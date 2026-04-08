@@ -21,7 +21,7 @@ pub struct PyResponse {
     #[pyo3(get)]
     headers: HashMap<String, String>,
     #[pyo3(get)]
-    content: String,
+    content: Vec<u8>,
 }
 
 fn value_to_py(py: Python<'_>, val: serde_json::Value) -> PyResult<Py<PyAny>> {
@@ -56,11 +56,12 @@ fn value_to_py(py: Python<'_>, val: serde_json::Value) -> PyResult<Py<PyAny>> {
 #[pymethods]
 impl PyResponse {
     fn text(&self) -> String {
-        self.content.clone()
+        // might want to revisit this... particularly the unwrap()
+        std::str::from_utf8(&self.content).unwrap().to_string()
     }
 
     fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        serde_json::from_str(&self.content)
+        serde_json::from_str(&self.text())
             .map_err(|e| PyRuntimeError::new_err(format!("invalid JSON response: {e}")))
             .and_then(|v| value_to_py(py, v))
     }
@@ -68,10 +69,11 @@ impl PyResponse {
 #[pymethods]
 impl PyClient {
     #[new]
-    #[pyo3(signature = (timeout))]
-    fn __new__(timeout: u64) -> PyResult<Self> {
+    #[pyo3(signature = ())]
+    fn __new__(//timeout: u64
+    ) -> PyResult<Self> {
         let http_client = Client::builder()
-            .timeout(Duration::from_secs(timeout))
+            //.timeout(Duration::from_secs(timeout))
             .connect_timeout(Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::limited(10))
             // .gzip(true)
@@ -119,15 +121,18 @@ impl PyClient {
             })
             .collect::<HashMap<_, _>>();
 
-        let content = RUNTIME
-            .get()
-            .ok_or_else(|| PyRuntimeError::new_err("runtime not initialized"))?
-            .block_on(async {
-                response
-                    .text()
-                    .await
-                    .map_err(|e| PyRuntimeError::new_err(format!("failed to read body: {e}")))
-            })?;
+        let content = py
+            .detach(|| {
+                RUNTIME
+                    .get()
+                    .ok_or_else(|| PyRuntimeError::new_err("runtime not initialized"))?
+                    .block_on(async {
+                        response.bytes().await.map_err(|e| {
+                            PyRuntimeError::new_err(format!("failed to read body: {e}"))
+                        })
+                    })
+            })?
+            .to_vec();
 
         Ok(PyResponse {
             status_code,
