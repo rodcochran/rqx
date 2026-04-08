@@ -1,6 +1,7 @@
 import threading
 import time
 
+import pytest
 import reqx
 from rich import print
 
@@ -24,12 +25,39 @@ def test_400():
     resp = client.get(f"{HTTPBIN_HOST}/status/400")
     assert resp.status_code == 400
     assert "content-type" in resp.headers
-    body = None
-    try:
-        body = resp.json()
-    except Exception as e:
-        assert "invalid JSON response" in str(e)
-    assert not body
+    with pytest.raises(RuntimeError):
+        resp.json()
+
+
+def test_404():
+    client = reqx.Client()
+    resp = client.get(f"{HTTPBIN_HOST}/status/404")
+    assert resp.status_code == 404
+    assert "content-type" in resp.headers
+    with pytest.raises(RuntimeError):
+        resp.json()
+
+
+def test_500():
+    client = reqx.Client()
+    resp = client.get(f"{HTTPBIN_HOST}/status/500")
+    assert resp.status_code == 500
+    assert "content-type" in resp.headers
+    with pytest.raises(RuntimeError):
+        resp.json()
+
+
+def test_body():
+    client = reqx.Client()
+    resp = client.get(f"{HTTPBIN_HOST}/get")
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+    body = resp.json()
+
+    expected_body_keys = ["args", "headers", "origin", "url"]
+
+    for k in expected_body_keys:
+        assert k in body.keys()
 
 
 def test_valid_text():
@@ -49,8 +77,39 @@ def test_valid_bytes():
     content = resp.content
     assert content is not None
     assert isinstance(content, bytes)
+    assert not isinstance(content, list)
     print("")
     print(f"Content:\n{content}")
+
+
+def test_headers():
+    client = reqx.Client()
+    resp = client.get(f"{HTTPBIN_HOST}/get")
+    headers = resp.headers
+    assert headers is not None
+    assert isinstance(headers, dict)
+    assert headers["content-type"] == "application/json"
+    print("")
+    print(f"Headers:\n{headers}")
+
+
+def test_nested_json():
+    # httpbin's /get?foo=bar&baz=123 will give you query params in the args field.
+    # Good way to test that nested JSON values come through correctly.
+    client = reqx.Client()
+
+    key1 = "baz"
+    val1 = "123"
+    key2 = "foo"
+    val2 = "bar"
+
+    resp = client.get(f"{HTTPBIN_HOST}/get?{key1}={val1}&{key2}={val2}")
+    body = resp.json()
+    args = body["args"]
+    assert args[key1] == val1
+    assert args[key2] == val2
+    print("")
+    print(f"Nested Json (body args):\n{body}")
 
 
 def test_gil_release():
@@ -79,7 +138,7 @@ def test_gil_release():
 
     end = time.perf_counter()
     duration = end - start
-    
+
     print("")
     print(f"Duration: {duration}s")
     assert duration <= max(wait_time_1, wait_time_2) * 1.1
