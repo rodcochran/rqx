@@ -1,0 +1,3 @@
+# _types.pyi
+class PyClient:
+    def __init__(self, timeout: int) -> None: ...
