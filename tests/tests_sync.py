@@ -6,7 +6,6 @@ from rich import print
 
 # HTTPBIN_HOST = "https://httpbin.org"
 HTTPBIN_HOST = "http://localhost"
-HTTP_BIN_PORT = "80"
 
 
 def test_true_200():
@@ -16,7 +15,8 @@ def test_true_200():
     assert "content-type" in resp.headers
     body = resp.json()
     assert body["url"] == f"{HTTPBIN_HOST}/get"
-    print(body)
+    print("")
+    print(f"JSON body:\n{body}")
 
 
 def test_400():
@@ -32,6 +32,27 @@ def test_400():
     assert not body
 
 
+def test_valid_text():
+    client = reqx.Client()
+    resp = client.get(f"{HTTPBIN_HOST}/get")
+    text = resp.text()
+    assert text is not None
+    assert isinstance(text, str)
+    assert len(text) > 0
+    print("")
+    print(f"Text:\n{text}")
+
+
+def test_valid_bytes():
+    client = reqx.Client()
+    resp = client.get(f"{HTTPBIN_HOST}/get")
+    content = resp.content
+    assert content is not None
+    assert isinstance(content, bytes)
+    print("")
+    print(f"Content:\n{content}")
+
+
 def test_gil_release():
 
     def task(wait_time: int):
@@ -43,8 +64,8 @@ def test_gil_release():
 
     client = reqx.Client()
 
-    wait_time_1 = 2
-    wait_time_2 = 3
+    wait_time_1 = 1
+    wait_time_2 = 2
 
     t1 = threading.Thread(target=task, args=(wait_time_1,))
     t2 = threading.Thread(target=task, args=(wait_time_2,))
@@ -58,6 +79,7 @@ def test_gil_release():
 
     end = time.perf_counter()
     duration = end - start
-
+    
+    print("")
     print(f"Duration: {duration}s")
     assert duration <= max(wait_time_1, wait_time_2) * 1.1
