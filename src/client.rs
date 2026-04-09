@@ -295,6 +295,17 @@ impl PyClient {
         self.request(py, "GET", url, None)
     }
 
+    #[pyo3(signature = (url))]
+    fn options(
+        &self, 
+        py: Python<'_>, 
+        url: &str,
+    ) -> PyResult<PyResponse> {
+        self.request(py, "OPTIONS", url, None)
+    }
+
+
+
     #[pyo3(signature = (url, json))]
     fn post(
         &self, 

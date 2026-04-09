@@ -156,6 +156,17 @@ def test_gil_release():
 
 def test_blank_post():
     client = reqx.Client()
+    resp = client.post(f"{HTTPBIN_HOST}/post", json=None)
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+    body = resp.json()
+    print("")
+    print(f"Post JSON response:\n{body}")
+
+
+def test_sample_json_params_post():
+    client = reqx.Client()
     resp = client.post(f"{HTTPBIN_HOST}/post", json={"special_param": 1})
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -163,3 +174,11 @@ def test_blank_post():
     body = resp.json()
     print("")
     print(f"Post JSON response:\n{body}")
+
+
+def test_blank_options():
+    client = reqx.Client()
+    resp = client.options(f"{HTTPBIN_HOST}/get")
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+    assert "allow" in resp.headers
