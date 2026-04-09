@@ -6,8 +6,6 @@ use reqwest::Client;
 use std::collections::HashMap;
 use std::time::Duration;
 use pyo3::Bound;
-// use serde::Serialize;
-// use serde_json::{Map, Number, Value};
 
 use super::runtime::RUNTIME;
 
@@ -199,8 +197,8 @@ impl PyClient {
             // content, 
             // data, 
             // files, 
-            json, 
-            // params, 
+            json=None, 
+            params=None, 
             // headers, 
             // cookies, 
             // auth, 
@@ -217,29 +215,29 @@ impl PyClient {
         // data: &Bound<'_, PyDict>,
         // files: &Bound<'_, PyDict>,
         json: Option<&Bound<'_, PyAny>>,
-        // params: &Bound<'_, PyDict>,
+        params: Option<HashMap<String, String>>,
         // headers: &Bound<'_, PyDict>,
         // cookies: &Bound<'_, PyDict>,
         // auth: Option<String>,
         // follow_redirects: Option<bool>,
         // extensions: &Bound<'_, PyDict>,
     ) -> PyResult<PyResponse> {
-        let bare_request = self.http_client
+        let mut builder = self.http_client
             .request(Method::from_bytes(method.as_bytes()).unwrap(), url);
 
-        let request = match json {
-            Some(j) => {
-                bare_request
-                    .json(&py_to_value(py, j))
-                    .build()
-                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to build request: {e}")))?
-            }
-            None => {
-                bare_request
-                    .build()
-                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to build request: {e}")))?
-            }
+        if let Some(j) = json {
+            builder = builder
+                .json(&py_to_value(py, j))
         };
+
+        if let Some(p) = params {
+            builder = builder
+                .query(&p)
+        }
+
+        let request = builder
+            .build()
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to build request: {e}")))?;
 
         let response = py.detach(|| {
             RUNTIME
@@ -286,74 +284,77 @@ impl PyClient {
         })
     }
 
-    #[pyo3(signature = (url, json=None))]
+    #[pyo3(signature = (url, params=None))]
     fn get(
         &self, 
         py: Python<'_>, 
         url: &str,
-        json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "GET", url, json)
+        self.request(py, "GET", url, None, params)
     }
 
-    #[pyo3(signature = (url, json=None))]
+    #[pyo3(signature = (url, params=None))]
     fn options(
         &self, 
         py: Python<'_>, 
         url: &str,
-        json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "OPTIONS", url, json)
+        self.request(py, "OPTIONS", url, None, params)
     }
 
-    #[pyo3(signature = (url, json=None))]
+    #[pyo3(signature = (url, params=None))]
     fn head(
         &self, 
         py: Python<'_>, 
         url: &str,
-        json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "HEAD", url, json)
+        self.request(py, "HEAD", url, None, params)
     }
 
 
-    #[pyo3(signature = (url, json=None))]
+    #[pyo3(signature = (url, json=None, params=None))]
     fn post(
         &self, 
         py: Python<'_>, 
         url: &str,
         json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "POST", url, json)
+        self.request(py, "POST", url, json, params)
     }
 
-    #[pyo3(signature = (url, json=None))]
+    #[pyo3(signature = (url,json=None, params=None))]
     fn put(
         &self, 
         py: Python<'_>, 
         url: &str,
         json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "PUT", url, json)
+        self.request(py, "PUT", url, json, params)
     }
 
-    #[pyo3(signature = (url, json=None))]
+    #[pyo3(signature = (url, json=None, params=None))]
     fn patch(
         &self, 
         py: Python<'_>, 
         url: &str,
         json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "PATCH", url, json)
+        self.request(py, "PATCH", url, json, params)
     }
 
-    #[pyo3(signature = (url, json=None))]
+    #[pyo3(signature = (url, params=None))]
     fn delete(
         &self, 
         py: Python<'_>, 
         url: &str,
-        json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "DELETE", url, json)
+        self.request(py, "DELETE", url, None, params)
     }
 }

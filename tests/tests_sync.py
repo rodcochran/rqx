@@ -1,3 +1,4 @@
+import json
 import threading
 import time
 
@@ -233,3 +234,50 @@ def test_blank_delete():
     resp = client.delete(f"{HTTPBIN_HOST}/delete")
     assert resp.status_code == 200
     assert "content-type" in resp.headers
+
+
+def test_post_with_query_params():
+
+    query_param_1_key = "q_param_1"
+    query_param_1_value = "hey"
+
+    client = reqx.Client()
+    resp = client.post(
+        f"{HTTPBIN_HOST}/post",
+        params={query_param_1_key: query_param_1_value},
+    )
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+    body = resp.json()
+
+    assert body["args"][query_param_1_key] == query_param_1_value
+
+    print("")
+    print(f"Post JSON response:\n{body}")
+
+
+def test_post_with_query_params_and_json():
+
+    query_param_1_key = "q_param_1"
+    query_param_1_value = "hey"
+
+    json_param_1_key = "special_param"
+    json_param_1_value = 1
+
+    client = reqx.Client()
+    resp = client.post(
+        f"{HTTPBIN_HOST}/post",
+        json={json_param_1_key: json_param_1_value},
+        params={query_param_1_key: query_param_1_value},
+    )
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+    body = resp.json()
+    print("")
+    print(f"Post JSON response:\n{body}")
+
+    assert body["args"][query_param_1_key] == query_param_1_value
+    assert body["json"] == {json_param_1_key: json_param_1_value}
+    assert json.loads(body["data"]) == {json_param_1_key: json_param_1_value}
