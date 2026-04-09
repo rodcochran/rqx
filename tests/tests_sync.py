@@ -450,3 +450,15 @@ def test_post_with_content():
     assert body["data"] == content_str
     print("")
     print(f"Post JSON response:\n{body}")
+
+
+def test_post_with_data():
+    data = {"hi": "goodbye", "hey": "2"}
+    client = reqx.Client()
+    resp = client.post(f"{HTTPBIN_HOST}/post", data=data)
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+    body = resp.json()
+    assert body["headers"]["Content-Type"] == "application/x-www-form-urlencoded"
+    print("")
+    print(f"Post JSON response:\n{body}")
