@@ -9,6 +9,11 @@ from rich import print
 HTTPBIN_HOST = "http://localhost"
 
 
+# ================================================================
+# Phase 1 tests
+# ================================================================
+
+
 def test_true_200():
     client = reqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/get")
@@ -142,3 +147,19 @@ def test_gil_release():
     print("")
     print(f"Duration: {duration}s")
     assert duration <= max(wait_time_1, wait_time_2) * 1.1
+
+
+# ================================================================
+# Phase 2 tests
+# ================================================================
+
+
+def test_blank_post():
+    client = reqx.Client()
+    resp = client.post(f"{HTTPBIN_HOST}/post", json={"special_param": 1})
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+    body = resp.json()
+    print("")
+    print(f"Post JSON response:\n{body}")
