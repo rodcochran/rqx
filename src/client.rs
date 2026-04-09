@@ -286,35 +286,38 @@ impl PyClient {
         })
     }
 
-    #[pyo3(signature = (url))]
+    #[pyo3(signature = (url, json=None))]
     fn get(
         &self, 
         py: Python<'_>, 
         url: &str,
+        json: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "GET", url, None)
+        self.request(py, "GET", url, json)
     }
 
-    #[pyo3(signature = (url))]
+    #[pyo3(signature = (url, json=None))]
     fn options(
         &self, 
         py: Python<'_>, 
         url: &str,
+        json: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "OPTIONS", url, None)
+        self.request(py, "OPTIONS", url, json)
     }
 
-    #[pyo3(signature = (url))]
+    #[pyo3(signature = (url, json=None))]
     fn head(
         &self, 
         py: Python<'_>, 
         url: &str,
+        json: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "HEAD", url, None)
+        self.request(py, "HEAD", url, json)
     }
 
 
-    #[pyo3(signature = (url, json))]
+    #[pyo3(signature = (url, json=None))]
     fn post(
         &self, 
         py: Python<'_>, 
@@ -324,7 +327,7 @@ impl PyClient {
         self.request(py, "POST", url, json)
     }
 
-    #[pyo3(signature = (url, json))]
+    #[pyo3(signature = (url, json=None))]
     fn put(
         &self, 
         py: Python<'_>, 
@@ -334,7 +337,7 @@ impl PyClient {
         self.request(py, "PUT", url, json)
     }
 
-    #[pyo3(signature = (url, json))]
+    #[pyo3(signature = (url, json=None))]
     fn patch(
         &self, 
         py: Python<'_>, 
@@ -344,12 +347,13 @@ impl PyClient {
         self.request(py, "PATCH", url, json)
     }
 
-    #[pyo3(signature = (url))]
+    #[pyo3(signature = (url, json=None))]
     fn delete(
         &self, 
         py: Python<'_>, 
         url: &str,
+        json: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "DELETE", url, None)
+        self.request(py, "DELETE", url, json)
     }
 }
