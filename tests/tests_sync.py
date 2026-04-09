@@ -375,3 +375,37 @@ def test_patch_with_query_params_and_json():
     assert body["args"][query_param_1_key] == query_param_1_value
     assert body["json"] == {json_param_1_key: json_param_1_value}
     assert json.loads(body["data"]) == {json_param_1_key: json_param_1_value}
+
+
+def test_get_with_headers():
+
+    headers = {
+        "Authorization": "Bearer your_access_token_here",
+        "X-API-Key": "your_api_key_string",
+    }
+
+    client = reqx.Client()
+    resp = client.get(f"{HTTPBIN_HOST}/get", headers=headers)
+
+    print("")
+    print(f"Response Headers:\n{resp.headers}")
+
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+    body = resp.json()
+    assert body["url"] == f"{HTTPBIN_HOST}/get"
+
+    echoed_headers = body["headers"]
+
+    print(f"Echoed Headers: \n{echoed_headers}")
+
+    for k, v in headers.items():
+        lower_k = k.lower()
+        for _k, _v in echoed_headers.items():
+            _lower_k = _k.lower()
+            if lower_k == _lower_k:
+                assert echoed_headers[_k] == v
+                break
+
+    print("")
+    print(f"JSON body:\n{body}")
