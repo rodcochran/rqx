@@ -1,6 +1,6 @@
 use pyo3::conversion::{IntoPyObject, IntoPyObjectExt};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
-use pyo3::prelude::{Py, PyAny, PyResult, Python, pyclass, pymethods};
+use pyo3::prelude::{Py, PyAny, PyResult, Python, PyRef, pyclass, pymethods};
 use pyo3::types::{PyAnyMethods, PyBool, PyDict, PyDictMethods, PyFloat, PyInt, PyList, PyString};
 use reqwest::Client;
 use std::collections::HashMap;
@@ -9,7 +9,7 @@ use pyo3::Bound;
 
 use super::runtime::RUNTIME;
 
-use http::Method;
+use http::{Method, StatusCode};
 
 const DEFAULT_TIMEOUT: u64 = 15;
 
@@ -28,6 +28,37 @@ pub struct PyResponse {
     headers: HashMap<String, String>,
     #[pyo3(get)]
     content: Vec<u8>,
+}
+
+#[pymethods]
+impl PyResponse {
+    fn text(&self) -> String {
+        // might want to revisit this... particularly the unwrap()
+        std::str::from_utf8(&self.content).unwrap().to_string()
+    }
+
+    fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        serde_json::from_str(&self.text())
+            .map_err(|e| PyRuntimeError::new_err(format!("invalid JSON response: {e}")))
+            .and_then(|v| value_to_py(py, v))
+    }
+
+    fn raise_for_status(&self) -> PyResult<()> {
+        let s_result = StatusCode::from_u16(self.status_code);
+        match s_result {
+            Ok(s) => {
+                if !s.is_success() {
+                    Err(PyRuntimeError::new_err(()))
+                }
+                else {
+                    Ok(())
+                }
+            }
+            Err(e) => {
+                Err(PyRuntimeError::new_err(format!("invalid Status Code: {e}")))
+            }
+        }
+    }
 }
 
 fn value_to_py(py: Python<'_>, val: serde_json::Value) -> PyResult<Py<PyAny>> {
@@ -140,19 +171,6 @@ fn py_to_value(py: Python<'_>, py_val: &Bound<'_, PyAny>) -> serde_json::Value  
 
 
 #[pymethods]
-impl PyResponse {
-    fn text(&self) -> String {
-        // might want to revisit this... particularly the unwrap()
-        std::str::from_utf8(&self.content).unwrap().to_string()
-    }
-
-    fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        serde_json::from_str(&self.text())
-            .map_err(|e| PyRuntimeError::new_err(format!("invalid JSON response: {e}")))
-            .and_then(|v| value_to_py(py, v))
-    }
-}
-#[pymethods]
 impl PyClient {
     #[new]
     #[pyo3(signature = (timeout=None))]
@@ -175,6 +193,18 @@ impl PyClient {
         })
     }
 
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __exit__(
+        &mut self,
+        _exc_type: Option<&Bound<'_, PyAny>>,
+        _exc_value: Option<&Bound<'_, PyAny>>,
+        _traceback: Option<&Bound<'_, PyAny>>,
+    ) {
+        // No-op exit since Reqwest client manages an Arc internally.
+    }
     /*
     class Client
         def request(

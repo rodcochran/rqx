@@ -416,3 +416,23 @@ def test_get_with_timeout():
     # TODO: change this to a TimeoutError when we implement it.
     with pytest.raises(RuntimeError):
         client.get(f"{HTTPBIN_HOST}/delay/5", timeout=1)
+
+
+def test_context_manger_200():
+    with reqx.Client() as client:
+        resp = client.get(f"{HTTPBIN_HOST}/get")
+        assert resp.status_code == 200
+        assert "content-type" in resp.headers
+        body = resp.json()
+        assert body["url"] == f"{HTTPBIN_HOST}/get"
+        print("")
+        print(f"JSON body:\n{body}")
+
+
+def test_raise_for_status():
+    client = reqx.Client()
+    resp = client.get(f"{HTTPBIN_HOST}/status/400")
+    assert resp.status_code == 400
+    assert "content-type" in resp.headers
+    with pytest.raises(RuntimeError):
+        resp.raise_for_status()
