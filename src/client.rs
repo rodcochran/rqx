@@ -304,6 +304,14 @@ impl PyClient {
         self.request(py, "OPTIONS", url, None)
     }
 
+    #[pyo3(signature = (url))]
+    fn head(
+        &self, 
+        py: Python<'_>, 
+        url: &str,
+    ) -> PyResult<PyResponse> {
+        self.request(py, "HEAD", url, None)
+    }
 
 
     #[pyo3(signature = (url, json))]
@@ -314,5 +322,15 @@ impl PyClient {
         json: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
         self.request(py, "POST", url, json)
+    }
+
+    #[pyo3(signature = (url, json))]
+    fn put(
+        &self, 
+        py: Python<'_>, 
+        url: &str,
+        json: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyResponse> {
+        self.request(py, "PUT", url, json)
     }
 }

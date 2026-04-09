@@ -182,3 +182,29 @@ def test_blank_options():
     assert resp.status_code == 200
     assert "content-type" in resp.headers
     assert "allow" in resp.headers
+
+
+def test_blank_head():
+    client = reqx.Client()
+    resp = client.head(f"{HTTPBIN_HOST}/get")
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+    assert not resp.content
+
+
+def test_blank_put():
+    client = reqx.Client()
+    resp = client.put(f"{HTTPBIN_HOST}/put", json=None)
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+
+def test_sample_json_params_put():
+    client = reqx.Client()
+    resp = client.put(f"{HTTPBIN_HOST}/put", json={"special_param": 1})
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+    body = resp.json()
+    print("")
+    print(f"Post JSON response:\n{body}")
