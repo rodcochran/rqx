@@ -48,7 +48,7 @@ impl PyResponse {
         match s_result {
             Ok(s) => {
                 if !s.is_success() {
-                    Err(PyRuntimeError::new_err(()))
+                    Err(PyRuntimeError::new_err(format!("{} error", self.status_code)))
                 }
                 else {
                     Ok(())
@@ -193,18 +193,6 @@ impl PyClient {
         })
     }
 
-    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf
-    }
-
-    fn __exit__(
-        &mut self,
-        _exc_type: Option<&Bound<'_, PyAny>>,
-        _exc_value: Option<&Bound<'_, PyAny>>,
-        _traceback: Option<&Bound<'_, PyAny>>,
-    ) {
-        // No-op exit since Reqwest client manages an Arc internally.
-    }
     /*
     class Client
         def request(
@@ -229,7 +217,7 @@ impl PyClient {
         signature = (
             method, 
             url, 
-            // content, 
+            content=None, 
             // data, 
             // files, 
             json=None, 
@@ -247,7 +235,7 @@ impl PyClient {
         py: Python<'_>, 
         method: &str, 
         url: &str, 
-        // content: &str,
+        content: Option<&[u8]>,
         // data: &Bound<'_, PyDict>,
         // files: &Bound<'_, PyDict>,
         json: Option<&Bound<'_, PyAny>>,
@@ -261,6 +249,11 @@ impl PyClient {
     ) -> PyResult<PyResponse> {
         let mut builder = self.http_client
             .request(Method::from_bytes(method.as_bytes()).unwrap(), url);
+        
+        if let Some(c) = content {
+            builder = builder
+                .body(c.to_vec())
+        };
 
         if let Some(j) = json {
             builder = builder
@@ -340,7 +333,7 @@ impl PyClient {
         headers: Option<HashMap<String, String>>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "GET", url, None, params, headers, timeout)
+        self.request(py, "GET", url, None, None, params, headers, timeout)
     }
 
     #[pyo3(signature = (url, params=None, headers=None, timeout=None))]
@@ -352,7 +345,7 @@ impl PyClient {
         headers: Option<HashMap<String, String>>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "OPTIONS", url, None, params, headers, timeout)
+        self.request(py, "OPTIONS", url, None, None, params, headers, timeout)
     }
 
     #[pyo3(signature = (url, params=None, headers=None, timeout=None))]
@@ -364,47 +357,50 @@ impl PyClient {
         headers: Option<HashMap<String, String>>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "HEAD", url, None, params, headers, timeout)
+        self.request(py, "HEAD", url, None, None, params, headers, timeout)
     }
 
 
-    #[pyo3(signature = (url, json=None, params=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, content=None, json=None, params=None, headers=None, timeout=None))]
     fn post(
         &self, 
         py: Python<'_>, 
         url: &str,
+        content: Option<&[u8]>,
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "POST", url, json, params, headers, timeout)
+        self.request(py, "POST", url, content, json, params, headers, timeout)
     }
 
-    #[pyo3(signature = (url,json=None, params=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, content=None, json=None, params=None, headers=None, timeout=None))]
     fn put(
         &self, 
         py: Python<'_>, 
         url: &str,
+        content: Option<&[u8]>,
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "PUT", url, json, params, headers, timeout)
+        self.request(py, "PUT", url, content, json, params, headers, timeout)
     }
 
-    #[pyo3(signature = (url, json=None, params=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, content=None, json=None, params=None, headers=None, timeout=None))]
     fn patch(
         &self, 
         py: Python<'_>, 
         url: &str,
+        content: Option<&[u8]>,
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "PATCH", url, json, params, headers, timeout)
+        self.request(py, "PATCH", url, content, json, params, headers, timeout)
     }
 
     #[pyo3(signature = (url, params=None, headers=None, timeout=None))]
@@ -416,6 +412,19 @@ impl PyClient {
         headers: Option<HashMap<String, String>>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "DELETE", url, None, params, headers, timeout)
+        self.request(py, "DELETE", url, None, None, params, headers, timeout)
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __exit__(
+        &mut self,
+        _exc_type: Option<&Bound<'_, PyAny>>,
+        _exc_value: Option<&Bound<'_, PyAny>>,
+        _traceback: Option<&Bound<'_, PyAny>>,
+    ) {
+        // No-op exit since Reqwest client manages an Arc internally.
     }
 }

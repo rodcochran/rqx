@@ -436,3 +436,17 @@ def test_raise_for_status():
     assert "content-type" in resp.headers
     with pytest.raises(RuntimeError):
         resp.raise_for_status()
+
+
+def test_post_with_content():
+    content_str = '{"raw_content": "hello"}'
+    content_bytes = content_str.encode()
+    client = reqx.Client()
+    resp = client.post(f"{HTTPBIN_HOST}/post", content=content_bytes)
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+    body = resp.json()
+    assert body["data"] == content_str
+    print("")
+    print(f"Post JSON response:\n{body}")
