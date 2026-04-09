@@ -224,7 +224,7 @@ impl PyClient {
             params=None, 
             headers=None, 
             // cookies, 
-            // auth, 
+            auth=None, 
             // follow_redirects, 
             timeout=None
             // extensions
@@ -242,13 +242,24 @@ impl PyClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         // cookies: &Bound<'_, PyDict>,
-        // auth: Option<String>,
+        auth: Option<(String, String)>,
         // follow_redirects: Option<bool>,
         timeout: Option<u64>,
         // extensions: &Bound<'_, PyDict>,
     ) -> PyResult<PyResponse> {
         let mut builder = self.http_client
             .request(Method::from_bytes(method.as_bytes()).unwrap(), url);
+
+        let count = [content.is_some(), data.is_some(), json.is_some()]
+            .into_iter()
+            .filter(|b| *b)
+            .count();
+        
+        if count > 1 {
+            return Err(PyValueError::new_err(
+                "Only one of content, data, or json may be set",
+            ));
+        }
         
         if let Some(c) = content {
             builder = builder
@@ -274,6 +285,11 @@ impl PyClient {
             builder = builder
                 .headers((&h).try_into().expect("valid headers"))
         };
+
+        if let Some(a) = auth {
+            builder = builder
+                .basic_auth(a.0, Some(a.1))
+        }
 
         if let Some(t) = timeout {
             builder = builder
@@ -329,44 +345,47 @@ impl PyClient {
         })
     }
 
-    #[pyo3(signature = (url, params=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, timeout=None))]
     fn get(
         &self, 
         py: Python<'_>, 
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "GET", url, None, None, None, params, headers, timeout)
+        self.request(py, "GET", url, None, None, None, params, headers, auth, timeout)
     }
 
-    #[pyo3(signature = (url, params=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, timeout=None))]
     fn options(
         &self, 
         py: Python<'_>, 
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "OPTIONS", url, None, None, None, params, headers, timeout)
+        self.request(py, "OPTIONS", url, None, None, None, params, headers, auth, timeout)
     }
 
-    #[pyo3(signature = (url, params=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, timeout=None))]
     fn head(
         &self, 
         py: Python<'_>, 
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "HEAD", url, None, None, None, params, headers, timeout)
+        self.request(py, "HEAD", url, None, None, None, params, headers, auth, timeout)
     }
 
 
-    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, timeout=None))]
     fn post(
         &self, 
         py: Python<'_>, 
@@ -376,12 +395,13 @@ impl PyClient {
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "POST", url, content, data, json, params, headers, timeout)
+        self.request(py, "POST", url, content, data, json, params, headers, auth, timeout)
     }
 
-    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, timeout=None))]
     fn put(
         &self, 
         py: Python<'_>, 
@@ -391,12 +411,13 @@ impl PyClient {
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "PUT", url, content, data, json, params, headers, timeout)
+        self.request(py, "PUT", url, content, data, json, params, headers, auth, timeout)
     }
 
-    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, timeout=None))]
     fn patch(
         &self, 
         py: Python<'_>, 
@@ -406,21 +427,23 @@ impl PyClient {
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "PATCH", url, content, data, json, params, headers, timeout)
+        self.request(py, "PATCH", url, content, data, json, params, headers, auth, timeout)
     }
 
-    #[pyo3(signature = (url, params=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, timeout=None))]
     fn delete(
         &self, 
         py: Python<'_>, 
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "DELETE", url, None, None, None, params, headers, timeout)
+        self.request(py, "DELETE", url, None, None, None, params, headers, auth, timeout)
     }
 
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {

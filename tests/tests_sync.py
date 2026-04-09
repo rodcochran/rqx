@@ -462,3 +462,12 @@ def test_post_with_data():
     assert body["headers"]["Content-Type"] == "application/x-www-form-urlencoded"
     print("")
     print(f"Post JSON response:\n{body}")
+
+
+def test_basic_auth():
+    u = "User"
+    p = "Password"
+    auth = (u, p)
+    client = reqx.Client()
+    resp = client.get(f"{HTTPBIN_HOST}/basic-auth/{u}/{p}", auth=auth)
+    assert resp.status_code == 200
