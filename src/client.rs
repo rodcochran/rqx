@@ -333,4 +333,23 @@ impl PyClient {
     ) -> PyResult<PyResponse> {
         self.request(py, "PUT", url, json)
     }
+
+    #[pyo3(signature = (url, json))]
+    fn patch(
+        &self, 
+        py: Python<'_>, 
+        url: &str,
+        json: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyResponse> {
+        self.request(py, "PATCH", url, json)
+    }
+
+    #[pyo3(signature = (url))]
+    fn delete(
+        &self, 
+        py: Python<'_>, 
+        url: &str,
+    ) -> PyResult<PyResponse> {
+        self.request(py, "DELETE", url, None)
+    }
 }

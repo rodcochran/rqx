@@ -208,3 +208,28 @@ def test_sample_json_params_put():
     body = resp.json()
     print("")
     print(f"Post JSON response:\n{body}")
+
+
+def test_blank_patch():
+    client = reqx.Client()
+    resp = client.patch(f"{HTTPBIN_HOST}/patch", json=None)
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+
+def test_sample_json_params_patch():
+    client = reqx.Client()
+    resp = client.patch(f"{HTTPBIN_HOST}/patch", json={"special_param": 1})
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+    body = resp.json()
+    print("")
+    print(f"Post JSON response:\n{body}")
+
+
+def test_blank_delete():
+    client = reqx.Client()
+    resp = client.delete(f"{HTTPBIN_HOST}/delete")
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
