@@ -2,7 +2,7 @@ use pyo3::conversion::{IntoPyObject, IntoPyObjectExt};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::{Py, PyAny, PyResult, Python, PyRef, pyclass, pymethods};
 use pyo3::types::{PyAnyMethods, PyBool, PyDict, PyDictMethods, PyFloat, PyInt, PyList, PyString};
-use reqwest::Client;
+use reqwest::{Client, Request};
 use std::collections::HashMap;
 use std::time::Duration;
 use pyo3::Bound;
@@ -12,12 +12,16 @@ use super::runtime::RUNTIME;
 use http::{Method, StatusCode};
 
 const DEFAULT_TIMEOUT: u64 = 15;
+const DEFAULT_FOLLOW_REDIRECTS: bool = false;
+const DEFAULT_MAX_REDIRECTS: u32 = 20;
 
 
 #[pyclass]
 pub struct PyClient {
     http_client: Client,
     timeout_secs: u64,
+    follow_redirects: bool,
+    max_redirects: u32
 }
 
 #[pyclass]
@@ -173,15 +177,20 @@ fn py_to_value(py: Python<'_>, py_val: &Bound<'_, PyAny>) -> serde_json::Value  
 #[pymethods]
 impl PyClient {
     #[new]
-    #[pyo3(signature = (timeout=None))]
+    #[pyo3(signature = (timeout=None, follow_redirects=None, max_redirects=None))]
     fn __new__(
-        timeout: Option<u64>
+        timeout: Option<u64>,
+        follow_redirects: Option<bool>,
+        max_redirects: Option<u32>,
     ) -> PyResult<Self> {
         let timeout_secs = timeout.unwrap_or(DEFAULT_TIMEOUT);
+        let client_level_follow_redirects = follow_redirects.unwrap_or(DEFAULT_FOLLOW_REDIRECTS);
+        let client_level_max_redirects = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
+
         let http_client = Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
             //.connect_timeout(Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::limited(10))
+            // .redirect(reqwest::redirect::Policy::limited(10))
             // .gzip(true)
             // .brotli(true)
             .pool_max_idle_per_host(20)
@@ -190,6 +199,8 @@ impl PyClient {
         Ok(Self {
             http_client: http_client,
             timeout_secs: timeout_secs,
+            follow_redirects: client_level_follow_redirects,
+            max_redirects: client_level_max_redirects,
         })
     }
 
@@ -225,7 +236,7 @@ impl PyClient {
             headers=None, 
             // cookies, 
             auth=None, 
-            // follow_redirects, 
+            follow_redirects=None, 
             timeout=None
             // extensions
         )
@@ -243,10 +254,171 @@ impl PyClient {
         headers: Option<HashMap<String, String>>,
         // cookies: &Bound<'_, PyDict>,
         auth: Option<(String, String)>,
-        // follow_redirects: Option<bool>,
+        follow_redirects: Option<bool>,
         timeout: Option<u64>,
         // extensions: &Bound<'_, PyDict>,
     ) -> PyResult<PyResponse> {
+        
+        let request = self.build_request(
+            py,
+            method,
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            timeout
+        )?;
+
+        self.send_single_request(py, request)
+    }        
+
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    fn get(
+        &self, 
+        py: Python<'_>, 
+        url: &str,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+    ) -> PyResult<PyResponse> {
+        self.request(py, "GET", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+    }
+
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    fn options(
+        &self, 
+        py: Python<'_>, 
+        url: &str,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+    ) -> PyResult<PyResponse> {
+        self.request(py, "OPTIONS", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+    }
+
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    fn head(
+        &self, 
+        py: Python<'_>, 
+        url: &str,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+    ) -> PyResult<PyResponse> {
+        self.request(py, "HEAD", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+    }
+
+
+    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    fn post(
+        &self, 
+        py: Python<'_>, 
+        url: &str,
+        content: Option<&[u8]>,
+        data: Option<HashMap<String, String>>,
+        json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+    ) -> PyResult<PyResponse> {
+        self.request(py, "POST", url, content, data, json, params, headers, auth, follow_redirects, timeout)
+    }
+
+    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    fn put(
+        &self, 
+        py: Python<'_>, 
+        url: &str,
+        content: Option<&[u8]>,
+        data: Option<HashMap<String, String>>,
+        json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+    ) -> PyResult<PyResponse> {
+        self.request(py, "PUT", url, content, data, json, params, headers, auth, follow_redirects, timeout)
+    }
+
+    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    fn patch(
+        &self, 
+        py: Python<'_>, 
+        url: &str,
+        content: Option<&[u8]>,
+        data: Option<HashMap<String, String>>,
+        json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+    ) -> PyResult<PyResponse> {
+        self.request(py, "PATCH", url, content, data, json, params, headers, auth, follow_redirects, timeout)
+    }
+
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    fn delete(
+        &self, 
+        py: Python<'_>, 
+        url: &str,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+    ) -> PyResult<PyResponse> {
+        self.request(py, "DELETE", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __exit__(
+        &mut self,
+        _exc_type: Option<&Bound<'_, PyAny>>,
+        _exc_value: Option<&Bound<'_, PyAny>>,
+        _traceback: Option<&Bound<'_, PyAny>>,
+    ) {
+        // No-op exit since Reqwest client manages an Arc internally.
+    }
+}
+
+///    Internal functions for PyClient.
+/// 
+///    This impl of PyClient is for defining functions that are not to be wrapped in #pymethods, 
+///    and therefore not exposed to Python.
+///
+
+impl PyClient {
+    fn build_request(
+        &self, 
+        py: Python<'_>, 
+        method: &str, 
+        url: &str, 
+        content: Option<&[u8]>,
+        data: Option<HashMap<String, String>>,
+        // files: &Bound<'_, PyDict>,
+        json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        // cookies: &Bound<'_, PyDict>,
+        auth: Option<(String, String)>,
+        timeout: Option<u64>,
+    ) -> PyResult<Request> {
         let mut builder = self.http_client
             .request(Method::from_bytes(method.as_bytes()).unwrap(), url);
 
@@ -260,6 +432,7 @@ impl PyClient {
                 "Only one of content, data, or json may be set",
             ));
         }
+
         
         if let Some(c) = content {
             builder = builder
@@ -300,6 +473,11 @@ impl PyClient {
             .build()
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to build request: {e}")))?;
 
+        return Ok(request)
+
+    }
+
+    fn send_single_request(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
         let response = py.detach(|| {
             RUNTIME
                 .get()
@@ -343,119 +521,5 @@ impl PyClient {
             headers,
             content,
         })
-    }
-
-    #[pyo3(signature = (url, params=None, headers=None, auth=None, timeout=None))]
-    fn get(
-        &self, 
-        py: Python<'_>, 
-        url: &str,
-        params: Option<HashMap<String, String>>,
-        headers: Option<HashMap<String, String>>,
-        auth: Option<(String, String)>,
-        timeout: Option<u64>,
-    ) -> PyResult<PyResponse> {
-        self.request(py, "GET", url, None, None, None, params, headers, auth, timeout)
-    }
-
-    #[pyo3(signature = (url, params=None, headers=None, auth=None, timeout=None))]
-    fn options(
-        &self, 
-        py: Python<'_>, 
-        url: &str,
-        params: Option<HashMap<String, String>>,
-        headers: Option<HashMap<String, String>>,
-        auth: Option<(String, String)>,
-        timeout: Option<u64>,
-    ) -> PyResult<PyResponse> {
-        self.request(py, "OPTIONS", url, None, None, None, params, headers, auth, timeout)
-    }
-
-    #[pyo3(signature = (url, params=None, headers=None, auth=None, timeout=None))]
-    fn head(
-        &self, 
-        py: Python<'_>, 
-        url: &str,
-        params: Option<HashMap<String, String>>,
-        headers: Option<HashMap<String, String>>,
-        auth: Option<(String, String)>,
-        timeout: Option<u64>,
-    ) -> PyResult<PyResponse> {
-        self.request(py, "HEAD", url, None, None, None, params, headers, auth, timeout)
-    }
-
-
-    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, timeout=None))]
-    fn post(
-        &self, 
-        py: Python<'_>, 
-        url: &str,
-        content: Option<&[u8]>,
-        data: Option<HashMap<String, String>>,
-        json: Option<&Bound<'_, PyAny>>,
-        params: Option<HashMap<String, String>>,
-        headers: Option<HashMap<String, String>>,
-        auth: Option<(String, String)>,
-        timeout: Option<u64>,
-    ) -> PyResult<PyResponse> {
-        self.request(py, "POST", url, content, data, json, params, headers, auth, timeout)
-    }
-
-    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, timeout=None))]
-    fn put(
-        &self, 
-        py: Python<'_>, 
-        url: &str,
-        content: Option<&[u8]>,
-        data: Option<HashMap<String, String>>,
-        json: Option<&Bound<'_, PyAny>>,
-        params: Option<HashMap<String, String>>,
-        headers: Option<HashMap<String, String>>,
-        auth: Option<(String, String)>,
-        timeout: Option<u64>,
-    ) -> PyResult<PyResponse> {
-        self.request(py, "PUT", url, content, data, json, params, headers, auth, timeout)
-    }
-
-    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, timeout=None))]
-    fn patch(
-        &self, 
-        py: Python<'_>, 
-        url: &str,
-        content: Option<&[u8]>,
-        data: Option<HashMap<String, String>>,
-        json: Option<&Bound<'_, PyAny>>,
-        params: Option<HashMap<String, String>>,
-        headers: Option<HashMap<String, String>>,
-        auth: Option<(String, String)>,
-        timeout: Option<u64>,
-    ) -> PyResult<PyResponse> {
-        self.request(py, "PATCH", url, content, data, json, params, headers, auth, timeout)
-    }
-
-    #[pyo3(signature = (url, params=None, headers=None, auth=None, timeout=None))]
-    fn delete(
-        &self, 
-        py: Python<'_>, 
-        url: &str,
-        params: Option<HashMap<String, String>>,
-        headers: Option<HashMap<String, String>>,
-        auth: Option<(String, String)>,
-        timeout: Option<u64>,
-    ) -> PyResult<PyResponse> {
-        self.request(py, "DELETE", url, None, None, None, params, headers, auth, timeout)
-    }
-
-    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf
-    }
-
-    fn __exit__(
-        &mut self,
-        _exc_type: Option<&Bound<'_, PyAny>>,
-        _exc_value: Option<&Bound<'_, PyAny>>,
-        _traceback: Option<&Bound<'_, PyAny>>,
-    ) {
-        // No-op exit since Reqwest client manages an Arc internally.
     }
 }
