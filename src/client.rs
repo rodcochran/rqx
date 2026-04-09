@@ -11,6 +11,7 @@ use super::runtime::RUNTIME;
 
 use http::Method;
 
+
 #[pyclass]
 pub struct PyClient {
     http_client: Client,
@@ -199,7 +200,7 @@ impl PyClient {
             // files, 
             json=None, 
             params=None, 
-            // headers, 
+            headers=None, 
             // cookies, 
             // auth, 
             // follow_redirects, 
@@ -216,7 +217,7 @@ impl PyClient {
         // files: &Bound<'_, PyDict>,
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
-        // headers: &Bound<'_, PyDict>,
+        headers: Option<HashMap<String, String>>,
         // cookies: &Bound<'_, PyDict>,
         // auth: Option<String>,
         // follow_redirects: Option<bool>,
@@ -233,6 +234,11 @@ impl PyClient {
         if let Some(p) = params {
             builder = builder
                 .query(&p)
+        };
+        
+        if let Some(h) = headers {
+            builder = builder
+                .headers((&h).try_into().expect("valid headers"))
         }
 
         let request = builder
@@ -284,77 +290,84 @@ impl PyClient {
         })
     }
 
-    #[pyo3(signature = (url, params=None))]
+    #[pyo3(signature = (url, params=None, headers=None))]
     fn get(
         &self, 
         py: Python<'_>, 
         url: &str,
         params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "GET", url, None, params)
+        self.request(py, "GET", url, None, params, headers)
     }
 
-    #[pyo3(signature = (url, params=None))]
+    #[pyo3(signature = (url, params=None, headers=None))]
     fn options(
         &self, 
         py: Python<'_>, 
         url: &str,
         params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "OPTIONS", url, None, params)
+        self.request(py, "OPTIONS", url, None, params, headers)
     }
 
-    #[pyo3(signature = (url, params=None))]
+    #[pyo3(signature = (url, params=None, headers=None))]
     fn head(
         &self, 
         py: Python<'_>, 
         url: &str,
         params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "HEAD", url, None, params)
+        self.request(py, "HEAD", url, None, params, headers)
     }
 
 
-    #[pyo3(signature = (url, json=None, params=None))]
+    #[pyo3(signature = (url, json=None, params=None, headers=None))]
     fn post(
         &self, 
         py: Python<'_>, 
         url: &str,
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "POST", url, json, params)
+        self.request(py, "POST", url, json, params, headers)
     }
 
-    #[pyo3(signature = (url,json=None, params=None))]
+    #[pyo3(signature = (url,json=None, params=None, headers=None))]
     fn put(
         &self, 
         py: Python<'_>, 
         url: &str,
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "PUT", url, json, params)
+        self.request(py, "PUT", url, json, params, headers)
     }
 
-    #[pyo3(signature = (url, json=None, params=None))]
+    #[pyo3(signature = (url, json=None, params=None, headers=None))]
     fn patch(
         &self, 
         py: Python<'_>, 
         url: &str,
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "PATCH", url, json, params)
+        self.request(py, "PATCH", url, json, params, headers)
     }
 
-    #[pyo3(signature = (url, params=None))]
+    #[pyo3(signature = (url, params=None, headers=None))]
     fn delete(
         &self, 
         py: Python<'_>, 
         url: &str,
         params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "DELETE", url, None, params)
+        self.request(py, "DELETE", url, None, params, headers)
     }
 }

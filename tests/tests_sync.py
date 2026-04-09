@@ -281,3 +281,97 @@ def test_post_with_query_params_and_json():
     assert body["args"][query_param_1_key] == query_param_1_value
     assert body["json"] == {json_param_1_key: json_param_1_value}
     assert json.loads(body["data"]) == {json_param_1_key: json_param_1_value}
+
+
+def test_put_with_query_params():
+
+    query_param_1_key = "q_param_1"
+    query_param_1_value = "hey"
+
+    client = reqx.Client()
+    resp = client.put(
+        f"{HTTPBIN_HOST}/put",
+        params={query_param_1_key: query_param_1_value},
+    )
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+    body = resp.json()
+
+    assert body["args"][query_param_1_key] == query_param_1_value
+
+    print("")
+    print(f"Put JSON response:\n{body}")
+
+
+def test_put_with_query_params_and_json():
+
+    query_param_1_key = "q_param_1"
+    query_param_1_value = "hey"
+
+    json_param_1_key = "special_param"
+    json_param_1_value = 1
+
+    client = reqx.Client()
+    resp = client.put(
+        f"{HTTPBIN_HOST}/put",
+        json={json_param_1_key: json_param_1_value},
+        params={query_param_1_key: query_param_1_value},
+    )
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+    body = resp.json()
+    print("")
+    print(f"Put JSON response:\n{body}")
+
+    assert body["args"][query_param_1_key] == query_param_1_value
+    assert body["json"] == {json_param_1_key: json_param_1_value}
+    assert json.loads(body["data"]) == {json_param_1_key: json_param_1_value}
+
+
+def test_patch_with_query_params():
+
+    query_param_1_key = "q_param_1"
+    query_param_1_value = "hey"
+
+    client = reqx.Client()
+    resp = client.patch(
+        f"{HTTPBIN_HOST}/patch",
+        params={query_param_1_key: query_param_1_value},
+    )
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+    body = resp.json()
+
+    assert body["args"][query_param_1_key] == query_param_1_value
+
+    print("")
+    print(f"Patch JSON response:\n{body}")
+
+
+def test_patch_with_query_params_and_json():
+
+    query_param_1_key = "q_param_1"
+    query_param_1_value = "hey"
+
+    json_param_1_key = "special_param"
+    json_param_1_value = 1
+
+    client = reqx.Client()
+    resp = client.patch(
+        f"{HTTPBIN_HOST}/patch",
+        json={json_param_1_key: json_param_1_value},
+        params={query_param_1_key: query_param_1_value},
+    )
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+    body = resp.json()
+    print("")
+    print(f"Patch JSON response:\n{body}")
+
+    assert body["args"][query_param_1_key] == query_param_1_value
+    assert body["json"] == {json_param_1_key: json_param_1_value}
+    assert json.loads(body["data"]) == {json_param_1_key: json_param_1_value}
