@@ -1,12 +1,17 @@
 use pyo3::conversion::{IntoPyObject, IntoPyObjectExt};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::{Py, PyAny, PyResult, Python, pyclass, pymethods};
-use pyo3::types::{PyDict, PyDictMethods};
+use pyo3::types::{PyAnyMethods, PyBool, PyDict, PyDictMethods, PyFloat, PyInt, PyList, PyString};
 use reqwest::Client;
 use std::collections::HashMap;
 use std::time::Duration;
+use pyo3::Bound;
+// use serde::Serialize;
+// use serde_json::{Map, Number, Value};
 
 use super::runtime::RUNTIME;
+
+use http::Method;
 
 #[pyclass]
 pub struct PyClient {
@@ -53,6 +58,86 @@ fn value_to_py(py: Python<'_>, val: serde_json::Value) -> PyResult<Py<PyAny>> {
     }
 }
 
+
+fn py_to_value(py: Python<'_>, py_val: &Bound<'_, PyAny>) -> serde_json::Value  {
+
+    if py_val.is_none() {
+        serde_json::Value::Null   
+    }
+
+    else if py_val.is_instance_of::<PyBool>() {
+        serde_json::Value::Bool(
+            py_val
+                .cast::<PyBool>()
+                .unwrap()
+                .extract::<bool>()
+                .unwrap()
+        )
+    }
+
+    else if py_val.is_instance_of::<PyInt>() {
+        serde_json::Value::Number(
+            serde_json::Number::from(
+                py_val
+                    .extract::<i64>()
+                    .unwrap()
+            )
+        )
+    }
+
+    else if py_val.is_instance_of::<PyFloat>() {
+        let fv = serde_json::Number::from_f64(
+            py_val
+            .extract::<f64>()
+            .unwrap()
+        );
+        match fv {
+            Some(_fv) => {
+                serde_json::Value::Number(_fv)
+            }
+            None => {
+                serde_json::Value::Null
+            }
+        }
+    }
+
+    else if py_val.is_instance_of::<PyString>() {
+        serde_json::Value::String(
+            py_val
+                .extract::<String>()
+                .unwrap()
+            )
+    }
+
+    else if py_val.is_instance_of::<PyDict>() {
+        serde_json::Value::Object(
+            py_val
+                .cast::<PyDict>()
+                .unwrap()
+                .iter()
+                .map(
+                    |(k, v)| 
+                    (
+                        k.extract::<String>().unwrap(), 
+                        py_to_value(py, &v)) 
+                    )
+                .collect()
+        )
+    }
+    else if py_val.is_instance_of::<PyList>() {
+        serde_json::Value::Array(
+            py_val
+                .cast::<PyList>()
+                .iter()
+                .map(|v| py_to_value(py, v))
+                .collect()
+        )
+    } else {
+        serde_json::Value::Null
+    }
+}
+
+
 #[pymethods]
 impl PyResponse {
     fn text(&self) -> String {
@@ -87,14 +172,74 @@ impl PyClient {
         })
     }
 
-    #[pyo3(signature = (url))]
-    fn get(&self, py: Python<'_>, url: &str) -> PyResult<PyResponse> {
-        let request = self
-            .http_client
-            .get(url)
-            // .timeout(Duration::from_secs(self.timeout_secs))
-            .build()
-            .map_err(|e| PyRuntimeError::new_err(format!("failed to build request: {e}")))?;
+    /*
+    class Client
+        def request(
+            self,
+            method: str,
+            url: URL | str,
+            *,
+            content: RequestContent | None = None,
+            data: RequestData | None = None,
+            files: RequestFiles | None = None,
+            json: typing.Any | None = None,
+            params: QueryParamTypes | None = None,
+            headers: HeaderTypes | None = None,
+            cookies: CookieTypes | None = None,
+            auth: AuthTypes | UseClientDefault | None = USE_CLIENT_DEFAULT,
+            follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+            timeout: TimeoutTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+            extensions: RequestExtensions | None = None,
+        ) -> Response:
+     */
+    #[pyo3(
+        signature = (
+            method, 
+            url, 
+            // content, 
+            // data, 
+            // files, 
+            json, 
+            // params, 
+            // headers, 
+            // cookies, 
+            // auth, 
+            // follow_redirects, 
+            // extensions
+        )
+    )]
+    fn request(
+        &self, 
+        py: Python<'_>, 
+        method: &str, 
+        url: &str, 
+        // content: &str,
+        // data: &Bound<'_, PyDict>,
+        // files: &Bound<'_, PyDict>,
+        json: Option<&Bound<'_, PyAny>>,
+        // params: &Bound<'_, PyDict>,
+        // headers: &Bound<'_, PyDict>,
+        // cookies: &Bound<'_, PyDict>,
+        // auth: Option<String>,
+        // follow_redirects: Option<bool>,
+        // extensions: &Bound<'_, PyDict>,
+    ) -> PyResult<PyResponse> {
+        let bare_request = self.http_client
+            .request(Method::from_bytes(method.as_bytes()).unwrap(), url);
+
+        let request = match json {
+            Some(j) => {
+                bare_request
+                    .json(&py_to_value(py, j))
+                    .build()
+                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to build request: {e}")))?
+            }
+            None => {
+                bare_request
+                    .build()
+                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to build request: {e}")))?
+            }
+        };
 
         let response = py.detach(|| {
             RUNTIME
@@ -139,5 +284,14 @@ impl PyClient {
             headers,
             content,
         })
+    }
+
+    #[pyo3(signature = (url))]
+    fn get(
+        &self, 
+        py: Python<'_>, 
+        url: &str,
+    ) -> PyResult<PyResponse> {
+        self.request(py, "GET", url, None)
     }
 }
