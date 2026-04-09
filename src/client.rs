@@ -11,11 +11,13 @@ use super::runtime::RUNTIME;
 
 use http::Method;
 
+const DEFAULT_TIMEOUT: u64 = 15;
+
 
 #[pyclass]
 pub struct PyClient {
     http_client: Client,
-    // timeout_secs: u64,
+    timeout_secs: u64,
 }
 
 #[pyclass]
@@ -153,12 +155,14 @@ impl PyResponse {
 #[pymethods]
 impl PyClient {
     #[new]
-    #[pyo3(signature = ())]
-    fn __new__(//timeout: u64
+    #[pyo3(signature = (timeout=None))]
+    fn __new__(
+        timeout: Option<u64>
     ) -> PyResult<Self> {
+        let timeout_secs = timeout.unwrap_or(DEFAULT_TIMEOUT);
         let http_client = Client::builder()
-            //.timeout(Duration::from_secs(timeout))
-            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(timeout_secs))
+            //.connect_timeout(Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::limited(10))
             // .gzip(true)
             // .brotli(true)
@@ -167,7 +171,7 @@ impl PyClient {
             .expect("Failed to build HTTP client");
         Ok(Self {
             http_client: http_client,
-            // timeout_secs: timeout,
+            timeout_secs: timeout_secs,
         })
     }
 
@@ -204,6 +208,7 @@ impl PyClient {
             // cookies, 
             // auth, 
             // follow_redirects, 
+            timeout=None
             // extensions
         )
     )]
@@ -221,6 +226,7 @@ impl PyClient {
         // cookies: &Bound<'_, PyDict>,
         // auth: Option<String>,
         // follow_redirects: Option<bool>,
+        timeout: Option<u64>,
         // extensions: &Bound<'_, PyDict>,
     ) -> PyResult<PyResponse> {
         let mut builder = self.http_client
@@ -239,7 +245,12 @@ impl PyClient {
         if let Some(h) = headers {
             builder = builder
                 .headers((&h).try_into().expect("valid headers"))
-        }
+        };
+
+        if let Some(t) = timeout {
+            builder = builder
+                .timeout(Duration::from_secs(t))
+        };
 
         let request = builder
             .build()
@@ -290,41 +301,44 @@ impl PyClient {
         })
     }
 
-    #[pyo3(signature = (url, params=None, headers=None))]
+    #[pyo3(signature = (url, params=None, headers=None, timeout=None))]
     fn get(
         &self, 
         py: Python<'_>, 
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
+        timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "GET", url, None, params, headers)
+        self.request(py, "GET", url, None, params, headers, timeout)
     }
 
-    #[pyo3(signature = (url, params=None, headers=None))]
+    #[pyo3(signature = (url, params=None, headers=None, timeout=None))]
     fn options(
         &self, 
         py: Python<'_>, 
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
+        timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "OPTIONS", url, None, params, headers)
+        self.request(py, "OPTIONS", url, None, params, headers, timeout)
     }
 
-    #[pyo3(signature = (url, params=None, headers=None))]
+    #[pyo3(signature = (url, params=None, headers=None, timeout=None))]
     fn head(
         &self, 
         py: Python<'_>, 
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
+        timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "HEAD", url, None, params, headers)
+        self.request(py, "HEAD", url, None, params, headers, timeout)
     }
 
 
-    #[pyo3(signature = (url, json=None, params=None, headers=None))]
+    #[pyo3(signature = (url, json=None, params=None, headers=None, timeout=None))]
     fn post(
         &self, 
         py: Python<'_>, 
@@ -332,11 +346,12 @@ impl PyClient {
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
+        timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "POST", url, json, params, headers)
+        self.request(py, "POST", url, json, params, headers, timeout)
     }
 
-    #[pyo3(signature = (url,json=None, params=None, headers=None))]
+    #[pyo3(signature = (url,json=None, params=None, headers=None, timeout=None))]
     fn put(
         &self, 
         py: Python<'_>, 
@@ -344,11 +359,12 @@ impl PyClient {
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
+        timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "PUT", url, json, params, headers)
+        self.request(py, "PUT", url, json, params, headers, timeout)
     }
 
-    #[pyo3(signature = (url, json=None, params=None, headers=None))]
+    #[pyo3(signature = (url, json=None, params=None, headers=None, timeout=None))]
     fn patch(
         &self, 
         py: Python<'_>, 
@@ -356,18 +372,20 @@ impl PyClient {
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
+        timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "PATCH", url, json, params, headers)
+        self.request(py, "PATCH", url, json, params, headers, timeout)
     }
 
-    #[pyo3(signature = (url, params=None, headers=None))]
+    #[pyo3(signature = (url, params=None, headers=None, timeout=None))]
     fn delete(
         &self, 
         py: Python<'_>, 
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
+        timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "DELETE", url, None, params, headers)
+        self.request(py, "DELETE", url, None, params, headers, timeout)
     }
 }

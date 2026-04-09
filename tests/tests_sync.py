@@ -409,3 +409,10 @@ def test_get_with_headers():
 
     print("")
     print(f"JSON body:\n{body}")
+
+
+def test_get_with_timeout():
+    client = reqx.Client()
+    # TODO: change this to a TimeoutError when we implement it.
+    with pytest.raises(RuntimeError):
+        client.get(f"{HTTPBIN_HOST}/delay/5", timeout=1)
