@@ -53,3 +53,92 @@ async def test_concurrent_gets():
             assert resp.status_code == 200
             assert "content-type" in resp.headers
             assert resp.json() is not None
+
+
+@pytest.mark.asyncio
+async def test_post():
+    async with reqx.AsyncClient() as client:
+        assert client is not None
+
+        future = client.post(f"{HTTPBIN_HOST}/post")
+        resp = await future
+
+        assert resp.status_code == 200
+        assert "content-type" in resp.headers
+        body = resp.json()
+        assert body["url"] == f"{HTTPBIN_HOST}/post"
+        print("")
+        print(f"JSON body:\n{body}")
+
+
+@pytest.mark.asyncio
+async def test_patch():
+    async with reqx.AsyncClient() as client:
+        assert client is not None
+
+        future = client.patch(f"{HTTPBIN_HOST}/patch")
+        resp = await future
+
+        assert resp.status_code == 200
+        assert "content-type" in resp.headers
+        body = resp.json()
+        assert body["url"] == f"{HTTPBIN_HOST}/patch"
+        print("")
+        print(f"JSON body:\n{body}")
+
+
+@pytest.mark.asyncio
+async def test_put():
+    async with reqx.AsyncClient() as client:
+        assert client is not None
+
+        future = client.put(f"{HTTPBIN_HOST}/put")
+        resp = await future
+
+        assert resp.status_code == 200
+        assert "content-type" in resp.headers
+        body = resp.json()
+        assert body["url"] == f"{HTTPBIN_HOST}/put"
+        print("")
+        print(f"JSON body:\n{body}")
+
+
+@pytest.mark.asyncio
+async def test_delete():
+    async with reqx.AsyncClient() as client:
+        assert client is not None
+
+        future = client.delete(f"{HTTPBIN_HOST}/delete")
+        resp = await future
+
+        assert resp.status_code == 200
+        assert "content-type" in resp.headers
+        body = resp.json()
+        assert body["url"] == f"{HTTPBIN_HOST}/delete"
+        print("")
+        print(f"JSON body:\n{body}")
+
+
+@pytest.mark.asyncio
+async def test_options():
+    async with reqx.AsyncClient() as client:
+        assert client is not None
+
+        future = client.options(f"{HTTPBIN_HOST}/get")
+        resp = await future
+
+        assert resp.status_code == 200
+        assert "content-type" in resp.headers
+        assert "allow" in resp.headers
+
+
+@pytest.mark.asyncio
+async def test_sample_json_params_post():
+    client = reqx.AsyncClient()
+    resp = await client.post(f"{HTTPBIN_HOST}/post", json={"special_param": 1})
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+    body = resp.json()
+    print("")
+    print(f"Post JSON response:\n{body}")

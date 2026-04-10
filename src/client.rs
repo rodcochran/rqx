@@ -491,6 +491,101 @@ impl PyAsyncClient {
         self.request(py, "GET", url, None, None, None, params, headers, auth, follow_redirects, timeout)
     }
 
+
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    fn options<'a>(
+        &self, 
+        py: Python<'a>, 
+        url: &str,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+    ) -> PyResult<Bound<'a,PyAny>>{
+        self.request(py, "OPTIONS", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+    }
+
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    fn head<'a>(
+        &self, 
+        py: Python<'a>, 
+        url: &str,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+    ) -> PyResult<Bound<'a,PyAny>>{
+        self.request(py, "HEAD", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+    }
+
+
+    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    fn post<'a>(
+        &self, 
+        py: Python<'a>, 
+        url: &str,
+        content: Option<&[u8]>,
+        data: Option<HashMap<String, String>>,
+        json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+    ) -> PyResult<Bound<'a,PyAny>>{
+        self.request(py, "POST", url, content, data, json, params, headers, auth, follow_redirects, timeout)
+    }
+
+    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    fn put<'a>(
+        &self, 
+        py: Python<'a>, 
+        url: &str,
+        content: Option<&[u8]>,
+        data: Option<HashMap<String, String>>,
+        json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+    ) -> PyResult<Bound<'a,PyAny>>{
+        self.request(py, "PUT", url, content, data, json, params, headers, auth, follow_redirects, timeout)
+    }
+
+    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    fn patch<'a>(
+        &self, 
+        py: Python<'a>, 
+        url: &str,
+        content: Option<&[u8]>,
+        data: Option<HashMap<String, String>>,
+        json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+    ) -> PyResult<Bound<'a,PyAny>>{
+        self.request(py, "PATCH", url, content, data, json, params, headers, auth, follow_redirects, timeout)
+    }
+
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    fn delete<'a>(
+        &self, 
+        py: Python<'a>, 
+        url: &str,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+    ) -> PyResult<Bound<'a,PyAny>>{
+        self.request(py, "DELETE", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+    }
+
     fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             Ok(slf)
