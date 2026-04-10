@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::time::Duration;
+use std::pin::Pin;
 use http::{Method, HeaderMap};
 use url::Url;
 use reqwest::{Client, Request};
@@ -459,12 +460,13 @@ impl PyAsyncClient {
         };
 
         let client = self.http_client.clone();
-        let fut = if _follow_redirects {
+        let max_redirects = self.max_redirects.clone();
+        let fut: Pin<Box<dyn Future<Output = PyResult<PyResponse>> + Send>> = if _follow_redirects {
             // Uncomment when implementing it.
             // self.send_handling_redirects(py, request)?
-            Self::send_single_request(client, request)
+            Box::pin(Self::send_handling_redirects(client, request, max_redirects))
         } else {
-            Self::send_single_request(client, request)
+            Box::pin(Self::send_single_request(client, request))
         };
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -620,5 +622,59 @@ impl PyAsyncClient {
         )?;
         let resp_future = PyResponse::from_response_async(response);
         resp_future.await
+    }
+
+    async fn send_handling_redirects(client: Client, request: Request, max_redirects: u32) -> PyResult<PyResponse> {
+        
+        let original_method = request.method().clone();
+        let original_url = request.url().clone();
+        let original_headers = request.headers().clone();
+        let mut current_response = Self::send_single_request(client.clone(), request).await.unwrap();
+
+        for _ in 1..max_redirects {
+            if !(300..400).contains(&current_response.status_code) {
+                return Ok(current_response);
+            }
+            current_response = Self::handle_redirect(
+                &client,
+                &original_url,
+                &original_method, 
+                &original_headers, 
+                &current_response,
+            ).await?;
+        }
+
+        if (300..400).contains(&current_response.status_code) {
+            return Err(TooManyRedirects::new_err(
+                format!("Exceeded max redirects {}", max_redirects)));
+        }
+        Ok(current_response)
+    }
+
+    async fn handle_redirect(
+        client: &Client,
+        original_url: &Url, 
+        original_method: &Method,
+        original_headers: &HeaderMap,
+        resp: &PyResponse,
+    ) -> PyResult<PyResponse> {
+        let new_url = determine_redirect_url(&original_url, &resp)
+            .map_err(|e| {
+                ReqxError::new_err(format!("Error parsing url from redirect: {e}"))
+            }
+        )?;
+        
+        let new_method = determine_redirect_method(&original_method, &resp);
+        let current_request = build_redirect_request(
+            &client,
+            new_method,
+            new_url,
+            &original_headers
+        );
+        let current_response = Self::send_single_request(
+            client.clone(),
+            current_request
+        ).await;
+        return current_response;
     }
 }

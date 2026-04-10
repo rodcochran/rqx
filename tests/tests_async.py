@@ -142,3 +142,39 @@ async def test_sample_json_params_post():
     body = resp.json()
     print("")
     print(f"Post JSON response:\n{body}")
+
+
+@pytest.mark.asyncio
+async def test_basic_client_based_redirect():
+    client = reqx.AsyncClient(follow_redirects=True)
+    resp = await client.get(
+        f"{HTTPBIN_HOST}/redirect/3",
+    )
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_basic_request_based_redirect():
+    client = reqx.AsyncClient(follow_redirects=False)
+    resp = await client.get(
+        f"{HTTPBIN_HOST}/redirect/3",
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_false_follow_redirects_returns_302():
+    client = reqx.AsyncClient(follow_redirects=False)
+    resp = await client.get(
+        f"{HTTPBIN_HOST}/redirect/3",
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+
+@pytest.mark.asyncio
+async def test_raise_error_on_redirects_exeeding_max_redirects():
+    client = reqx.AsyncClient(follow_redirects=True, max_redirects=1)
+    with pytest.raises(reqx.TooManyRedirects):
+        await client.get(f"{HTTPBIN_HOST}/redirect/3")
