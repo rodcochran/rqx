@@ -191,7 +191,7 @@ impl PyClient {
         let http_client = Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
             //.connect_timeout(Duration::from_secs(10))
-            // .redirect(reqwest::redirect::Policy::limited(10))
+            .redirect(reqwest::redirect::Policy::none())
             // .gzip(true)
             // .brotli(true)
             .pool_max_idle_per_host(20)
@@ -491,47 +491,6 @@ impl PyClient {
 
     }
 
-    fn build_redirect_request(
-        &self, 
-        method: Method, 
-        url: Url, 
-        headers: &HeaderMap,
-    ) -> Request {
-        self.http_client.request(method, url)
-            .headers(headers.clone())
-            .build()
-            .unwrap()
-    }
-
-    fn determine_redirect_method(
-        &self,
-        original_method: &Method,
-        response: &PyResponse
-    ) -> Method {
-        // Get new Method
-        if response.status_code == 303 && original_method != Method::HEAD {
-            return Method::GET;
-        }
-        else if response.status_code == 302 && original_method != Method::HEAD {
-            return Method::GET;
-        }
-        else {
-            return original_method.to_owned();
-        }
-    }
-
-    fn determine_redirect_url(
-        &self,
-        // _request: &Request,
-        response: &PyResponse
-    ) -> Url {
-        let location = response
-            .headers
-            .get("Location")
-            .unwrap();
-        Url::parse(location).unwrap()
-        // TODO: might need to get url from request when above fails.
-    }
 
     fn send_single_request(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
         let response = py.detach(|| {
@@ -583,48 +542,44 @@ impl PyClient {
     fn send_handling_redirects(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
         
         let original_method = request.method().clone();
-        // let original_url = request.url().clone();
+        let original_url = request.url().clone();
         let original_headers = request.headers().clone();
-        let initial_response = self.send_single_request(py, request).unwrap();
+        let mut current_response = self.send_single_request(py, request).unwrap();
 
-        if !((300 <= initial_response.status_code) && (initial_response.status_code < 400)) {
-            return Ok(initial_response);
-        }
-
-
-        let mut current_response = self.handle_redirect(
-            py,
-            &original_method, 
-            &original_headers, 
-            &initial_response
-        );
-
-        let current_status_code = &current_response.as_ref().unwrap().status_code;
-
-        if !((300 <= current_status_code.to_owned()) && (current_status_code.to_owned() < 400)) {
-            return current_response;
-        }
-
-        for _ in 0..self.max_redirects {
+        for _ in 1..self.max_redirects {
+            if !(300..400).contains(&current_response.status_code) {
+                return Ok(current_response);
+            }
             current_response = self.handle_redirect(
                 py, 
+                &original_url,
                 &original_method, 
                 &original_headers, 
-                &current_response.unwrap(),
-            )
+                &current_response,
+            )?;
         }
 
-        return current_response;
+        if (300..400).contains(&current_response.status_code) {
+            return Err(PyRuntimeError::new_err(
+                format!("Exceeded max redirects {}", &self.max_redirects)));
+        }
+        Ok(current_response)
     }
 
     fn handle_redirect(
         &self,
         py: Python<'_>, 
+        original_url: &Url, 
         original_method: &Method,
         original_headers: &HeaderMap,
         resp: &PyResponse,
     ) -> PyResult<PyResponse> {
-        let new_url = self.determine_redirect_url(&resp);
+        let new_url = self.determine_redirect_url(&original_url, &resp)
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!("Error parsing url from redirect: {e}"))
+            }
+        )?;
+        
         let new_method = self.determine_redirect_method(&original_method, &resp);
         let current_request = self.build_redirect_request(
             new_method,
@@ -636,5 +591,46 @@ impl PyClient {
             current_request
         );
         return current_response;
+    }
+
+    fn build_redirect_request(
+        &self, 
+        method: Method, 
+        url: Url, 
+        headers: &HeaderMap,
+    ) -> Request {
+        self.http_client.request(method, url)
+            .headers(headers.clone())
+            .build()
+            .unwrap()
+    }
+
+    fn determine_redirect_method(
+        &self,
+        original_method: &Method,
+        response: &PyResponse
+    ) -> Method {
+        // Get new Method
+        if response.status_code == 303 && original_method != Method::HEAD {
+            return Method::GET;
+        }
+        else if response.status_code == 302 && original_method != Method::HEAD {
+            return Method::GET;
+        }
+        else {
+            return original_method.to_owned();
+        }
+    }
+
+    fn determine_redirect_url(
+        &self,
+        current_url: &Url,
+        response: &PyResponse
+    ) -> PyResult<Url> {
+        let location = response
+            .headers
+            .get("location")
+            .unwrap();
+        Ok(current_url.join(location.as_str()).unwrap())
     }
 }

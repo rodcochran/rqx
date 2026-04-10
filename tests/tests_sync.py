@@ -471,3 +471,35 @@ def test_basic_auth():
     client = reqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/basic-auth/{u}/{p}", auth=auth)
     assert resp.status_code == 200
+
+
+def test_basic_client_based_redirect():
+    client = reqx.Client(follow_redirects=True)
+    resp = client.get(
+        f"{HTTPBIN_HOST}/redirect/3",
+    )
+    assert resp.status_code == 200
+
+
+def test_basic_request_based_redirect():
+    client = reqx.Client(follow_redirects=False)
+    resp = client.get(
+        f"{HTTPBIN_HOST}/redirect/3",
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+
+
+def test_false_follow_redirects_returns_302():
+    client = reqx.Client(follow_redirects=False)
+    resp = client.get(
+        f"{HTTPBIN_HOST}/redirect/3",
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+
+def test_raise_error_on_redirects_exeeding_max_redirects():
+    client = reqx.Client(follow_redirects=True, max_redirects=1)
+    with pytest.raises(RuntimeError):
+        client.get(f"{HTTPBIN_HOST}/redirect/3")
