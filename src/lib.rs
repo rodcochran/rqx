@@ -2,8 +2,9 @@ use pyo3::prelude::*;
 use pyo3::exceptions::{PyRuntimeError};
 use tokio::runtime::Runtime;
 
-
 mod client;
+mod py_json;
+mod response;
 mod runtime;
 pub mod exceptions;
 use client::PyClient;
