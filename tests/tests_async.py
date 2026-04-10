@@ -358,3 +358,9 @@ async def test_nested_json():
     assert args[key2] == val2
     print("")
     print(f"Nested Json (body args):\n{body}")
+
+@pytest.mark.asyncio
+async def test_get_with_timeout():
+    client = reqx.AsyncClient()
+    with pytest.raises(reqx.TimeoutException):
+        await client.get(f"{HTTPBIN_HOST}/delay/5", timeout=1)
