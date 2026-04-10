@@ -326,3 +326,35 @@ async def test_valid_bytes():
     assert not isinstance(content, list)
     print("")
     print(f"Content:\n{content}")
+
+
+@pytest.mark.asyncio
+async def test_headers():
+    client = reqx.AsyncClient()
+    resp = await client.get(f"{HTTPBIN_HOST}/get")
+    headers = resp.headers
+    assert headers is not None
+    assert isinstance(headers, dict)
+    assert headers["content-type"] == "application/json"
+    print("")
+    print(f"Headers:\n{headers}")
+
+
+@pytest.mark.asyncio
+async def test_nested_json():
+    # httpbin's /get?foo=bar&baz=123 will give you query params in the args field.
+    # Good way to test that nested JSON values come through correctly.
+    client = reqx.AsyncClient()
+
+    key1 = "baz"
+    val1 = "123"
+    key2 = "foo"
+    val2 = "bar"
+
+    resp = await client.get(f"{HTTPBIN_HOST}/get?{key1}={val1}&{key2}={val2}")
+    body = resp.json()
+    args = body["args"]
+    assert args[key1] == val1
+    assert args[key2] == val2
+    print("")
+    print(f"Nested Json (body args):\n{body}")
