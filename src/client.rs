@@ -4,7 +4,7 @@ use http::{Method, HeaderMap};
 use url::Url;
 use reqwest::{Client, Request};
 use pyo3::exceptions::{PyValueError};
-use pyo3::prelude::{PyAny, PyRef, PyResult, Python,  pyclass, pymethods};
+use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python,  pyclass, pymethods};
 use pyo3::Bound;
 
 use super::runtime::RUNTIME;
@@ -503,4 +503,63 @@ impl PyClient {
             .unwrap();
         Ok(current_url.join(location.as_str()).unwrap())
     }
+}
+
+
+#[pyclass]
+pub struct PyAsyncClient {
+    http_client: Client,
+    timeout_secs: u64,
+    follow_redirects: bool,
+    max_redirects: u32
+}
+
+#[pymethods]
+impl PyAsyncClient {
+    #[new]
+    #[pyo3(signature = (timeout=None, follow_redirects=None, max_redirects=None))]
+    fn __new__(
+        timeout: Option<u64>,
+        follow_redirects: Option<bool>,
+        max_redirects: Option<u32>,
+    ) -> PyResult<Self> {
+        let timeout_secs = timeout.unwrap_or(DEFAULT_TIMEOUT);
+        let client_level_follow_redirects = follow_redirects.unwrap_or(DEFAULT_FOLLOW_REDIRECTS);
+        let client_level_max_redirects = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
+
+        let http_client = Client::builder()
+            .timeout(Duration::from_secs(timeout_secs))
+            //.connect_timeout(Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
+            // .gzip(true)
+            // .brotli(true)
+            .pool_max_idle_per_host(20)
+            .build()
+            .expect("Failed to build HTTP client");
+        Ok(Self {
+            http_client: http_client,
+            timeout_secs: timeout_secs,
+            follow_redirects: client_level_follow_redirects,
+            max_redirects: client_level_max_redirects,
+        })
+    }
+
+    fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            Ok(slf)
+        })
+    }
+    
+    fn __aexit__<'py>(
+        &self,
+        py: Python<'py>,
+        _exc_type: Option<&Bound<'_, PyAny>>,
+        _exc_value: Option<&Bound<'_, PyAny>>,
+        _traceback: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            Ok(false)
+        })
+    }
+
 }

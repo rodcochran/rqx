@@ -24,8 +24,6 @@ pub struct PyResponse {
     pub(crate) elapsed: f64
 }
 
-
-
 #[pymethods]
 impl PyResponse {
     fn text(&self) -> String {

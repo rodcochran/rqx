@@ -7,7 +7,7 @@ mod py_json;
 mod response;
 mod runtime;
 pub mod exceptions;
-use client::PyClient;
+use client::{PyClient, PyAsyncClient};
 use runtime::RUNTIME;
 use exceptions::*;
 
@@ -19,6 +19,7 @@ fn _reqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
             ?
     ).expect("Runtime already initialized");
     m.add_class::<PyClient>()?;
+    m.add_class::<PyAsyncClient>()?;
     m.add("ReqxError", m.py().get_type::<ReqxError>())?;
     m.add("RequestError", m.py().get_type::<RequestError>())?;
     m.add("MaxRetriesExceeded", m.py().get_type::<MaxRetriesExceeded>())?;

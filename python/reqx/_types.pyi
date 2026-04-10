@@ -6,3 +6,11 @@ class PyClient:
         follow_redirects: bool | None = None,
         max_redirects: int | None = None,
     ) -> None: ...
+
+class PyAsyncClient:
+    def __init__(
+        self,
+        timeout: int | None = None,
+        follow_redirects: bool | None = None,
+        max_redirects: int | None = None,
+    ) -> None: ...

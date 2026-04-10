@@ -7,6 +7,7 @@ from ._reqx import (
     NetworkError,
     PoolTimeout,
     ProxyError,
+    PyAsyncClient,
     PyClient,
     ReadError,
     ReadTimeout,
@@ -20,8 +21,10 @@ from ._reqx import (
 
 # optional: nicer names (drop Py prefix)
 Client = PyClient
+AsyncClient = PyAsyncClient
 
 __all__ = [
+    "AsyncClient",
     "Client",
     "ConnectError",
     "ConnectTimeout",
