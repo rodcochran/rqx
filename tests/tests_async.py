@@ -302,3 +302,27 @@ async def test_get_total_elapsed_time():
     assert resp.elapsed > delay_time
     print("")
     print(f"Elapsed time:\n{resp.elapsed:.2f}s")
+
+
+@pytest.mark.asyncio
+async def test_valid_text():
+    client = reqx.AsyncClient()
+    resp = await client.get(f"{HTTPBIN_HOST}/get")
+    text = resp.text()
+    assert text is not None
+    assert isinstance(text, str)
+    assert len(text) > 0
+    print("")
+    print(f"Text:\n{text}")
+
+
+@pytest.mark.asyncio
+async def test_valid_bytes():
+    client = reqx.AsyncClient()
+    resp = await client.get(f"{HTTPBIN_HOST}/get")
+    content = resp.content
+    assert content is not None
+    assert isinstance(content, bytes)
+    assert not isinstance(content, list)
+    print("")
+    print(f"Content:\n{content}")
