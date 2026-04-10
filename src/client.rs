@@ -299,42 +299,7 @@ impl PyClient {
                         })
                 })
         })?;
-
-        let status_code = response.status().as_u16();
-
-        let headers = response
-            .headers()
-            .iter()
-            .map(|(k, v)| {
-                (
-                    k.to_string(),
-                    v.to_str().unwrap_or("<non-utf8>").to_string(),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        
-        let url = response.url().as_str().to_owned();
-
-        let content = py
-            .detach(|| {
-                RUNTIME
-                    .get()
-                    .ok_or_else(|| ReqxError::new_err("runtime not initialized"))?
-                    .block_on(async {
-                        response.bytes().await.map_err(|e| {
-                            ReqxError::new_err(format!("failed to read body: {e}"))
-                        })
-                    })
-            })?
-            .to_vec();
-
-        Ok(PyResponse {
-            status_code: status_code,
-            headers: headers,
-            content: content,
-            url: url,
-            elapsed: 0.0
-        })
+        PyResponse::from_response(py, response)
     }
 
 
@@ -434,6 +399,92 @@ impl PyAsyncClient {
         })
     }
 
+    #[pyo3(
+        signature = (
+            method, 
+            url, 
+            content=None, 
+            data=None, 
+            // files, 
+            json=None, 
+            params=None, 
+            headers=None, 
+            // cookies, 
+            auth=None, 
+            follow_redirects=None, 
+            timeout=None
+            // extensions
+        )
+    )]
+    fn request(
+        &self, 
+        py: Python<'_>,
+        method: &str, 
+        url: &str, 
+        content: Option<&[u8]>,
+        data: Option<HashMap<String, String>>,
+        // files: &Bound<'_, PyDict>,
+        json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        // cookies: &Bound<'_, PyDict>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+        // extensions: &Bound<'_, PyDict>,
+    ) -> PyResult<PyResponse> {
+
+        let start_time = std::time::Instant::now();
+        
+        let request = build_client_request(
+            &self.http_client,
+            py,
+            method,
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            timeout
+        )?;
+
+        let _follow_redirects = match follow_redirects {
+            Some(fr) => {fr}
+            None => {
+                self.follow_redirects
+            }
+        };
+
+        let mut resp = if _follow_redirects {
+            // Uncomment when implementing it.
+            // self.send_handling_redirects(py, request)?
+            self.send_single_request(py, request)?
+        } else {
+            self.send_single_request(py, request)?
+        };
+
+        let end_time = std::time::Instant::now();
+        let total =  end_time - start_time;
+        resp.elapsed = total.as_secs_f64();
+        return Ok(resp);
+    }
+
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    fn get(
+        &self, 
+        py: Python<'_>, 
+        url: &str,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+    ) -> PyResult<PyResponse> {
+        self.request(py, "GET", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+    }
+
     fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             Ok(slf)
@@ -451,5 +502,26 @@ impl PyAsyncClient {
             Ok(false)
         })
     }
-
+}
+impl PyAsyncClient {
+    fn send_single_request(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
+        let response = py.detach(|| {
+            RUNTIME
+                .get()
+                .ok_or_else(|| ReqxError::new_err("runtime not initialized"))?
+                .block_on(async {
+                    self.http_client
+                        .execute(request)
+                        .await
+                        .map_err(|e| {
+                            if e.is_timeout() {
+                                TimeoutException::new_err(format!("request timed out: {e}"))
+                            } else {
+                                ReqxError::new_err(format!("request failed: {e}"))
+                            }
+                        })
+                })
+        })?;
+        PyResponse::from_response(py, response)
+    }
 }
