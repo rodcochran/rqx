@@ -4,6 +4,7 @@ use tokio::runtime::Runtime;
 
 mod client;
 mod py_json;
+mod request;
 mod response;
 mod runtime;
 pub mod exceptions;

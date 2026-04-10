@@ -3,14 +3,18 @@ use std::time::Duration;
 use http::{Method, HeaderMap};
 use url::Url;
 use reqwest::{Client, Request};
-use pyo3::exceptions::{PyValueError};
 use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python,  pyclass, pymethods};
 use pyo3::Bound;
 
 use super::runtime::RUNTIME;
 use super::exceptions::*;
-use super::py_json::{py_to_value};
 use super::response::PyResponse;
+use super::request::{
+    build_client_request, 
+    determine_redirect_url, 
+    determine_redirect_method, 
+    build_redirect_request
+};
 
 
 const DEFAULT_TIMEOUT: u64 = 15;
@@ -96,7 +100,7 @@ impl PyClient {
     )]
     fn request(
         &self, 
-        py: Python<'_>, 
+        py: Python<'_>,
         method: &str, 
         url: &str, 
         content: Option<&[u8]>,
@@ -114,7 +118,8 @@ impl PyClient {
 
         let start_time = std::time::Instant::now();
         
-        let request = self.build_request(
+        let request = build_client_request(
+            &self.http_client,
             py,
             method,
             url,
@@ -276,82 +281,6 @@ impl PyClient {
 ///
 
 impl PyClient {
-    fn build_request(
-        &self, 
-        py: Python<'_>, 
-        method: &str, 
-        url: &str, 
-        content: Option<&[u8]>,
-        data: Option<HashMap<String, String>>,
-        // files: &Bound<'_, PyDict>,
-        json: Option<&Bound<'_, PyAny>>,
-        params: Option<HashMap<String, String>>,
-        headers: Option<HashMap<String, String>>,
-        // cookies: &Bound<'_, PyDict>,
-        auth: Option<(String, String)>,
-        timeout: Option<u64>,
-    ) -> PyResult<Request> {
-        let mut builder = self.http_client
-            .request(Method::from_bytes(method.as_bytes()).unwrap(), url);
-
-        let count = [content.is_some(), data.is_some(), json.is_some()]
-            .into_iter()
-            .filter(|b| *b)
-            .count();
-        
-        if count > 1 {
-            return Err(PyValueError::new_err(
-                "Only one of content, data, or json may be set",
-            ));
-        }
-
-        
-        if let Some(c) = content {
-            builder = builder
-                .body(c.to_vec())
-        };
-
-        if let Some(d) = data {
-            builder = builder
-                .form(&d)
-        }
-
-        if let Some(j) = json {
-            builder = builder
-                .json(&py_to_value(py, j))
-        };
-
-        if let Some(p) = params {
-            builder = builder
-                .query(&p)
-        };
-        
-        if let Some(h) = headers {
-            builder = builder
-                .headers((&h).try_into().expect("valid headers"))
-        };
-
-        if let Some(a) = auth {
-            builder = builder
-                .basic_auth(a.0, Some(a.1))
-        }
-
-        if let Some(t) = timeout {
-            builder = builder
-                .timeout(Duration::from_secs(t))
-        };
-
-        let request = builder
-            .build()
-            .map_err(|e| {
-                ReqxError::new_err(format!("Failed to build request: {e}"))
-            })?;
-
-        return Ok(request)
-
-    }
-
-
     fn send_single_request(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
         let response = py.detach(|| {
             RUNTIME
@@ -444,14 +373,15 @@ impl PyClient {
         original_headers: &HeaderMap,
         resp: &PyResponse,
     ) -> PyResult<PyResponse> {
-        let new_url = self.determine_redirect_url(&original_url, &resp)
+        let new_url = determine_redirect_url(&original_url, &resp)
             .map_err(|e| {
                 ReqxError::new_err(format!("Error parsing url from redirect: {e}"))
             }
         )?;
         
-        let new_method = self.determine_redirect_method(&original_method, &resp);
-        let current_request = self.build_redirect_request(
+        let new_method = determine_redirect_method(&original_method, &resp);
+        let current_request = build_redirect_request(
+            &self.http_client,
             new_method,
             new_url,
             &original_headers
@@ -463,46 +393,6 @@ impl PyClient {
         return current_response;
     }
 
-    fn build_redirect_request(
-        &self, 
-        method: Method, 
-        url: Url, 
-        headers: &HeaderMap,
-    ) -> Request {
-        self.http_client.request(method, url)
-            .headers(headers.clone())
-            .build()
-            .unwrap()
-    }
-
-    fn determine_redirect_method(
-        &self,
-        original_method: &Method,
-        response: &PyResponse
-    ) -> Method {
-        // Get new Method
-        if response.status_code == 303 && original_method != Method::HEAD {
-            return Method::GET;
-        }
-        else if response.status_code == 302 && original_method != Method::HEAD {
-            return Method::GET;
-        }
-        else {
-            return original_method.to_owned();
-        }
-    }
-
-    fn determine_redirect_url(
-        &self,
-        current_url: &Url,
-        response: &PyResponse
-    ) -> PyResult<Url> {
-        let location = response
-            .headers
-            .get("location")
-            .unwrap();
-        Ok(current_url.join(location.as_str()).unwrap())
-    }
 }
 
 
