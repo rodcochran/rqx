@@ -178,3 +178,127 @@ async def test_raise_error_on_redirects_exeeding_max_redirects():
     client = reqx.AsyncClient(follow_redirects=True, max_redirects=1)
     with pytest.raises(reqx.TooManyRedirects):
         await client.get(f"{HTTPBIN_HOST}/redirect/3")
+
+
+@pytest.mark.asyncio
+async def test_raise_for_status():
+    client = reqx.AsyncClient()
+    resp = await client.get(f"{HTTPBIN_HOST}/status/400")
+    assert resp.status_code == 400
+    assert "content-type" in resp.headers
+    with pytest.raises(reqx.HTTPStatusError):
+        resp.raise_for_status()
+
+
+@pytest.mark.asyncio
+async def test_post_with_content():
+    content_str = '{"raw_content": "hello"}'
+    content_bytes = content_str.encode()
+    client = reqx.AsyncClient()
+    resp = await client.post(f"{HTTPBIN_HOST}/post", content=content_bytes)
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+    body = resp.json()
+    assert body["data"] == content_str
+    print("")
+    print(f"Post JSON response:\n{body}")
+
+
+@pytest.mark.asyncio
+async def test_post_with_data():
+    data = {"hi": "goodbye", "hey": "2"}
+    client = reqx.AsyncClient()
+    resp = await client.post(f"{HTTPBIN_HOST}/post", data=data)
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+    body = resp.json()
+    assert body["headers"]["Content-Type"] == "application/x-www-form-urlencoded"
+    print("")
+    print(f"Post JSON response:\n{body}")
+
+
+@pytest.mark.asyncio
+async def test_basic_auth():
+    u = "User"
+    p = "Password"
+    auth = (u, p)
+    client = reqx.AsyncClient()
+    resp = await client.get(f"{HTTPBIN_HOST}/basic-auth/{u}/{p}", auth=auth)
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_400():
+    client = reqx.AsyncClient()
+    resp = await client.get(f"{HTTPBIN_HOST}/status/400")
+    assert resp.status_code == 400
+    assert "content-type" in resp.headers
+    with pytest.raises(reqx.ReqxError):
+        resp.json()
+
+
+@pytest.mark.asyncio
+async def test_404():
+    client = reqx.AsyncClient()
+    resp = await client.get(f"{HTTPBIN_HOST}/status/404")
+    assert resp.status_code == 404
+    assert "content-type" in resp.headers
+    with pytest.raises(reqx.ReqxError):
+        resp.json()
+
+
+@pytest.mark.asyncio
+async def test_500():
+    client = reqx.AsyncClient()
+    resp = await client.get(f"{HTTPBIN_HOST}/status/500")
+    assert resp.status_code == 500
+    assert "content-type" in resp.headers
+    with pytest.raises(reqx.ReqxError):
+        resp.json()
+
+
+@pytest.mark.asyncio
+async def test_body():
+    client = reqx.AsyncClient()
+    resp = await client.get(f"{HTTPBIN_HOST}/get")
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+    body = resp.json()
+
+    expected_body_keys = ["args", "headers", "origin", "url"]
+
+    for k in expected_body_keys:
+        assert k in body.keys()
+
+
+@pytest.mark.asyncio
+async def test_basic_final_url_in_output():
+    client = reqx.AsyncClient()
+    resp = await client.get(f"{HTTPBIN_HOST}/get")
+    assert resp.url == f"{HTTPBIN_HOST}/get"
+
+
+@pytest.mark.asyncio
+async def test_redirected_final_url_in_output():
+    client = reqx.AsyncClient()
+    resp = await client.get(f"{HTTPBIN_HOST}/redirect/3", follow_redirects=True)
+    assert resp.url == f"{HTTPBIN_HOST}/get"
+
+
+@pytest.mark.asyncio
+async def test_bad_url_raises():
+    client = reqx.AsyncClient()
+    with pytest.raises(reqx.ReqxError):
+        await client.get("Bad URL")
+
+
+@pytest.mark.asyncio
+async def test_get_total_elapsed_time():
+    delay_time = 1
+    client = reqx.AsyncClient()
+    resp = await client.get(f"{HTTPBIN_HOST}/delay/{delay_time}")
+    assert resp.elapsed is not None
+    assert resp.elapsed > delay_time
+    print("")
+    print(f"Elapsed time:\n{resp.elapsed:.2f}s")
