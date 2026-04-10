@@ -97,4 +97,40 @@ impl PyResponse {
         )
 
     }
+
+    pub async fn from_response_async(response: Response) -> PyResult<PyResponse> {
+        let status_code = response.status().as_u16();
+
+        let headers = response
+            .headers()
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.to_string(),
+                    v.to_str().unwrap_or("<non-utf8>").to_string(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        
+        let url = response.url().as_str().to_owned();
+
+        let content = response
+            .bytes()
+            .await
+            .map_err(|e| {
+                ReqxError::new_err(format!("failed to read body: {e}"))
+            })?
+            .to_vec();
+
+        Ok(
+            PyResponse  {
+                status_code: status_code,
+                headers: headers,
+                content: content,
+                url: url,
+                elapsed: 0.0
+            }
+        )
+
+    }
 }
