@@ -33,7 +33,13 @@ pub struct PyResponse {
     headers: HashMap<String, String>,
     #[pyo3(get)]
     content: Vec<u8>,
+    #[pyo3(get)]
+    url: String,
+    #[pyo3(get)]
+    pub(crate) elapsed: f64
 }
+
+
 
 #[pymethods]
 impl PyResponse {
@@ -259,6 +265,8 @@ impl PyClient {
         timeout: Option<u64>,
         // extensions: &Bound<'_, PyDict>,
     ) -> PyResult<PyResponse> {
+
+        let start_time = std::time::Instant::now();
         
         let request = self.build_request(
             py,
@@ -280,12 +288,16 @@ impl PyClient {
             }
         };
 
-        if _follow_redirects {
-            self.send_handling_redirects(py, request)
-        }
-        else {
-            self.send_single_request(py, request)
-        }
+        let mut resp = if _follow_redirects {
+            self.send_handling_redirects(py, request)?
+        } else {
+            self.send_single_request(py, request)?
+        };
+
+        let end_time = std::time::Instant::now();
+        let total =  end_time - start_time;
+        resp.elapsed = total.as_secs_f64();
+        return Ok(resp);
     }
 
 
@@ -517,6 +529,8 @@ impl PyClient {
                 )
             })
             .collect::<HashMap<_, _>>();
+        
+        let url = response.url().as_str().to_owned();
 
         let content = py
             .detach(|| {
@@ -532,9 +546,11 @@ impl PyClient {
             .to_vec();
 
         Ok(PyResponse {
-            status_code,
-            headers,
-            content,
+            status_code: status_code,
+            headers: headers,
+            content: content,
+            url: url,
+            elapsed: 0.0
         })
     }
 

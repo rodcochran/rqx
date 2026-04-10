@@ -503,3 +503,13 @@ def test_raise_error_on_redirects_exeeding_max_redirects():
     client = reqx.Client(follow_redirects=True, max_redirects=1)
     with pytest.raises(RuntimeError):
         client.get(f"{HTTPBIN_HOST}/redirect/3")
+
+
+def test_get_total_elapsed_time():
+    delay_time = 1
+    client = reqx.Client()
+    resp = client.get(f"{HTTPBIN_HOST}/delay/{delay_time}")
+    assert resp.elapsed is not None
+    assert resp.elapsed > delay_time
+    print("")
+    print(f"Elapsed time:\n{resp.elapsed:.2f}s")
