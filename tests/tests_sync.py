@@ -513,3 +513,15 @@ def test_get_total_elapsed_time():
     assert resp.elapsed > delay_time
     print("")
     print(f"Elapsed time:\n{resp.elapsed:.2f}s")
+
+
+def test_basic_final_url_in_output():
+    client = reqx.Client()
+    resp = client.get(f"{HTTPBIN_HOST}/get")
+    assert resp.url == f"{HTTPBIN_HOST}/get"
+
+
+def test_redirected_final_url_in_output():
+    client = reqx.Client()
+    resp = client.get(f"{HTTPBIN_HOST}/redirect/3", follow_redirects=True)
+    assert resp.url == f"{HTTPBIN_HOST}/get"
