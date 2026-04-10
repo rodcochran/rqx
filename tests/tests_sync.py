@@ -524,3 +524,9 @@ def test_redirected_final_url_in_output():
     client = reqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/redirect/3", follow_redirects=True)
     assert resp.url == f"{HTTPBIN_HOST}/get"
+
+
+def test_bad_url_raises():
+    client = reqx.Client()
+    with pytest.raises(reqx.ReqxError):
+        client.get("Bad URL")
