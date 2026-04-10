@@ -1,5 +1,5 @@
 use pyo3::conversion::{IntoPyObject, IntoPyObjectExt};
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyValueError};
 use pyo3::prelude::{Py, PyAny, PyResult, Python, PyRef, pyclass, pymethods};
 use pyo3::types::{PyAnyMethods, PyBool, PyDict, PyDictMethods, PyFloat, PyInt, PyList, PyString};
 use pyo3::Bound;
@@ -9,6 +9,7 @@ use std::time::Duration;
 use url::Url;
 
 use super::runtime::RUNTIME;
+use super::exceptions::*;
 
 use http::{Method, StatusCode, HeaderMap};
 
@@ -50,7 +51,7 @@ impl PyResponse {
 
     fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         serde_json::from_str(&self.text())
-            .map_err(|e| PyRuntimeError::new_err(format!("invalid JSON response: {e}")))
+            .map_err(|e| ReqxError::new_err(format!("invalid JSON response: {e}")))
             .and_then(|v| value_to_py(py, v))
     }
 
@@ -59,14 +60,14 @@ impl PyResponse {
         match s_result {
             Ok(s) => {
                 if !s.is_success() {
-                    Err(PyRuntimeError::new_err(format!("{} error", self.status_code)))
+                    Err(HTTPStatusError::new_err(format!("{} error", self.status_code)))
                 }
                 else {
                     Ok(())
                 }
             }
             Err(e) => {
-                Err(PyRuntimeError::new_err(format!("invalid Status Code: {e}")))
+                Err(ReqxError::new_err(format!("invalid Status Code: {e}")))
             }
         }
     }
@@ -497,7 +498,9 @@ impl PyClient {
 
         let request = builder
             .build()
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to build request: {e}")))?;
+            .map_err(|e| {
+                ReqxError::new_err(format!("Failed to build request: {e}"))
+            })?;
 
         return Ok(request)
 
@@ -508,12 +511,18 @@ impl PyClient {
         let response = py.detach(|| {
             RUNTIME
                 .get()
-                .ok_or_else(|| PyRuntimeError::new_err("runtime not initialized"))?
+                .ok_or_else(|| ReqxError::new_err("runtime not initialized"))?
                 .block_on(async {
                     self.http_client
                         .execute(request)
                         .await
-                        .map_err(|e| PyRuntimeError::new_err(format!("request failed: {e}")))
+                        .map_err(|e| {
+                            if e.is_timeout() {
+                                TimeoutException::new_err(format!("request timed out: {e}"))
+                            } else {
+                                ReqxError::new_err(format!("request failed: {e}"))
+                            }
+                        })
                 })
         })?;
 
@@ -536,10 +545,10 @@ impl PyClient {
             .detach(|| {
                 RUNTIME
                     .get()
-                    .ok_or_else(|| PyRuntimeError::new_err("runtime not initialized"))?
+                    .ok_or_else(|| ReqxError::new_err("runtime not initialized"))?
                     .block_on(async {
                         response.bytes().await.map_err(|e| {
-                            PyRuntimeError::new_err(format!("failed to read body: {e}"))
+                            ReqxError::new_err(format!("failed to read body: {e}"))
                         })
                     })
             })?
@@ -576,7 +585,7 @@ impl PyClient {
         }
 
         if (300..400).contains(&current_response.status_code) {
-            return Err(PyRuntimeError::new_err(
+            return Err(TooManyRedirects::new_err(
                 format!("Exceeded max redirects {}", &self.max_redirects)));
         }
         Ok(current_response)
@@ -592,7 +601,7 @@ impl PyClient {
     ) -> PyResult<PyResponse> {
         let new_url = self.determine_redirect_url(&original_url, &resp)
             .map_err(|e| {
-                PyRuntimeError::new_err(format!("Error parsing url from redirect: {e}"))
+                ReqxError::new_err(format!("Error parsing url from redirect: {e}"))
             }
         )?;
         

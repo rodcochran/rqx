@@ -31,7 +31,7 @@ def test_400():
     resp = client.get(f"{HTTPBIN_HOST}/status/400")
     assert resp.status_code == 400
     assert "content-type" in resp.headers
-    with pytest.raises(RuntimeError):
+    with pytest.raises(reqx.ReqxError):
         resp.json()
 
 
@@ -40,7 +40,7 @@ def test_404():
     resp = client.get(f"{HTTPBIN_HOST}/status/404")
     assert resp.status_code == 404
     assert "content-type" in resp.headers
-    with pytest.raises(RuntimeError):
+    with pytest.raises(reqx.ReqxError):
         resp.json()
 
 
@@ -49,7 +49,7 @@ def test_500():
     resp = client.get(f"{HTTPBIN_HOST}/status/500")
     assert resp.status_code == 500
     assert "content-type" in resp.headers
-    with pytest.raises(RuntimeError):
+    with pytest.raises(reqx.ReqxError):
         resp.json()
 
 
@@ -413,8 +413,7 @@ def test_get_with_headers():
 
 def test_get_with_timeout():
     client = reqx.Client()
-    # TODO: change this to a TimeoutError when we implement it.
-    with pytest.raises(RuntimeError):
+    with pytest.raises(reqx.TimeoutException):
         client.get(f"{HTTPBIN_HOST}/delay/5", timeout=1)
 
 
@@ -434,7 +433,7 @@ def test_raise_for_status():
     resp = client.get(f"{HTTPBIN_HOST}/status/400")
     assert resp.status_code == 400
     assert "content-type" in resp.headers
-    with pytest.raises(RuntimeError):
+    with pytest.raises(reqx.HTTPStatusError):
         resp.raise_for_status()
 
 
@@ -501,7 +500,7 @@ def test_false_follow_redirects_returns_302():
 
 def test_raise_error_on_redirects_exeeding_max_redirects():
     client = reqx.Client(follow_redirects=True, max_redirects=1)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(reqx.TooManyRedirects):
         client.get(f"{HTTPBIN_HOST}/redirect/3")
 
 

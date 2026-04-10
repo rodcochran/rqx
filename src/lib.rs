@@ -25,6 +25,7 @@ fn _reqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("HTTPStatusError", m.py().get_type::<HTTPStatusError>())?;
     m.add("TimeoutException", m.py().get_type::<TimeoutException>())?;
     m.add("NetworkError", m.py().get_type::<NetworkError>())?;
+    m.add("TooManyRedirects", m.py().get_type::<TooManyRedirects>())?;
     m.add("ProxyError", m.py().get_type::<ProxyError>())?;
     m.add("ConnectTimeout", m.py().get_type::<ConnectTimeout>())?;
     m.add("ReadTimeout", m.py().get_type::<ReadTimeout>())?;

@@ -16,6 +16,7 @@ reqx.ReqxError
 │   │   │   ├── reqx.ConnectError
 │   │   │   ├── reqx.ReadError
 │   │   │   └── reqx.WriteError
+│   │   ├── reqx.TooManyRedirects
 │   │   └── reqx.ProxyError
 │   └── reqx.HTTPStatusError          (raised by raise_for_status())
 └── reqx.MaxRetriesExceeded           (raised when retry budget exhausted)
@@ -32,6 +33,7 @@ create_exception!(reqx, MaxRetriesExceeded, ReqxError);
 // Level 3
 create_exception!(reqx, TransportError, RequestError);
 create_exception!(reqx, HTTPStatusError, RequestError);
+create_exception!(reqx, TooManyRedirects, RequestError);
 
 // Level 4
 create_exception!(reqx, TimeoutException, TransportError);
