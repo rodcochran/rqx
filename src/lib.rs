@@ -15,6 +15,8 @@ use client::{PyClient, PyAsyncClient};
 use runtime::RUNTIME;
 use exceptions::*;
 use retry::PyRetry;
+use transport::HttpTransport;
+
 
 #[pymodule]
 fn _reqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -26,6 +28,7 @@ fn _reqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyClient>()?;
     m.add_class::<PyAsyncClient>()?;
     m.add_class::<PyRetry>()?;
+    m.add_class::<HttpTransport>()?;
     m.add("ReqxError", m.py().get_type::<ReqxError>())?;
     m.add("RequestError", m.py().get_type::<RequestError>())?;
     m.add("MaxRetriesExceeded", m.py().get_type::<MaxRetriesExceeded>())?;

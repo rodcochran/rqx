@@ -7,7 +7,6 @@ use reqwest::{Client, Request};
 use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python,  pyclass, pymethods};
 use pyo3::Bound;
 
-use super::runtime::RUNTIME;
 use super::exceptions::*;
 use super::response::PyResponse;
 use super::request::{

@@ -530,3 +530,45 @@ def test_bad_url_raises():
     client = reqx.Client()
     with pytest.raises(reqx.ReqxError):
         client.get("Bad URL")
+
+
+# ================================================================
+# Phase 3 tests
+# ================================================================
+
+
+def test_retry_init():
+
+    retry = reqx.Retry()
+
+    assert retry is not None
+
+    # base
+    assert retry.total is not None
+
+    # dependent retry counts (should inherit from total)
+    assert retry.connect is not None
+    assert retry.read is not None
+    assert retry.status is not None
+
+    # Assert that they inherit from total
+    assert retry.connect == retry.total
+    assert retry.read == retry.total
+    assert retry.status == retry.total
+
+    # backoff config
+    assert retry.backoff_factor is not None
+    assert retry.backoff_max is not None
+    assert retry.backoff_jitter is not None
+
+    # collections
+    assert retry.status_forcelist is not None
+    assert retry.allowed_methods is not None
+
+    # flags
+    assert retry.respect_retry_after_header is not None
+    assert retry.raise_on_status is not None
+    assert retry.raise_on_redirect is not None
+
+
+def test_transport_init(): ...

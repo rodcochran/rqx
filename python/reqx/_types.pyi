@@ -31,3 +31,9 @@ class PyRetry:
         raise_on_status: bool | None = None,
         raise_on_redirect: bool | None = None,
     ) -> None: ...
+
+class HttpTransport:
+    def __init__(
+        self,
+        retries: PyRetry | None = None,
+    ): ...

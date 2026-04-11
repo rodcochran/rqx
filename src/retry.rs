@@ -23,28 +23,51 @@ const DEFAULT_RAISE_ON_REDIRECT: bool = true;
 #[derive(Clone)]
 pub struct PyRetry {
     // maximum total retry attempts (across all failure modes)
+    #[pyo3(get)]
     pub total: i32,
+
     // max retries on connection errors (defaults to total)
+    #[pyo3(get)]
     pub connect: i32,
+
     // max retries on read errors (defaults to total)
+    #[pyo3(get)]
     pub read: i32,
+
     // max retries on bad status codes (defaults to total)
+    #[pyo3(get)]
     pub status: i32,
+
     // multiplier for exponential backoff between retries
+    #[pyo3(get)]
     pub backoff_factor: f32,
+
     // ceiling on computed backoff delay in seconds
+    #[pyo3(get)]
     pub backoff_max: f32,
+    
     // random jitter added to backoff (0.0 = no jitter)
+    #[pyo3(get)]
     pub backoff_jitter: f32,
+
     // set of status codes that trigger a retry
+    #[pyo3(get)]
     pub status_forcelist: HashSet<u16>,
+
     // only retry requests with these HTTP methods
+    #[pyo3(get)]
     pub allowed_methods: HashSet<String>,
+
     // honor Retry-After header delay when present
+    #[pyo3(get)]
     pub respect_retry_after_header: bool,
+
     // raise MaxRetriesExceeded when retries exhausted
+    #[pyo3(get)]
     pub raise_on_status: bool,
+
     // raise TooManyRedirects when redirect loop detected
+    #[pyo3(get)]
     pub raise_on_redirect: bool,
 }
 
