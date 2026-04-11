@@ -14,3 +14,20 @@ class PyAsyncClient:
         follow_redirects: bool | None = None,
         max_redirects: int | None = None,
     ) -> None: ...
+
+class PyRetry:
+    def __init__(
+        self,
+        total: int | None = None,
+        connect: int | None = None,
+        read: int | None = None,
+        status: int | None = None,
+        backoff_factor: float | None = None,
+        backoff_max: float | None = None,
+        backoff_jitter: float | None = None,
+        status_forcelist: set[int] | None = None,
+        allowed_methods: set[str] | None = None,
+        respect_retry_after_header: bool | None = None,
+        raise_on_status: bool | None = None,
+        raise_on_redirect: bool | None = None,
+    ) -> None: ...

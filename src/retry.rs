@@ -20,7 +20,7 @@ const DEFAULT_RAISE_ON_REDIRECT: bool = true;
 
 
 #[pyclass]
-struct PyRetry {
+pub struct PyRetry {
     // maximum total retry attempts (across all failure modes)
     total: i32,
     // max retries on connection errors (defaults to total)

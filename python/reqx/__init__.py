@@ -9,6 +9,7 @@ from ._reqx import (
     ProxyError,
     PyAsyncClient,
     PyClient,
+    PyRetry,
     ReadError,
     ReadTimeout,
     ReqxError,
@@ -22,6 +23,7 @@ from ._reqx import (
 # optional: nicer names (drop Py prefix)
 Client = PyClient
 AsyncClient = PyAsyncClient
+Retry = PyRetry
 
 __all__ = [
     "AsyncClient",
@@ -35,6 +37,7 @@ __all__ = [
     "ProxyError",
     "ReadError",
     "ReadTimeout",
+    "Retry",
     "ReqxError",
     "TimeoutException",
     "TooManyRedirects",

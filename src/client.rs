@@ -462,8 +462,6 @@ impl PyAsyncClient {
         let client = self.http_client.clone();
         let max_redirects = self.max_redirects.clone();
         let fut: Pin<Box<dyn Future<Output = PyResult<PyResponse>> + Send>> = if _follow_redirects {
-            // Uncomment when implementing it.
-            // self.send_handling_redirects(py, request)?
             Box::pin(Self::send_handling_redirects(client, request, max_redirects))
         } else {
             Box::pin(Self::send_single_request(client, request))
