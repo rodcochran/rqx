@@ -14,6 +14,7 @@ use super::runtime::RUNTIME;
 #[derive(Clone)]
 pub struct HttpTransport {
     http_client: Client,
+    #[pyo3(get)]
     retries: Option<PyRetry>
 }
 

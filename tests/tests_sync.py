@@ -571,4 +571,9 @@ def test_retry_init():
     assert retry.raise_on_redirect is not None
 
 
-def test_transport_init(): ...
+def test_transport_init():
+
+    transport = reqx.HttpTransport()
+
+    assert transport is not None
+    assert transport.retries is None
