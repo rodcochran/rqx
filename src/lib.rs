@@ -6,6 +6,7 @@ mod client;
 mod py_json;
 mod request;
 mod response;
+mod retry;
 mod runtime;
 pub mod exceptions;
 use client::{PyClient, PyAsyncClient};
