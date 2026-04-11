@@ -5,7 +5,7 @@ const DEFAULT_TOTAL_RETRIES: i32 = 3;
 const DEFAULT_BACKOFF_FACTOR: f32 = 0.0;
 const DEFAULT_BACKOFF_MAX: f32 = 120.0;
 const DEFAULT_BACKOFF_JITTER: f32 = 0.0;
-const DEFAULT_STATUS_FORCELIST: &[i32] = &[];
+const DEFAULT_STATUS_FORCELIST: &[u16] = &[];
 const DEFAULT_ALLOWED_METHODS: &[&str] = &[
     "DELETE", 
     "GET", 
@@ -23,29 +23,29 @@ const DEFAULT_RAISE_ON_REDIRECT: bool = true;
 #[derive(Clone)]
 pub struct PyRetry {
     // maximum total retry attempts (across all failure modes)
-    total: i32,
+    pub total: i32,
     // max retries on connection errors (defaults to total)
-    connect: i32,
+    pub connect: i32,
     // max retries on read errors (defaults to total)
-    read: i32,
+    pub read: i32,
     // max retries on bad status codes (defaults to total)
-    status: i32,
+    pub status: i32,
     // multiplier for exponential backoff between retries
-    backoff_factor: f32,
+    pub backoff_factor: f32,
     // ceiling on computed backoff delay in seconds
-    backoff_max: f32,
+    pub backoff_max: f32,
     // random jitter added to backoff (0.0 = no jitter)
-    backoff_jitter: f32,
+    pub backoff_jitter: f32,
     // set of status codes that trigger a retry
-    status_forcelist: HashSet<i32>,
+    pub status_forcelist: HashSet<u16>,
     // only retry requests with these HTTP methods
-    allowed_methods: HashSet<String>,
+    pub allowed_methods: HashSet<String>,
     // honor Retry-After header delay when present
-    respect_retry_after_header: bool,
+    pub respect_retry_after_header: bool,
     // raise MaxRetriesExceeded when retries exhausted
-    raise_on_status: bool,
+    pub raise_on_status: bool,
     // raise TooManyRedirects when redirect loop detected
-    raise_on_redirect: bool,
+    pub raise_on_redirect: bool,
 }
 
 #[pymethods]
@@ -73,7 +73,7 @@ impl PyRetry {
         backoff_factor: Option<f32>,
         backoff_max: Option<f32>,
         backoff_jitter: Option<f32>,
-        status_forcelist: Option<HashSet<i32>>,
+        status_forcelist: Option<HashSet<u16>>,
         allowed_methods: Option<HashSet<String>>,
         respect_retry_after_header: Option<bool>,
         raise_on_status: Option<bool>,

@@ -16,6 +16,7 @@ use super::request::{
     determine_redirect_method, 
     build_redirect_request
 };
+use super::transport::HttpTransport;
 
 
 const DEFAULT_TIMEOUT: u64 = 15;
@@ -25,7 +26,8 @@ const DEFAULT_MAX_REDIRECTS: u32 = 20;
 
 #[pyclass]
 pub struct PyClient {
-    http_client: Client,
+    // http_client: Client,
+    transport: HttpTransport,
     timeout_secs: u64,
     follow_redirects: bool,
     max_redirects: u32
@@ -35,27 +37,25 @@ pub struct PyClient {
 #[pymethods]
 impl PyClient {
     #[new]
-    #[pyo3(signature = (timeout=None, follow_redirects=None, max_redirects=None))]
+    #[pyo3(signature = (timeout=None, follow_redirects=None, max_redirects=None, transport=None))]
     fn __new__(
         timeout: Option<u64>,
         follow_redirects: Option<bool>,
         max_redirects: Option<u32>,
+        // retries: Option<PyRef<'_, PyRetry>>,
+        transport: Option<PyRef<'_, HttpTransport>>,
     ) -> PyResult<Self> {
         let timeout_secs = timeout.unwrap_or(DEFAULT_TIMEOUT);
         let client_level_follow_redirects = follow_redirects.unwrap_or(DEFAULT_FOLLOW_REDIRECTS);
         let client_level_max_redirects = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
 
-        let http_client = Client::builder()
-            // .timeout(Duration::from_secs(timeout_secs))
-            //.connect_timeout(Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::none())
-            // .gzip(true)
-            // .brotli(true)
-            .pool_max_idle_per_host(20)
-            .build()
-            .expect("Failed to build HTTP client");
+        let _transport = match transport {
+            Some(t) => t.clone(),
+            None => HttpTransport::default(),
+        };
+
         Ok(Self {
-            http_client: http_client,
+            transport: _transport,
             timeout_secs: timeout_secs,
             follow_redirects: client_level_follow_redirects,
             max_redirects: client_level_max_redirects,
@@ -120,7 +120,7 @@ impl PyClient {
         let start_time = std::time::Instant::now();
 
         let request = build_client_request(
-            &self.http_client,
+            &self.transport.client(),
             py,
             method,
             url,
@@ -144,7 +144,7 @@ impl PyClient {
         let mut resp = if _follow_redirects {
             self.send_handling_redirects(py, request)?
         } else {
-            self.send_single_request(py, request)?
+            self.transport.handle_request(py, request)?
         };
 
         let end_time = std::time::Instant::now();
@@ -283,34 +283,12 @@ impl PyClient {
 ///
 
 impl PyClient {
-    fn send_single_request(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
-        let response = py.detach(|| {
-            RUNTIME
-                .get()
-                .ok_or_else(|| ReqxError::new_err("runtime not initialized"))?
-                .block_on(async {
-                    self.http_client
-                        .execute(request)
-                        .await
-                        .map_err(|e| {
-                            if e.is_timeout() {
-                                TimeoutException::new_err(format!("request timed out: {e}"))
-                            } else {
-                                ReqxError::new_err(format!("request failed: {e}"))
-                            }
-                        })
-                })
-        })?;
-        PyResponse::from_response(py, response)
-    }
-
-
     fn send_handling_redirects(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
         
         let original_method = request.method().clone();
         let original_url = request.url().clone();
         let original_headers = request.headers().clone();
-        let mut current_response = self.send_single_request(py, request).unwrap();
+        let mut current_response = self.transport.handle_request(py, request).unwrap();
 
         for _ in 1..self.max_redirects {
             if !(300..400).contains(&current_response.status_code) {
@@ -348,12 +326,12 @@ impl PyClient {
         
         let new_method = determine_redirect_method(&original_method, &resp);
         let current_request = build_redirect_request(
-            &self.http_client,
+            &self.transport.client(),
             new_method,
             new_url,
             &original_headers
         );
-        let current_response = self.send_single_request(
+        let current_response = self.transport.handle_request(
             py, 
             current_request
         );
