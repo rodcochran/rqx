@@ -46,7 +46,7 @@ impl PyClient {
         let client_level_max_redirects = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
 
         let http_client = Client::builder()
-            .timeout(Duration::from_secs(timeout_secs))
+            // .timeout(Duration::from_secs(timeout_secs))
             //.connect_timeout(Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none())
             // .gzip(true)
@@ -118,7 +118,7 @@ impl PyClient {
     ) -> PyResult<PyResponse> {
 
         let start_time = std::time::Instant::now();
-        
+
         let request = build_client_request(
             &self.http_client,
             py,
@@ -130,7 +130,8 @@ impl PyClient {
             params,
             headers,
             auth,
-            timeout
+            // setting default timeout from top level
+            Some(timeout.unwrap_or(self.timeout_secs))
         )?;
 
         let _follow_redirects = match follow_redirects {

@@ -19,7 +19,8 @@ const DEFAULT_RAISE_ON_STATUS: bool = true;
 const DEFAULT_RAISE_ON_REDIRECT: bool = true;
 
 
-#[pyclass]
+#[pyclass(from_py_object)]
+#[derive(Clone)]
 pub struct PyRetry {
     // maximum total retry attempts (across all failure modes)
     total: i32,
@@ -110,5 +111,32 @@ impl PyRetry {
             }
         )
 
+    }
+}
+
+impl PyRetry {
+    pub fn with_defaults() -> Self {
+        Self {
+            total: DEFAULT_TOTAL_RETRIES,
+            connect: DEFAULT_TOTAL_RETRIES,
+            read: DEFAULT_TOTAL_RETRIES,
+            status: DEFAULT_TOTAL_RETRIES,
+            backoff_factor: DEFAULT_BACKOFF_FACTOR,
+            backoff_max: DEFAULT_BACKOFF_MAX,
+            backoff_jitter: DEFAULT_BACKOFF_JITTER,
+            status_forcelist: DEFAULT_STATUS_FORCELIST
+                .iter()
+                .copied()
+                .collect()
+            ,
+            allowed_methods: DEFAULT_ALLOWED_METHODS
+                .iter()
+                .map(ToString::to_string)
+                .collect()
+            ,
+            respect_retry_after_header: DEFAULT_RESPECT_RETRY_AFTER_HEADER,
+            raise_on_status: DEFAULT_RAISE_ON_STATUS,
+            raise_on_redirect: DEFAULT_RAISE_ON_REDIRECT,
+        }
     }
 }
