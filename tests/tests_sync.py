@@ -637,3 +637,21 @@ def test_not_allowed_method_is_not_retried(flaky_server):
 
     assert resp.status_code == 503
     assert "content-type" in resp.headers
+
+
+def test_retry_history_populated(flaky_server):
+    transport = reqx.HTTPTransport(
+        retries=reqx.Retry(
+            total=5,
+            backoff_factor=0.1,
+            status_forcelist={503},
+        )
+    )
+    client = reqx.Client(transport=transport)
+    resp = client.get(f"{flaky_server}/flaky?request_id=test4")
+    assert resp.status_code == 200
+    assert resp.num_retries == 2
+    assert len(resp.retry_history) == 2
+    assert resp.retry_history[0][0] == "503"  # status code string
+    print("")
+    print(f"Retry History:\{resp.retry_history}")
