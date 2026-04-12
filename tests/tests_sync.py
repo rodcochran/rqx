@@ -573,7 +573,34 @@ def test_retry_init():
 
 def test_transport_init():
 
-    transport = reqx.HttpTransport()
+    transport = reqx.HTTPTransport()
 
     assert transport is not None
     assert transport.retries is None
+
+
+def test_retry_on_flaky_server(flaky_server):
+    transport = reqx.HTTPTransport(
+        retries=reqx.Retry(
+            total=5,
+            backoff_factor=0.1,
+            status_forcelist={503},
+        )
+    )
+    client = reqx.Client(transport=transport)
+    resp = client.get(f"{flaky_server}/flaky?request_id=test1")
+    assert resp.status_code == 200
+
+
+def test_exceeded_retries_on_flaky_server(flaky_server):
+    transport = reqx.HTTPTransport(
+        retries=reqx.Retry(
+            total=1,
+            backoff_factor=0.1,
+            status_forcelist={503},
+        )
+    )
+    client = reqx.Client(transport=transport)
+
+    with pytest.raises(reqx.MaxRetriesExceeded):
+        client.get(f"{flaky_server}/flaky?request_id=test1")

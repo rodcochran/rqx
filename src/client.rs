@@ -15,7 +15,7 @@ use super::request::{
     determine_redirect_method, 
     build_redirect_request
 };
-use super::transport::HttpTransport;
+use super::transport::HTTPTransport;
 
 
 const DEFAULT_TIMEOUT: u64 = 15;
@@ -26,7 +26,7 @@ const DEFAULT_MAX_REDIRECTS: u32 = 20;
 #[pyclass]
 pub struct PyClient {
     // http_client: Client,
-    transport: HttpTransport,
+    transport: HTTPTransport,
     timeout_secs: u64,
     follow_redirects: bool,
     max_redirects: u32
@@ -42,7 +42,7 @@ impl PyClient {
         follow_redirects: Option<bool>,
         max_redirects: Option<u32>,
         // retries: Option<PyRef<'_, PyRetry>>,
-        transport: Option<PyRef<'_, HttpTransport>>,
+        transport: Option<PyRef<'_, HTTPTransport>>,
     ) -> PyResult<Self> {
         let timeout_secs = timeout.unwrap_or(DEFAULT_TIMEOUT);
         let client_level_follow_redirects = follow_redirects.unwrap_or(DEFAULT_FOLLOW_REDIRECTS);
@@ -50,7 +50,7 @@ impl PyClient {
 
         let _transport = match transport {
             Some(t) => t.clone(),
-            None => HttpTransport::default(),
+            None => HTTPTransport::default(),
         };
 
         Ok(Self {

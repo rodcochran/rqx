@@ -12,14 +12,14 @@ use super::runtime::RUNTIME;
 
 #[pyclass(skip_from_py_object)]
 #[derive(Clone)]
-pub struct HttpTransport {
+pub struct HTTPTransport {
     http_client: Client,
     #[pyo3(get)]
     retries: Option<PyRetry>
 }
 
 #[pymethods]
-impl HttpTransport {
+impl HTTPTransport {
     #[new]
     #[pyo3(signature = (retries=None))]
     fn __new__(
@@ -46,7 +46,7 @@ impl HttpTransport {
     }
 }
 
-impl Default for HttpTransport {
+impl Default for HTTPTransport {
     fn default() -> Self {
         Self {
             http_client: Client::builder()
@@ -58,7 +58,7 @@ impl Default for HttpTransport {
     }
 }
 
-impl HttpTransport {
+impl HTTPTransport {
     pub fn handle_request(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
         if self.retries.is_some() {
             // Handle retries etc.
@@ -168,7 +168,7 @@ impl HttpTransport {
 /* 
 Accessors etc.
 */
-impl HttpTransport {
+impl HTTPTransport {
     pub fn client(&self) -> &Client {
         &self.http_client
     }

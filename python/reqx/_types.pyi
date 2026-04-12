@@ -32,7 +32,7 @@ class PyRetry:
         raise_on_redirect: bool | None = None,
     ) -> None: ...
 
-class HttpTransport:
+class HTTPTransport:
     def __init__(
         self,
         retries: PyRetry | None = None,
