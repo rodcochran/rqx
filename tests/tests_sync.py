@@ -604,3 +604,36 @@ def test_exceeded_retries_on_flaky_server(flaky_server):
 
     with pytest.raises(reqx.MaxRetriesExceeded):
         client.get(f"{flaky_server}/flaky?request_id=test1")
+
+
+def test_404_is_not_retried():
+    transport = reqx.HTTPTransport(
+        retries=reqx.Retry(
+            total=1,
+            backoff_factor=0.1,
+            status_forcelist={503},
+        )
+    )
+    client = reqx.Client(transport=transport)
+
+    resp = client.get(f"{HTTPBIN_HOST}/status/404")
+    assert resp.status_code == 404
+    assert "content-type" in resp.headers
+    with pytest.raises(reqx.ReqxError):
+        resp.json()
+
+
+def test_not_allowed_method_is_not_retried(flaky_server):
+    transport = reqx.HTTPTransport(
+        retries=reqx.Retry(
+            total=1,
+            backoff_factor=0.1,
+            status_forcelist={503},
+            allowed_methods={"POST"},
+        )
+    )
+    client = reqx.Client(transport=transport)
+    resp = client.get(f"{flaky_server}/flaky?request_id=test1")
+
+    assert resp.status_code == 503
+    assert "content-type" in resp.headers
