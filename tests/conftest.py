@@ -5,7 +5,6 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-PORT = 9999
 DEFAULT_ERRORS_BEFORE_SUCCESS = 3
 
 
@@ -46,9 +45,10 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
 @pytest.fixture(scope="session")
 def flaky_server():
     # start server in thread
-    server = HTTPServer(("localhost", PORT), FlakyServerHandler)
+    server = HTTPServer(("localhost", 0), FlakyServerHandler)
+    port = server.server_address[1]  # get the assigned port
     thread = threading.Thread(target=server.serve_forever)
     thread.daemon = True
     thread.start()
-    yield f"http://localhost:{PORT}"
+    yield f"http://localhost:{port}"
     server.shutdown()

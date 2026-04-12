@@ -22,7 +22,13 @@ pub struct PyResponse {
     pub url: String,
 
     #[pyo3(get)]
-    pub(crate) elapsed: f64
+    pub(crate) elapsed: f64,
+
+    #[pyo3(get)]
+    pub(crate) num_retries: i32,
+
+    #[pyo3(get)]
+    pub(crate) retry_history: Vec<(String, f64)>,
 }
 
 #[pymethods]
@@ -92,7 +98,9 @@ impl PyResponse {
                 headers: headers,
                 content: content,
                 url: url,
-                elapsed: 0.0
+                elapsed: 0.0,
+                num_retries: 0,
+                retry_history: Vec::new(),
             }
         )
 
@@ -128,7 +136,9 @@ impl PyResponse {
                 headers: headers,
                 content: content,
                 url: url,
-                elapsed: 0.0
+                elapsed: 0.0,
+                num_retries: 0,
+                retry_history: Vec::new(),
             }
         )
 

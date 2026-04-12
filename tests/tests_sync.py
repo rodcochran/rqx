@@ -603,7 +603,7 @@ def test_exceeded_retries_on_flaky_server(flaky_server):
     client = reqx.Client(transport=transport)
 
     with pytest.raises(reqx.MaxRetriesExceeded):
-        client.get(f"{flaky_server}/flaky?request_id=test1")
+        client.get(f"{flaky_server}/flaky?request_id=test2")
 
 
 def test_404_is_not_retried():
@@ -633,7 +633,7 @@ def test_not_allowed_method_is_not_retried(flaky_server):
         )
     )
     client = reqx.Client(transport=transport)
-    resp = client.get(f"{flaky_server}/flaky?request_id=test1")
+    resp = client.get(f"{flaky_server}/flaky?request_id=test3")
 
     assert resp.status_code == 503
     assert "content-type" in resp.headers

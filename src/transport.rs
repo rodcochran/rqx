@@ -1,7 +1,8 @@
 
+use core::num;
 use std::time::Duration;
 
-use reqwest::{Client, Request};
+use reqwest::{Client, Request, retry};
 use pyo3::prelude::{PyRef, PyResult, Python,  pyclass, pymethods};
 use tokio;
 
@@ -92,76 +93,99 @@ impl HTTPTransport {
     }
 
     fn send_with_retries(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
-        /*
-            1. Sends the request
-            2. Checks if the response should be retried (status in forcelist, method in allowed_methods)
-            3. If yes, sleeps (backoff) and retries
-            4. Tracks attempt count and history
-            5. Returns the final response or raises MaxRetriesExceeded 
-        */
-
-        // get reference to retry object
+        // Retry configuration
         let r = self.retries.as_ref().unwrap();
         let method = request.method().to_string();
-
-        // try_clone can return None - should make sure its handled.
-        let mut request_copy = request
-            .try_clone()
-            .ok_or_else(
-                || ReqxError::new_err("Streaming request bodies cannot be retried")
-            )?;
-
-        let mut current_response = self.send(py, request_copy)
-            .map_err(|e| {
-                ReqxError::new_err(format!("request failed: {e}"))
-            })?;
-        // let mut retry_history = ();
-
-        if !r.allowed_methods.contains(&method){
-            return Ok(current_response);
-        }
-
+        let is_retryable_method = r.allowed_methods.contains(&method);
+        let backoff_max: f32 = r.backoff_max.into();
         let mut backoff_time: f32;
 
-        for attempt in 0..r.total {
-            if !r.status_forcelist.contains(&current_response.status_code) {
-                return Ok(current_response);
+        // Stateful components to track
+        let mut num_retries: i32 = 0;
+        let mut retry_history: Vec<(String, f64)> = Vec::new();
+        let mut current_response: Option<PyResponse> = None;
+        let mut request_copy: Request;
+
+        for attempt in 0..=r.total {
+            if attempt > 0 {
+                // increment retries
+                num_retries = num_retries + 1;
+
+                // Calculate backoff time
+                backoff_time = f32::min(r.backoff_factor * 2_f32.powi(attempt), backoff_max);
+
+                // Run tokio sleep in Rust's runtime
+                py.detach(|| {
+                    RUNTIME
+                        .get()
+                        .expect("runtime not initialized")
+                        .block_on(async {
+                            tokio::time::sleep(Duration::from_secs_f32(backoff_time)).await
+                        })
+                });
             }
-
-            // now retry is confirmed to start.
-            // Calculate backoff time
-            backoff_time = f32::min(r.backoff_factor * 2_f32.powi(attempt), r.backoff_max.into());
-
-            // Run tokio sleep in Rust's runtime
-            py.detach(|| {
-                RUNTIME
-                    .get()
-                    .expect("runtime not initialized")
-                    .block_on(async {
-                        tokio::time::sleep(Duration::from_secs_f32(backoff_time)).await
-                    })
-            });
 
             request_copy = request
                 .try_clone()
                 .ok_or_else(
                     || ReqxError::new_err("Streaming request bodies cannot be retried")
                 )?;
-            current_response = self.send(py, request_copy)
-                .map_err(|e| {
-                    ReqxError::new_err(format!("request failed: {e}"))
-                })?;
+            
+            let attempt_start = std::time::Instant::now();
+            match self.send(py, request_copy) {
+                Ok(resp) => {
+                    if !is_retryable_method { 
+                        return Ok(resp);
+                    }
+
+                    let attempt_elapsed = attempt_start.elapsed().as_millis() as f64;
+                    if attempt > 0 {
+                        retry_history.push((resp.status_code.to_string(), attempt_elapsed));
+                    }
+                    current_response = Some(resp);
+
+                },
+                Err(e) => {
+                    let attempt_elapsed = attempt_start.elapsed().as_millis() as f64;
+                    current_response = None;
+                    // record in retry_history
+                    if attempt > 0 {
+                        retry_history.push((format!("{}", e), attempt_elapsed));
+                    }
+                }
+            }
+
+            if let Some(cr) = current_response.as_ref() {
+                if !r.status_forcelist.contains(&cr.status_code) {
+                    // need to take ownership here to set fields and return
+                    let mut resp = current_response.unwrap();
+                    resp.num_retries = num_retries;
+                    resp.retry_history = retry_history;
+                    return Ok(resp);
+                }
+            }
+            
         }
 
-        if r.status_forcelist.contains(&current_response.status_code) {
-            return Err(
-                MaxRetriesExceeded::new_err(format!("max retries exeeded: {}", r.total))
-            )
+        match current_response {
+            Some(mut cr) => {
+                if r.status_forcelist.contains(&cr.status_code) {
+                    return Err(
+                        MaxRetriesExceeded::new_err(format!("max retries exeeded: {}", r.total))
+                    )
+                }
+                cr.num_retries = num_retries;
+                cr.retry_history = retry_history;
+                return Ok(cr);
+            }
+            None => {
+                return Err(
+                    MaxRetriesExceeded::new_err(format!("max retries exeeded: {}", r.total))
+                )
+            }
         }
-        return Ok(current_response);
-
     }
-    
+
 }
 
 
