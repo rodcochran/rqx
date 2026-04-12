@@ -1,5 +1,6 @@
 # import from the compiled Rust extension module
 from ._reqx import (
+    AsyncHTTPTransport,
     ConnectError,
     ConnectTimeout,
     HTTPStatusError,
@@ -28,6 +29,7 @@ Retry = PyRetry
 
 __all__ = [
     "AsyncClient",
+    "AsyncHTTPTransport",
     "Client",
     "ConnectError",
     "ConnectTimeout",

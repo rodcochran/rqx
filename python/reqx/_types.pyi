@@ -37,3 +37,9 @@ class HTTPTransport:
         self,
         retries: PyRetry | None = None,
     ): ...
+
+class AsyncHTTPTransport:
+    def __init__(
+        self,
+        retries: PyRetry | None = None,
+    ): ...

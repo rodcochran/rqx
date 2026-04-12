@@ -15,7 +15,7 @@ use super::request::{
     determine_redirect_method, 
     build_redirect_request
 };
-use super::transport::HTTPTransport;
+use super::transport::{HTTPTransport, AsyncHTTPTransport};
 
 
 const DEFAULT_TIMEOUT: u64 = 15;
@@ -342,7 +342,8 @@ impl PyClient {
 
 #[pyclass]
 pub struct PyAsyncClient {
-    http_client: Client,
+    // http_client: Client,
+    transport: AsyncHTTPTransport,
     timeout_secs: u64,
     follow_redirects: bool,
     max_redirects: u32
@@ -351,27 +352,23 @@ pub struct PyAsyncClient {
 #[pymethods]
 impl PyAsyncClient {
     #[new]
-    #[pyo3(signature = (timeout=None, follow_redirects=None, max_redirects=None))]
+    #[pyo3(signature = (timeout=None, follow_redirects=None, max_redirects=None, transport=None))]
     fn __new__(
         timeout: Option<u64>,
         follow_redirects: Option<bool>,
         max_redirects: Option<u32>,
+        transport: Option<PyRef<'_, AsyncHTTPTransport>>,
     ) -> PyResult<Self> {
         let timeout_secs = timeout.unwrap_or(DEFAULT_TIMEOUT);
         let client_level_follow_redirects = follow_redirects.unwrap_or(DEFAULT_FOLLOW_REDIRECTS);
         let client_level_max_redirects = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
 
-        let http_client = Client::builder()
-            .timeout(Duration::from_secs(timeout_secs))
-            //.connect_timeout(Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::none())
-            // .gzip(true)
-            // .brotli(true)
-            .pool_max_idle_per_host(20)
-            .build()
-            .expect("Failed to build HTTP client");
+        let _transport = match transport {
+            Some(t) => t.clone(),
+            None => AsyncHTTPTransport::default(),
+        };
         Ok(Self {
-            http_client: http_client,
+            transport: _transport,
             timeout_secs: timeout_secs,
             follow_redirects: client_level_follow_redirects,
             max_redirects: client_level_max_redirects,
@@ -417,7 +414,7 @@ impl PyAsyncClient {
         let start_time = std::time::Instant::now();
         
         let request = build_client_request(
-            &self.http_client,
+            &self.transport.client(),
             py,
             method,
             url,
@@ -437,12 +434,12 @@ impl PyAsyncClient {
             }
         };
 
-        let client = self.http_client.clone();
+        let transport = self.transport.clone();
         let max_redirects = self.max_redirects.clone();
         let fut: Pin<Box<dyn Future<Output = PyResult<PyResponse>> + Send>> = if _follow_redirects {
-            Box::pin(Self::send_handling_redirects(client, request, max_redirects))
+            Box::pin(Self::send_handling_redirects(transport, request, max_redirects))
         } else {
-            Box::pin(Self::send_single_request(client, request))
+            Box::pin(AsyncHTTPTransport::handle_request(transport, request))
         };
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -584,35 +581,22 @@ impl PyAsyncClient {
 }
 
 impl PyAsyncClient {
-    async fn send_single_request(client: Client, request: Request) -> PyResult<PyResponse> {
-        let response = client
-            .execute(request)
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    TimeoutException::new_err(format!("request timed out: {e}"))
-                } else {
-                    ReqxError::new_err(format!("request failed: {e}"))
-                }
-            }
-        )?;
-        let resp_future = PyResponse::from_response_async(response);
-        resp_future.await
-    }
 
-    async fn send_handling_redirects(client: Client, request: Request, max_redirects: u32) -> PyResult<PyResponse> {
+    async fn send_handling_redirects(transport: AsyncHTTPTransport, request: Request, max_redirects: u32) -> PyResult<PyResponse> {
         
         let original_method = request.method().clone();
         let original_url = request.url().clone();
         let original_headers = request.headers().clone();
-        let mut current_response = Self::send_single_request(client.clone(), request).await.unwrap();
+        let mut current_response = AsyncHTTPTransport::
+            handle_request(transport.clone(), request)
+                .await?;
 
         for _ in 1..max_redirects {
             if !(300..400).contains(&current_response.status_code) {
                 return Ok(current_response);
             }
             current_response = Self::handle_redirect(
-                &client,
+                &transport,
                 &original_url,
                 &original_method, 
                 &original_headers, 
@@ -628,7 +612,7 @@ impl PyAsyncClient {
     }
 
     async fn handle_redirect(
-        client: &Client,
+        transport: &AsyncHTTPTransport,
         original_url: &Url, 
         original_method: &Method,
         original_headers: &HeaderMap,
@@ -642,13 +626,13 @@ impl PyAsyncClient {
         
         let new_method = determine_redirect_method(&original_method, &resp);
         let current_request = build_redirect_request(
-            &client,
+            &transport.client(),
             new_method,
             new_url,
             &original_headers
         );
-        let current_response = Self::send_single_request(
-            client.clone(),
+        let current_response = AsyncHTTPTransport::handle_request(
+            transport.clone(),
             current_request
         ).await;
         return current_response;

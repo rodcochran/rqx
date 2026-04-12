@@ -359,8 +359,106 @@ async def test_nested_json():
     print("")
     print(f"Nested Json (body args):\n{body}")
 
+
 @pytest.mark.asyncio
 async def test_get_with_timeout():
     client = reqx.AsyncClient()
     with pytest.raises(reqx.TimeoutException):
         await client.get(f"{HTTPBIN_HOST}/delay/5", timeout=1)
+
+
+# ================================================================
+# Phase 3 tests
+# ================================================================
+
+
+@pytest.mark.asyncio
+async def test_transport_init():
+
+    transport = reqx.AsyncHTTPTransport()
+
+    assert transport is not None
+    assert transport.retries is None
+
+
+@pytest.mark.asyncio
+async def test_retry_on_flaky_server(flaky_server):
+    transport = reqx.AsyncHTTPTransport(
+        retries=reqx.Retry(
+            total=5,
+            backoff_factor=0.1,
+            status_forcelist={503},
+        )
+    )
+    client = reqx.AsyncClient(transport=transport)
+    resp = await client.get(f"{flaky_server}/flaky?request_id=test1")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_exceeded_retries_on_flaky_server(flaky_server):
+    transport = reqx.AsyncHTTPTransport(
+        retries=reqx.Retry(
+            total=1,
+            backoff_factor=0.1,
+            status_forcelist={503},
+        )
+    )
+    client = reqx.AsyncClient(transport=transport)
+
+    with pytest.raises(reqx.MaxRetriesExceeded):
+        await client.get(f"{flaky_server}/flaky?request_id=test2")
+
+
+@pytest.mark.asyncio
+async def test_404_is_not_retried():
+    transport = reqx.AsyncHTTPTransport(
+        retries=reqx.Retry(
+            total=1,
+            backoff_factor=0.1,
+            status_forcelist={503},
+        )
+    )
+    client = reqx.AsyncClient(transport=transport)
+
+    resp = await client.get(f"{HTTPBIN_HOST}/status/404")
+    assert resp.status_code == 404
+    assert "content-type" in resp.headers
+    with pytest.raises(reqx.ReqxError):
+        resp.json()
+
+
+@pytest.mark.asyncio
+async def test_not_allowed_method_is_not_retried(flaky_server):
+    transport = reqx.AsyncHTTPTransport(
+        retries=reqx.Retry(
+            total=1,
+            backoff_factor=0.1,
+            status_forcelist={503},
+            allowed_methods={"POST"},
+        )
+    )
+    client = reqx.AsyncClient(transport=transport)
+    resp = await client.get(f"{flaky_server}/flaky?request_id=test3")
+
+    assert resp.status_code == 503
+    assert "content-type" in resp.headers
+
+
+@pytest.mark.asyncio
+async def test_retry_history_populated(flaky_server):
+    transport = reqx.AsyncHTTPTransport(
+        retries=reqx.Retry(
+            total=5,
+            backoff_factor=0.1,
+            status_forcelist={503},
+        )
+    )
+    client = reqx.AsyncClient(transport=transport)
+    resp = await client.get(f"{flaky_server}/flaky?request_id=test4")
+    assert resp.status_code == 200
+    assert resp.num_retries == 2
+    assert len(resp.retry_history) == 2
+    assert resp.retry_history[0][0] == "503"  # status code string
+    print("")
+    print(f"Retry History:\n{resp.retry_history}")

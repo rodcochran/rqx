@@ -654,4 +654,4 @@ def test_retry_history_populated(flaky_server):
     assert len(resp.retry_history) == 2
     assert resp.retry_history[0][0] == "503"  # status code string
     print("")
-    print(f"Retry History:\{resp.retry_history}")
+    print(f"Retry History:\n{resp.retry_history}")
