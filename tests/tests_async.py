@@ -462,3 +462,38 @@ async def test_retry_history_populated(flaky_server):
     assert resp.retry_history[0][0] == "503"  # status code string
     print("")
     print(f"Retry History:\n{resp.retry_history}")
+
+
+@pytest.mark.asyncio
+async def test_total_timeout_exceeded(flaky_server):
+    transport = reqx.AsyncHTTPTransport(
+        retries=reqx.Retry(
+            total=5,
+            backoff_factor=2.0,
+            status_forcelist={503},
+            total_timeout=1.0,
+        )
+    )
+    client = reqx.AsyncClient(transport=transport)
+    with pytest.raises(reqx.MaxRetriesExceeded):
+        await client.get(f"{flaky_server}/flaky?request_id=asynctest5")
+
+
+@pytest.mark.asyncio
+async def test_total_timeout_not_exceeded(flaky_server):
+    transport = reqx.AsyncHTTPTransport(
+        retries=reqx.Retry(
+            total=5,
+            backoff_factor=0.1,
+            status_forcelist={503},
+            total_timeout=30.0,
+        )
+    )
+    client = reqx.AsyncClient(transport=transport)
+    resp = await client.get(f"{flaky_server}/flaky?request_id=asynctest6")
+    assert resp.status_code == 200
+    assert resp.num_retries == 2
+    assert len(resp.retry_history) == 2
+    assert resp.retry_history[0][0] == "503"  # status code string
+    print("")
+    print(f"Retry History:\n{resp.retry_history}")

@@ -1,4 +1,5 @@
-use std::time::Duration;
+use std::f64::INFINITY;
+use std::time::{Duration, Instant};
 use reqwest::{Client, Request};
 use pyo3::prelude::{PyRef, PyResult, Python,  pyclass, pymethods};
 use tokio;
@@ -96,6 +97,7 @@ impl HTTPTransport {
         let is_retryable_method = r.allowed_methods.contains(&method);
         let backoff_max: f32 = r.backoff_max.into();
         let respect_retry = r.respect_retry_after_header;
+        let total_timeout: f64 = r.total_timeout.unwrap_or(INFINITY);
 
         // Stateful components to track
         let mut num_retries: i32 = 0;
@@ -103,8 +105,21 @@ impl HTTPTransport {
         let mut current_response: Option<PyResponse> = None;
         let mut request_copy: Request;
         
+        // Timer for total time in retry
+        let start_time = Instant::now();
 
         for attempt in 0..=r.total {
+            if start_time.elapsed().as_secs_f64() > total_timeout {
+                return Err(
+                    MaxRetriesExceeded::new_err(
+                        format!(
+                            "total timeout of {}s exceeded after {} retries", 
+                            total_timeout,
+                            num_retries,
+                        )
+                    )
+                )
+            }
             if attempt > 0 {
                 // increment retries
                 num_retries = num_retries + 1;
@@ -287,6 +302,7 @@ impl AsyncHTTPTransport {
         let is_retryable_method = r.allowed_methods.contains(&method);
         let backoff_max: f32 = r.backoff_max.into();
         let respect_retry = r.respect_retry_after_header;
+        let total_timeout: f64 = r.total_timeout.unwrap_or(INFINITY);
 
         // Stateful components to track
         let mut num_retries: i32 = 0;
@@ -294,7 +310,22 @@ impl AsyncHTTPTransport {
         let mut current_response: Option<PyResponse> = None;
         let mut request_copy: Request;
 
+        // Timer for total time in retry
+        let start_time = Instant::now();
+
         for attempt in 0..=r.total {
+            if start_time.elapsed().as_secs_f64() > total_timeout {
+                return Err(
+                    MaxRetriesExceeded::new_err(
+                        format!(
+                            "total timeout of {}s exceeded after {} retries", 
+                            total_timeout,
+                            num_retries,
+                        )
+                    )
+                )
+            }
+
             if attempt > 0 {
                 // increment retries
                 num_retries = num_retries + 1;

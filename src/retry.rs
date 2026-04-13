@@ -17,6 +17,7 @@ const DEFAULT_ALLOWED_METHODS: &[&str] = &[
 const DEFAULT_RESPECT_RETRY_AFTER_HEADER: bool = true;
 const DEFAULT_RAISE_ON_STATUS: bool = true;
 const DEFAULT_RAISE_ON_REDIRECT: bool = true;
+const DEFAULT_TOTAL_TIMEOUT: Option<f64> = None;
 
 
 #[pyclass(from_py_object)]
@@ -69,6 +70,10 @@ pub struct PyRetry {
     // raise TooManyRedirects when redirect loop detected
     #[pyo3(get)]
     pub raise_on_redirect: bool,
+
+    // raise MaxRetriesExceeded when total time in retry exceeds max
+    #[pyo3(get)]
+    pub total_timeout: Option<f64>,
 }
 
 #[pymethods]
@@ -86,7 +91,8 @@ impl PyRetry {
         allowed_methods=None,
         respect_retry_after_header=None,
         raise_on_status=None,
-        raise_on_redirect=None
+        raise_on_redirect=None,
+        total_timeout=None,
     ))]
     fn __new__(
         total: Option<i32>,
@@ -100,7 +106,8 @@ impl PyRetry {
         allowed_methods: Option<HashSet<String>>,
         respect_retry_after_header: Option<bool>,
         raise_on_status: Option<bool>,
-        raise_on_redirect: Option<bool>
+        raise_on_redirect: Option<bool>,
+        total_timeout: Option<f64>,
     ) -> PyResult<Self> {
 
         let default_total = total.unwrap_or(DEFAULT_TOTAL_RETRIES);
@@ -130,7 +137,8 @@ impl PyRetry {
                     DEFAULT_RESPECT_RETRY_AFTER_HEADER
                 ),
                 raise_on_status: raise_on_status.unwrap_or(DEFAULT_RAISE_ON_STATUS),
-                raise_on_redirect: raise_on_redirect.unwrap_or(DEFAULT_RAISE_ON_REDIRECT)
+                raise_on_redirect: raise_on_redirect.unwrap_or(DEFAULT_RAISE_ON_REDIRECT),
+                total_timeout: total_timeout
             }
         )
 
@@ -160,6 +168,7 @@ impl PyRetry {
             respect_retry_after_header: DEFAULT_RESPECT_RETRY_AFTER_HEADER,
             raise_on_status: DEFAULT_RAISE_ON_STATUS,
             raise_on_redirect: DEFAULT_RAISE_ON_REDIRECT,
+            total_timeout: DEFAULT_TOTAL_TIMEOUT,
         }
     }
 }
