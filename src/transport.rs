@@ -95,22 +95,31 @@ impl HTTPTransport {
         let method = request.method().to_string();
         let is_retryable_method = r.allowed_methods.contains(&method);
         let backoff_max: f32 = r.backoff_max.into();
-        let mut backoff_time: f32;
+        let respect_retry = r.respect_retry_after_header;
 
         // Stateful components to track
         let mut num_retries: i32 = 0;
         let mut retry_history: Vec<(String, f64)> = Vec::new();
         let mut current_response: Option<PyResponse> = None;
         let mut request_copy: Request;
+        
 
         for attempt in 0..=r.total {
             if attempt > 0 {
                 // increment retries
                 num_retries = num_retries + 1;
 
-                // Calculate backoff time
-                backoff_time = f32::min(r.backoff_factor * 2_f32.powi(attempt), backoff_max);
-
+                let retry_after: f32 = if respect_retry {
+                    current_response.as_ref()
+                        .and_then(|r| r.headers.get("retry-after"))
+                        .and_then(|v| v.parse::<f32>().ok())
+                        .unwrap_or(0.0)
+                } else {
+                    0.0
+                };
+              
+                let calculated_backoff = r.backoff_factor * 2_f32.powi(attempt);
+                let backoff_time = f32::min(f32::max(calculated_backoff, retry_after), backoff_max);
                 // Run tokio sleep in Rust's runtime
                 py.detach(|| {
                     RUNTIME
@@ -120,8 +129,7 @@ impl HTTPTransport {
                             tokio::time::sleep(Duration::from_secs_f32(backoff_time)).await
                         })
                 });
-            }
-
+            }            
             request_copy = request
                 .try_clone()
                 .ok_or_else(
@@ -161,7 +169,6 @@ impl HTTPTransport {
                     return Ok(resp);
                 }
             }
-            
         }
 
         match current_response {
@@ -279,7 +286,7 @@ impl AsyncHTTPTransport {
         let method = request.method().to_string();
         let is_retryable_method = r.allowed_methods.contains(&method);
         let backoff_max: f32 = r.backoff_max.into();
-        let mut backoff_time: f32;
+        let respect_retry = r.respect_retry_after_header;
 
         // Stateful components to track
         let mut num_retries: i32 = 0;
@@ -292,8 +299,17 @@ impl AsyncHTTPTransport {
                 // increment retries
                 num_retries = num_retries + 1;
 
-                // Calculate backoff time
-                backoff_time = f32::min(r.backoff_factor * 2_f32.powi(attempt), backoff_max);
+                let retry_after: f32 = if respect_retry {
+                    current_response.as_ref()
+                        .and_then(|r| r.headers.get("retry-after"))
+                        .and_then(|v| v.parse::<f32>().ok())
+                        .unwrap_or(0.0)
+                } else {
+                    0.0
+                };
+              
+                let calculated_backoff = r.backoff_factor * 2_f32.powi(attempt);
+                let backoff_time = f32::min(f32::max(calculated_backoff, retry_after), backoff_max);
 
                 // Run tokio sleep in Rust's runtime
                 tokio::time::sleep(Duration::from_secs_f32(backoff_time)).await
@@ -338,6 +354,7 @@ impl AsyncHTTPTransport {
                     return Ok(resp);
                 }
             }
+            
             
         }
 

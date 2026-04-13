@@ -391,7 +391,7 @@ async def test_retry_on_flaky_server(flaky_server):
         )
     )
     client = reqx.AsyncClient(transport=transport)
-    resp = await client.get(f"{flaky_server}/flaky?request_id=test1")
+    resp = await client.get(f"{flaky_server}/flaky?request_id=asynctest1")
     assert resp.status_code == 200
 
 
@@ -407,7 +407,7 @@ async def test_exceeded_retries_on_flaky_server(flaky_server):
     client = reqx.AsyncClient(transport=transport)
 
     with pytest.raises(reqx.MaxRetriesExceeded):
-        await client.get(f"{flaky_server}/flaky?request_id=test2")
+        await client.get(f"{flaky_server}/flaky?request_id=asynctest2")
 
 
 @pytest.mark.asyncio
@@ -439,7 +439,7 @@ async def test_not_allowed_method_is_not_retried(flaky_server):
         )
     )
     client = reqx.AsyncClient(transport=transport)
-    resp = await client.get(f"{flaky_server}/flaky?request_id=test3")
+    resp = await client.get(f"{flaky_server}/flaky?request_id=asynctest3")
 
     assert resp.status_code == 503
     assert "content-type" in resp.headers
@@ -455,7 +455,7 @@ async def test_retry_history_populated(flaky_server):
         )
     )
     client = reqx.AsyncClient(transport=transport)
-    resp = await client.get(f"{flaky_server}/flaky?request_id=test4")
+    resp = await client.get(f"{flaky_server}/flaky?request_id=asynctest4")
     assert resp.status_code == 200
     assert resp.num_retries == 2
     assert len(resp.retry_history) == 2
