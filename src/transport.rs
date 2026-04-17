@@ -514,7 +514,8 @@ fn build_http_client(
 ) -> PyResult<Client> {
     let mut http_client_builder =  Client::builder()
         // Explicitly add no redirects at the transport level, as we let the PyClient take care of it
-        .redirect(reqwest::redirect::Policy::none());
+        .redirect(reqwest::redirect::Policy::none())
+        .cookie_store(true);
 
     if let Some(max_keepalive) = max_keepalive_connections {
         http_client_builder = http_client_builder.pool_max_idle_per_host(max_keepalive as usize);

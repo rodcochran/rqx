@@ -33,6 +33,9 @@ pub struct PyResponse {
     #[pyo3(get)]
     pub(crate) http_version: String,
 
+    #[pyo3(get)]
+    pub(crate) cookies: HashMap<String, String>
+
 }
 
 #[pymethods]
@@ -83,6 +86,12 @@ impl PyResponse {
         
         let url = response.url().as_str().to_owned();
         let http_version  = format!("{:?}", response.version());
+        let cookies: HashMap<String, String> = response.cookies()
+            .map(|c| (
+                c.name().to_string(), 
+                c.value().to_string())
+            )
+            .collect();
 
         let content = py
             .detach(|| {
@@ -107,6 +116,7 @@ impl PyResponse {
                 num_retries: 0,
                 retry_history: Vec::new(),
                 http_version: http_version,
+                cookies: cookies
             }
         )
 
@@ -128,6 +138,12 @@ impl PyResponse {
         
         let url = response.url().as_str().to_owned();
         let http_version  = format!("{:?}", response.version());
+        let cookies: HashMap<String, String> = response.cookies()
+            .map(|c| (
+                c.name().to_string(), 
+                c.value().to_string())
+            )
+            .collect();
 
         let content = response
             .bytes()
@@ -147,6 +163,7 @@ impl PyResponse {
                 num_retries: 0,
                 retry_history: Vec::new(),
                 http_version: http_version,
+                cookies: cookies
             }
         )
 

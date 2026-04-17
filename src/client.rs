@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::time::Duration;
-use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use tokio::sync::{Mutex as TokioMutex};
 use http::{Method, HeaderMap};
 use url::Url;
-use reqwest::{Client, Request};
+use reqwest::{Request};
 use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python,  pyclass, pymethods};
 use pyo3::Bound;
 
@@ -25,11 +25,11 @@ const DEFAULT_MAX_REDIRECTS: u32 = 20;
 
 #[pyclass]
 pub struct PyClient {
-    // http_client: Client,
     transport: HTTPTransport,
     timeout_secs: u64,
     follow_redirects: bool,
-    max_redirects: u32
+    max_redirects: u32,
+    cookies: Mutex<HashMap<String, String>>,
 }
 
 
@@ -58,6 +58,7 @@ impl PyClient {
             timeout_secs: timeout_secs,
             follow_redirects: client_level_follow_redirects,
             max_redirects: client_level_max_redirects,
+            cookies: Mutex::new(HashMap::<String, String>::new())
         })
     }
 
@@ -145,6 +146,9 @@ impl PyClient {
         } else {
             self.transport.handle_request(py, request)?
         };
+
+        // collecting cookies here - though we should also accumulate them on redirects...
+        self.update_cookies(&resp);
 
         let end_time = std::time::Instant::now();
         let total =  end_time - start_time;
@@ -337,6 +341,11 @@ impl PyClient {
         return current_response;
     }
 
+    fn update_cookies(&self, resp: &PyResponse) {
+        let mut cookies = self.cookies.lock().unwrap();
+        cookies.extend(resp.cookies.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+
 }
 
 
@@ -346,7 +355,8 @@ pub struct PyAsyncClient {
     transport: AsyncHTTPTransport,
     timeout_secs: u64,
     follow_redirects: bool,
-    max_redirects: u32
+    max_redirects: u32,
+    cookies: Arc<TokioMutex<HashMap<String, String>>>,
 }
 
 #[pymethods]
@@ -372,6 +382,7 @@ impl PyAsyncClient {
             timeout_secs: timeout_secs,
             follow_redirects: client_level_follow_redirects,
             max_redirects: client_level_max_redirects,
+            cookies: Arc::new(TokioMutex::new(HashMap::<String, String>::new()))
         })
     }
 
@@ -435,15 +446,18 @@ impl PyAsyncClient {
         };
 
         let transport = self.transport.clone();
-        let max_redirects = self.max_redirects.clone();
-        let fut: Pin<Box<dyn Future<Output = PyResult<PyResponse>> + Send>> = if _follow_redirects {
-            Box::pin(Self::send_handling_redirects(transport, request, max_redirects))
-        } else {
-            Box::pin(AsyncHTTPTransport::handle_request(transport, request))
-        };
+        let max_redirects = self.max_redirects;
 
+        let cookies = Arc::clone(&self.cookies);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let mut resp = fut.await?;
+            let mut resp = if _follow_redirects {
+                Self::send_handling_redirects(transport, request, max_redirects).await?
+            } else {
+                AsyncHTTPTransport::handle_request(transport, request).await?
+            };
+            cookies.lock().await.extend(
+                resp.cookies.iter().map(|(k, v)| (k.clone(), v.clone()))
+            );
             let end_time = std::time::Instant::now();
             let total =  end_time - start_time;
             resp.elapsed = total.as_secs_f64();
@@ -637,4 +651,5 @@ impl PyAsyncClient {
         ).await;
         return current_response;
     }
+
 }
