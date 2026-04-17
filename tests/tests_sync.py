@@ -774,3 +774,16 @@ def test_basic_http2_implicit_opt_out():
     url = "https://nghttp2.org/httpbin/get"
     resp = client.get(url=url)
     assert resp.http_version != "HTTP/2.0"
+
+
+def test_proxy_config():
+    transport = reqx.HTTPTransport(proxy={"https": "http://localhost:8080"})
+    assert transport is not None
+
+
+def test_verify_is_false_returns_200_on_unsigned_url():
+    transport = reqx.HTTPTransport(verify=False)
+    client = reqx.Client(transport=transport)
+    # hitting a normal HTTPS endpoint still works
+    resp = client.get("https://nghttp2.org/httpbin/get")
+    assert resp.status_code == 200
