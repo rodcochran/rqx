@@ -83,6 +83,7 @@ impl Default for HTTPTransport {
         Self {
             http_client: Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
+                .cookie_store(true)
                 .build()
                 .expect("Failed to build HTTP client"),
             max_connection_semaphore: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
@@ -331,6 +332,7 @@ impl Default for AsyncHTTPTransport {
         Self {
             http_client: Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
+                .cookie_store(true)
                 .build()
                 .expect("Failed to build Async HTTP client"),
             max_connection_semaphore: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),

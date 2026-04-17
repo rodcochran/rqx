@@ -787,3 +787,21 @@ def test_verify_is_false_returns_200_on_unsigned_url():
     # hitting a normal HTTPS endpoint still works
     resp = client.get("https://nghttp2.org/httpbin/get")
     assert resp.status_code == 200
+
+
+def test_cookies_basic():
+    client = reqx.Client()
+
+    # First request sets the cookie
+    resp1 = client.get(f"{HTTPBIN_HOST}/cookies/set/testcookie/hello")
+    assert "testcookie" in resp1.cookies
+    assert resp1.cookies["testcookie"] == "hello"
+
+    # Client should have the cookie stored
+    assert "testcookie" in client.cookies
+    assert client.cookies["testcookie"] == "hello"
+
+    # Second request should send the cookie back
+    resp2 = client.get(f"{HTTPBIN_HOST}/cookies")
+    body = resp2.json()
+    assert body["cookies"]["testcookie"] == "hello"

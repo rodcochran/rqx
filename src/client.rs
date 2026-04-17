@@ -32,7 +32,6 @@ pub struct PyClient {
     cookies: Mutex<HashMap<String, String>>,
 }
 
-
 #[pymethods]
 impl PyClient {
     #[new]
@@ -276,6 +275,10 @@ impl PyClient {
         _traceback: Option<&Bound<'_, PyAny>>,
     ) {
         // No-op exit since Reqwest client manages an Arc internally.
+    }
+    #[getter]
+    fn cookies(&self) -> HashMap<String, String> {
+        self.cookies.lock().unwrap().clone()
     }
 }
 
@@ -591,6 +594,10 @@ impl PyAsyncClient {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             Ok(false)
         })
+    }
+    #[getter]
+    fn cookies(&self) -> HashMap<String, String> {
+        self.cookies.blocking_lock().clone()
     }
 }
 
