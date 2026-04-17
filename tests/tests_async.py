@@ -538,3 +538,30 @@ async def test_max_connections():
             assert resp.status_code == 200
             assert "content-type" in resp.headers
             assert resp.json() is not None
+
+
+@pytest.mark.asyncio
+async def test_basic_http2():
+    transport = reqx.AsyncHTTPTransport(http2=True)
+    client = reqx.AsyncClient(transport=transport)
+    url = "https://nghttp2.org/httpbin/get"
+    resp = await client.get(url=url)
+    assert resp.http_version == "HTTP/2.0"
+
+
+@pytest.mark.asyncio
+async def test_basic_http2_explicit_opt_out():
+    transport = reqx.AsyncHTTPTransport(http2=False)
+    client = reqx.AsyncClient(transport=transport)
+    url = "https://nghttp2.org/httpbin/get"
+    resp = await client.get(url=url)
+    assert resp.http_version != "HTTP/2.0"
+
+
+@pytest.mark.asyncio
+async def test_basic_http2_implicit_opt_out():
+    transport = reqx.AsyncHTTPTransport()
+    client = reqx.AsyncClient(transport=transport)
+    url = "https://nghttp2.org/httpbin/get"
+    resp = await client.get(url=url)
+    assert resp.http_version != "HTTP/2.0"

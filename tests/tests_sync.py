@@ -750,3 +750,27 @@ def test_max_connections_with_freed_gil():
         f"Duration: {duration}s\n"
         f"All Serial: {all_serial_time}s"
     )
+
+
+def test_basic_http2():
+    transport = reqx.HTTPTransport(http2=True)
+    client = reqx.Client(transport=transport)
+    url = "https://nghttp2.org/httpbin/get"
+    resp = client.get(url=url)
+    assert resp.http_version == "HTTP/2.0"
+
+
+def test_basic_http2_explicit_opt_out():
+    transport = reqx.HTTPTransport(http2=False)
+    client = reqx.Client(transport=transport)
+    url = "https://nghttp2.org/httpbin/get"
+    resp = client.get(url=url)
+    assert resp.http_version != "HTTP/2.0"
+
+
+def test_basic_http2_implicit_opt_out():
+    transport = reqx.HTTPTransport()
+    client = reqx.Client(transport=transport)
+    url = "https://nghttp2.org/httpbin/get"
+    resp = client.get(url=url)
+    assert resp.http_version != "HTTP/2.0"

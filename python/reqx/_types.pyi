@@ -23,6 +23,7 @@ class HTTPTransport:
         max_connections: int | None = None,
         max_keepalive_connections: int | None = None,
         keepalive_expiry: float | None = None,
+        http2: bool | None = None,
     ): ...
 
 class AsyncHTTPTransport:
@@ -32,6 +33,7 @@ class AsyncHTTPTransport:
         max_connections: int | None = None,
         max_keepalive_connections: int | None = None,
         keepalive_expiry: float | None = None,
+        http2: bool | None = None,
     ): ...
 
 class PyClient:

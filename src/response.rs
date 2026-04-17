@@ -29,6 +29,10 @@ pub struct PyResponse {
 
     #[pyo3(get)]
     pub(crate) retry_history: Vec<(String, f64)>,
+
+    #[pyo3(get)]
+    pub(crate) http_version: String,
+
 }
 
 #[pymethods]
@@ -78,6 +82,7 @@ impl PyResponse {
             .collect::<HashMap<_, _>>();
         
         let url = response.url().as_str().to_owned();
+        let http_version  = format!("{:?}", response.version());
 
         let content = py
             .detach(|| {
@@ -101,6 +106,7 @@ impl PyResponse {
                 elapsed: 0.0,
                 num_retries: 0,
                 retry_history: Vec::new(),
+                http_version: http_version,
             }
         )
 
@@ -121,6 +127,7 @@ impl PyResponse {
             .collect::<HashMap<_, _>>();
         
         let url = response.url().as_str().to_owned();
+        let http_version  = format!("{:?}", response.version());
 
         let content = response
             .bytes()
@@ -139,6 +146,7 @@ impl PyResponse {
                 elapsed: 0.0,
                 num_retries: 0,
                 retry_history: Vec::new(),
+                http_version: http_version,
             }
         )
 

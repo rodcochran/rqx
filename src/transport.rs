@@ -25,12 +25,19 @@ pub struct HTTPTransport {
 #[pymethods]
 impl HTTPTransport {
     #[new]
-    #[pyo3(signature = (retries=None, max_connections=None, max_keepalive_connections=None, keepalive_expiry=None))]
+    #[pyo3(signature = (
+        retries=None, 
+        max_connections=None, 
+        max_keepalive_connections=None, 
+        keepalive_expiry=None, 
+        http2=None
+    ))]
     fn __new__(
         retries: Option<PyRef<'_, PyRetry>>,
         max_connections: Option<u32>,
         max_keepalive_connections: Option<u32>,
         keepalive_expiry: Option<f64>,
+        http2: Option<bool>
     ) -> PyResult<Self> {
 
         // need to make it so that transport only creates default 
@@ -52,6 +59,12 @@ impl HTTPTransport {
 
         if let Some(ke) = keepalive_expiry {
             http_client_builder = http_client_builder.pool_idle_timeout(Duration::from_secs_f64(ke));
+        }
+
+        if http2.unwrap_or(false) {
+            http_client_builder = http_client_builder.http2_prior_knowledge();
+        } else {
+            http_client_builder = http_client_builder.http1_only();
         }
     
         let http_client = http_client_builder
@@ -270,12 +283,19 @@ pub struct AsyncHTTPTransport {
 #[pymethods]
 impl AsyncHTTPTransport {
     #[new]
-    #[pyo3(signature = (retries=None, max_connections=None, max_keepalive_connections=None, keepalive_expiry=None))]
+    #[pyo3(signature = (
+        retries=None, 
+        max_connections=None, 
+        max_keepalive_connections=None, 
+        keepalive_expiry=None,
+        http2=None,
+    ))]
     fn __new__(
         retries: Option<PyRef<'_, PyRetry>>,
         max_connections: Option<u32>,
         max_keepalive_connections: Option<u32>,
         keepalive_expiry: Option<f64>,
+        http2: Option<bool>,
     ) -> PyResult<Self> {
 
         // need to make it so that transport only creates default 
@@ -297,6 +317,12 @@ impl AsyncHTTPTransport {
 
         if let Some(ke) = keepalive_expiry {
             http_client_builder = http_client_builder.pool_idle_timeout(Duration::from_secs_f64(ke));
+        }
+
+        if http2.unwrap_or(false) {
+            http_client_builder = http_client_builder.http2_prior_knowledge();
+        } else {
+            http_client_builder = http_client_builder.http1_only();
         }
     
         let http_client = http_client_builder
