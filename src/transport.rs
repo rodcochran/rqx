@@ -1,9 +1,13 @@
+use std::collections::HashMap;
 use std::f64::INFINITY;
-use std::time::{Duration, Instant};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use std::usize;
 use reqwest::{Client, Request};
+use reqwest::tls::Certificate;
 use pyo3::prelude::{PyRef, PyResult, Python,  pyclass, pymethods};
+use pyo3::types::{PyAny, PyAnyMethods, PyBool, PyString};
+use pyo3::Bound;
 use tokio;
 use tokio::sync::{Semaphore};
 
@@ -30,14 +34,18 @@ impl HTTPTransport {
         max_connections=None, 
         max_keepalive_connections=None, 
         keepalive_expiry=None, 
-        http2=None
+        http2=None,
+        verify=None,
+        proxy=None,
     ))]
     fn __new__(
         retries: Option<PyRef<'_, PyRetry>>,
         max_connections: Option<u32>,
         max_keepalive_connections: Option<u32>,
         keepalive_expiry: Option<f64>,
-        http2: Option<bool>
+        http2: Option<bool>,
+        verify: Option<&Bound<'_, PyAny>>,
+        proxy: Option<HashMap<String, String>>
     ) -> PyResult<Self> {
 
         // need to make it so that transport only creates default 
@@ -49,27 +57,13 @@ impl HTTPTransport {
             None => None
         };
 
-        let mut http_client_builder =  Client::builder()
-            // Explicitly add no redirects at the transport level, as we let the PyClient take care of it
-            .redirect(reqwest::redirect::Policy::none());
-
-        if let Some(max_keepalive) = max_keepalive_connections {
-            http_client_builder = http_client_builder.pool_max_idle_per_host(max_keepalive as usize);
-        }
-
-        if let Some(ke) = keepalive_expiry {
-            http_client_builder = http_client_builder.pool_idle_timeout(Duration::from_secs_f64(ke));
-        }
-
-        if http2.unwrap_or(false) {
-            http_client_builder = http_client_builder.http2_prior_knowledge();
-        } else {
-            http_client_builder = http_client_builder.http1_only();
-        }
-    
-        let http_client = http_client_builder
-            .build()
-            .expect("Failed to build HTTP client");
+        let http_client = build_http_client(
+            max_keepalive_connections, 
+            keepalive_expiry, 
+            http2, 
+            verify, 
+            proxy
+        )?;
 
         let max_connection_semaphore = match max_connections {
             Some(mc) => {Arc::new(Semaphore::new(mc as usize))},
@@ -289,6 +283,8 @@ impl AsyncHTTPTransport {
         max_keepalive_connections=None, 
         keepalive_expiry=None,
         http2=None,
+        verify=None,
+        proxy=None,
     ))]
     fn __new__(
         retries: Option<PyRef<'_, PyRetry>>,
@@ -296,6 +292,8 @@ impl AsyncHTTPTransport {
         max_keepalive_connections: Option<u32>,
         keepalive_expiry: Option<f64>,
         http2: Option<bool>,
+        verify: Option<&Bound<'_, PyAny>>,
+        proxy: Option<HashMap<String, String>>
     ) -> PyResult<Self> {
 
         // need to make it so that transport only creates default 
@@ -307,27 +305,13 @@ impl AsyncHTTPTransport {
             None => None
         };
 
-        let mut http_client_builder =  Client::builder()
-            // Explicitly add no redirects at the transport level, as we let the PyClient take care of it
-            .redirect(reqwest::redirect::Policy::none());
-
-        if let Some(max_keepalive) = max_keepalive_connections {
-            http_client_builder = http_client_builder.pool_max_idle_per_host(max_keepalive as usize);
-        }
-
-        if let Some(ke) = keepalive_expiry {
-            http_client_builder = http_client_builder.pool_idle_timeout(Duration::from_secs_f64(ke));
-        }
-
-        if http2.unwrap_or(false) {
-            http_client_builder = http_client_builder.http2_prior_knowledge();
-        } else {
-            http_client_builder = http_client_builder.http1_only();
-        }
-    
-        let http_client = http_client_builder
-            .build()
-            .expect("Failed to build HTTP client");
+        let http_client = build_http_client(
+            max_keepalive_connections, 
+            keepalive_expiry, 
+            http2, 
+            verify, 
+            proxy
+        )?;
 
         let max_connection_semaphore = match max_connections {
             Some(mc) => {Arc::new(Semaphore::new(mc as usize))},
@@ -514,4 +498,73 @@ impl AsyncHTTPTransport {
     pub fn semaphore(&self) -> &Arc<Semaphore> {
         &self.max_connection_semaphore
     }
+}
+
+/*
+
+Helper for constructing the HTTP Client
+
+*/
+fn build_http_client(
+    max_keepalive_connections: Option<u32>,
+    keepalive_expiry: Option<f64>,
+    http2: Option<bool>,
+    verify: Option<&Bound<'_, PyAny>>,
+    proxy: Option<HashMap<String, String>>
+) -> PyResult<Client> {
+    let mut http_client_builder =  Client::builder()
+        // Explicitly add no redirects at the transport level, as we let the PyClient take care of it
+        .redirect(reqwest::redirect::Policy::none());
+
+    if let Some(max_keepalive) = max_keepalive_connections {
+        http_client_builder = http_client_builder.pool_max_idle_per_host(max_keepalive as usize);
+    }
+
+    if let Some(ke) = keepalive_expiry {
+        http_client_builder = http_client_builder.pool_idle_timeout(Duration::from_secs_f64(ke));
+    }
+
+    if http2.unwrap_or(false) {
+        http_client_builder = http_client_builder.http2_prior_knowledge();
+    } else {
+        http_client_builder = http_client_builder.http1_only();
+    }
+
+    if let Some(v) = verify {
+        if v.is_instance_of::<PyBool>() {
+            let verify_enabled = v.extract::<bool>().unwrap();
+            if !verify_enabled {
+                http_client_builder = http_client_builder.danger_accept_invalid_certs(true);
+            }
+        }
+        else if v.is_instance_of::<PyString>() {
+            let path = v
+                .extract::<String>()
+                .map_err(|e| ReqxError::new_err(format!("failed to parse CA cert path: {e}")))?;
+            let bytes = std::fs::read(&path)
+                .map_err(|e| ReqxError::new_err(format!("failed to read CA cert: {e}")))?;
+            let cert = Certificate::from_pem(&bytes)
+                .map_err(|e| ReqxError::new_err(format!("failed to construct CA cert: {e}")))?;
+
+            http_client_builder = http_client_builder.add_root_certificate(cert);
+        }
+    }
+
+    if let Some(proxies) = proxy {
+        for (scheme, url) in proxies {
+            let p = match scheme.as_str() {
+                "http" => reqwest::Proxy::http(&url),
+                "https" => reqwest::Proxy::https(&url),
+                _ => continue,
+            }.map_err(|e| ReqxError::new_err(format!("invalid proxy: {e}")))?;
+            http_client_builder = http_client_builder.proxy(p);
+        }
+    }
+
+    let http_client = http_client_builder
+        .build()
+        .expect("Failed to build HTTP client");
+
+    return Ok(http_client);
+
 }
