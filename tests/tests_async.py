@@ -497,3 +497,44 @@ async def test_total_timeout_not_exceeded(flaky_server):
     assert resp.retry_history[0][0] == "503"  # status code string
     print("")
     print(f"Retry History:\n{resp.retry_history}")
+
+
+# ================================================================
+# Phase 4 tests
+# ================================================================
+
+
+@pytest.mark.asyncio
+async def test_max_connections():
+    async with reqx.AsyncClient(
+        transport=reqx.AsyncHTTPTransport(max_connections=2)
+    ) as client:
+        assert client is not None
+
+        async def task(wait_time):
+            fut = client.get(f"{HTTPBIN_HOST}/delay/{wait_time}")
+            return await fut
+
+        durations = [1, 1, 1, 1, 1]
+        futures = [task(d) for d in durations]
+        start = time.perf_counter()
+        resp_list = await asyncio.gather(*futures)
+        end = time.perf_counter()
+        duration = end - start
+
+        print(f"Concurrent tasks duration: {duration}s")
+
+        all_parallel_time = max(durations)
+        all_serial_time = sum(durations)
+        print(
+            f"All Parallel Time: {all_parallel_time}s\n"
+            f"Duration: {duration}s\n"
+            f"All Serial: {all_serial_time}s"
+        )
+
+        assert all_parallel_time < duration < all_serial_time
+
+        for resp in resp_list:
+            assert resp.status_code == 200
+            assert "content-type" in resp.headers
+            assert resp.json() is not None

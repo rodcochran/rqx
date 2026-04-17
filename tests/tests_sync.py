@@ -688,3 +688,65 @@ def test_total_timeout_not_exceeded(flaky_server):
     assert resp.retry_history[0][0] == "503"  # status code string
     print("")
     print(f"Retry History:\n{resp.retry_history}")
+
+
+# ================================================================
+# Phase 4 tests
+# ================================================================
+
+
+def test_max_connections_with_freed_gil():
+
+    def task(wait_time: int):
+        print(f"Starting {wait_time} second wait")
+        resp = client.get(f"{HTTPBIN_HOST}/delay/{wait_time}")
+        print(f"Finished {wait_time} second wait")
+        assert resp.status_code == 200
+        assert "content-type" in resp.headers
+
+    transport = reqx.HTTPTransport(max_connections=2)
+    client = reqx.Client(transport=transport)
+
+    wait_time_1 = 1
+    wait_time_2 = 1
+    wait_time_3 = 1
+    wait_time_4 = 1
+    wait_time_5 = 1
+
+    wait_times = [wait_time_1, wait_time_2, wait_time_3, wait_time_4, wait_time_5]
+
+    t1 = threading.Thread(target=task, args=(wait_time_1,))
+    t2 = threading.Thread(target=task, args=(wait_time_2,))
+    t3 = threading.Thread(target=task, args=(wait_time_3,))
+    t4 = threading.Thread(target=task, args=(wait_time_4,))
+    t5 = threading.Thread(target=task, args=(wait_time_5,))
+
+    start = time.perf_counter()
+    t1.start()
+    t2.start()
+    t3.start()
+    t4.start()
+    t5.start()
+
+    t1.join()
+    t2.join()
+    t3.join()
+    t4.join()
+    t5.join()
+
+    end = time.perf_counter()
+    duration = end - start
+
+    print("")
+    print(f"Duration: {duration}s")
+
+    all_parallel_time = max(wait_times)
+    all_serial_time = sum(wait_times)
+
+    assert all_parallel_time < duration < all_serial_time
+
+    print(
+        f"All Parallel Time: {all_parallel_time}s\n"
+        f"Duration: {duration}s\n"
+        f"All Serial: {all_serial_time}s"
+    )

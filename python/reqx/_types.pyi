@@ -1,20 +1,4 @@
 # _types.pyi
-class PyClient:
-    def __init__(
-        self,
-        timeout: int | None = None,
-        follow_redirects: bool | None = None,
-        max_redirects: int | None = None,
-    ) -> None: ...
-
-class PyAsyncClient:
-    def __init__(
-        self,
-        timeout: int | None = None,
-        follow_redirects: bool | None = None,
-        max_redirects: int | None = None,
-    ) -> None: ...
-
 class PyRetry:
     def __init__(
         self,
@@ -36,10 +20,34 @@ class HTTPTransport:
     def __init__(
         self,
         retries: PyRetry | None = None,
+        max_connections: int | None = None,
+        max_keepalive_connections: int | None = None,
+        keepalive_expiry: float | None = None,
     ): ...
 
 class AsyncHTTPTransport:
     def __init__(
         self,
         retries: PyRetry | None = None,
+        max_connections: int | None = None,
+        max_keepalive_connections: int | None = None,
+        keepalive_expiry: float | None = None,
     ): ...
+
+class PyClient:
+    def __init__(
+        self,
+        timeout: int | None = None,
+        follow_redirects: bool | None = None,
+        max_redirects: int | None = None,
+        transport: HTTPTransport | None = None,
+    ) -> None: ...
+
+class PyAsyncClient:
+    def __init__(
+        self,
+        timeout: int | None = None,
+        follow_redirects: bool | None = None,
+        max_redirects: int | None = None,
+        transport: AsyncHTTPTransport | None = None,
+    ) -> None: ...

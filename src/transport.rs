@@ -1,18 +1,23 @@
 use std::f64::INFINITY;
 use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::usize;
 use reqwest::{Client, Request};
 use pyo3::prelude::{PyRef, PyResult, Python,  pyclass, pymethods};
 use tokio;
+use tokio::sync::{Semaphore};
 
 use super::exceptions::*;
 use super::response::PyResponse;
 use super::retry::PyRetry;
 use super::runtime::RUNTIME;
 
+
 #[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct HTTPTransport {
     http_client: Client,
+    max_connection_semaphore: Arc<Semaphore>,
     #[pyo3(get)]
     retries: Option<PyRetry>
 }
@@ -20,9 +25,12 @@ pub struct HTTPTransport {
 #[pymethods]
 impl HTTPTransport {
     #[new]
-    #[pyo3(signature = (retries=None))]
+    #[pyo3(signature = (retries=None, max_connections=None, max_keepalive_connections=None, keepalive_expiry=None))]
     fn __new__(
         retries: Option<PyRef<'_, PyRetry>>,
+        max_connections: Option<u32>,
+        max_keepalive_connections: Option<u32>,
+        keepalive_expiry: Option<f64>,
     ) -> PyResult<Self> {
 
         // need to make it so that transport only creates default 
@@ -34,12 +42,30 @@ impl HTTPTransport {
             None => None
         };
 
-        let http_client = Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
+        let mut http_client_builder =  Client::builder()
+            // Explicitly add no redirects at the transport level, as we let the PyClient take care of it
+            .redirect(reqwest::redirect::Policy::none());
+
+        if let Some(max_keepalive) = max_keepalive_connections {
+            http_client_builder = http_client_builder.pool_max_idle_per_host(max_keepalive as usize);
+        }
+
+        if let Some(ke) = keepalive_expiry {
+            http_client_builder = http_client_builder.pool_idle_timeout(Duration::from_secs_f64(ke));
+        }
+    
+        let http_client = http_client_builder
             .build()
             .expect("Failed to build HTTP client");
+
+        let max_connection_semaphore = match max_connections {
+            Some(mc) => {Arc::new(Semaphore::new(mc as usize))},
+            None => {Arc::new(Semaphore::new(Semaphore::MAX_PERMITS))}
+        };
+
         Ok(Self {
             http_client: http_client,
+            max_connection_semaphore: max_connection_semaphore,
             retries: _retries
         })
     }
@@ -52,6 +78,7 @@ impl Default for HTTPTransport {
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .expect("Failed to build HTTP client"),
+            max_connection_semaphore: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
             retries: None
         }
     }
@@ -74,7 +101,17 @@ impl HTTPTransport {
             RUNTIME
                 .get()
                 .ok_or_else(|| ReqxError::new_err("runtime not initialized"))?
+                // NOTE: block_on panics if called from within an existing tokio runtime
+                // context ("Cannot start a runtime from within a runtime"). Safe here
+                // because Python is the caller and py.detach releases the GIL without
+                // entering a runtime. Callers embedding this in an async Python framework
+                // (or invoking it from inside another tokio task) will panic — they should
+                // use the async variant of this API instead.
                 .block_on(async {
+                    let _permit = self.max_connection_semaphore
+                        .acquire()
+                        .await
+                        .map_err(|_| ReqxError::new_err("connection pool closed"))?;
                     self.http_client
                         .execute(request)
                         .await
@@ -225,6 +262,7 @@ Async-compatible HTTP Transport
 #[derive(Clone)]
 pub struct AsyncHTTPTransport {
     http_client: Client,
+    max_connection_semaphore: Arc<Semaphore>,
     #[pyo3(get)]
     retries: Option<PyRetry>
 }
@@ -232,9 +270,12 @@ pub struct AsyncHTTPTransport {
 #[pymethods]
 impl AsyncHTTPTransport {
     #[new]
-    #[pyo3(signature = (retries=None))]
+    #[pyo3(signature = (retries=None, max_connections=None, max_keepalive_connections=None, keepalive_expiry=None))]
     fn __new__(
         retries: Option<PyRef<'_, PyRetry>>,
+        max_connections: Option<u32>,
+        max_keepalive_connections: Option<u32>,
+        keepalive_expiry: Option<f64>,
     ) -> PyResult<Self> {
 
         // need to make it so that transport only creates default 
@@ -246,12 +287,30 @@ impl AsyncHTTPTransport {
             None => None
         };
 
-        let http_client = Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
+        let mut http_client_builder =  Client::builder()
+            // Explicitly add no redirects at the transport level, as we let the PyClient take care of it
+            .redirect(reqwest::redirect::Policy::none());
+
+        if let Some(max_keepalive) = max_keepalive_connections {
+            http_client_builder = http_client_builder.pool_max_idle_per_host(max_keepalive as usize);
+        }
+
+        if let Some(ke) = keepalive_expiry {
+            http_client_builder = http_client_builder.pool_idle_timeout(Duration::from_secs_f64(ke));
+        }
+    
+        let http_client = http_client_builder
             .build()
             .expect("Failed to build HTTP client");
+
+        let max_connection_semaphore = match max_connections {
+            Some(mc) => {Arc::new(Semaphore::new(mc as usize))},
+            None => {Arc::new(Semaphore::new(Semaphore::MAX_PERMITS))}
+        };
+
         Ok(Self {
             http_client: http_client,
+            max_connection_semaphore: max_connection_semaphore,
             retries: _retries
         })
     }
@@ -264,6 +323,7 @@ impl Default for AsyncHTTPTransport {
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .expect("Failed to build Async HTTP client"),
+            max_connection_semaphore: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
             retries: None
         }
     }
@@ -276,11 +336,19 @@ impl AsyncHTTPTransport {
             Self::send_with_retries(&transport, request).await
         } else {
             // don't do any retries
-            Self::send(transport.client(), request).await
+            Self::send(transport.client(), request, transport.semaphore()).await
         }
     }
 
-    async fn send(client: &Client, request: Request) -> PyResult<PyResponse> {
+    async fn send(
+        client: &Client, 
+        request: Request, 
+        max_connection_semaphore: &Arc<Semaphore>,
+    ) -> PyResult<PyResponse> {
+        let _permit = max_connection_semaphore
+            .acquire()
+            .await
+            .map_err(|_| ReqxError::new_err("connection pool closed"))?;
         let response = client
             .execute(request)
             .await
@@ -353,7 +421,7 @@ impl AsyncHTTPTransport {
                 )?;
             
             let attempt_start = std::time::Instant::now();
-            match Self::send(transport.client(), request_copy).await {
+            match Self::send(transport.client(), request_copy, transport.semaphore()).await {
                 Ok(resp) => {
                     if !is_retryable_method { 
                         return Ok(resp);
@@ -415,5 +483,9 @@ Accessors etc.
 impl AsyncHTTPTransport {
     pub fn client(&self) -> &Client {
         &self.http_client
+    }
+
+    pub fn semaphore(&self) -> &Arc<Semaphore> {
+        &self.max_connection_semaphore
     }
 }
