@@ -3,7 +3,7 @@ requires = ["maturin>=1.12,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "reqx"
+name = "py-reqx"
 requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Rust",

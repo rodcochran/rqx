@@ -8,8 +8,7 @@ name: CI
 on:
   push:
     branches:
-      # - main
-      - master
+      - main
     tags:
       - '*'
   pull_request:
@@ -176,11 +175,11 @@ jobs:
         uses: actions/attest-build-provenance@v3
         with:
           subject-path: 'wheels-*/*'
-      - name: Install uv
+      - name: Merge wheel directories
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
-        uses: astral-sh/setup-uv@v7
+        run: mkdir -p dist && cp wheels-*/* dist/
       - name: Publish to PyPI
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
-        run: uv publish 'wheels-*/*'
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
