@@ -1,5 +1,9 @@
 # reqx: The Rust-based drop-in replacement for httpx
 
+> - _Author's note: Hey, I'm Rodrigo the creator of reqx (the Python version, reqx is already a Rust crate)._
+> - _Acknowledgement: I'm presenting this project as a a drop-in replacement for for the popular Python http client package, `httpx`. Early results show a significant improvement over httpx, but that being said, I must acknowledge the great work of that package along with pyO3, maturin, and reqwest. This project would not have been possible without them!_
+> - _Origin story: This project was intended to be a learning experience for me. While writing up the spec, I had Claude rewrite it in the form of a Berkeley CS class (CS262) project spec - interestingly, it made the spec really sharp and pushed me to think about the right things (implementation details, the shape of the code, etc.) that would typically get handed to an AI agent._
+
 ## 1. Design Decisions
 
 ### Runtime Singleton
