@@ -15,3 +15,16 @@ dynamic = ["version"]
 [tool.maturin]
 module-name = "reqx._reqx"
 python-source = "python"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-xdist",
+    "rich",
+    "numpy",
+    "ty",
+]
+
+[tool.ty.rules]
+"unresolved-import" = "ignore"
