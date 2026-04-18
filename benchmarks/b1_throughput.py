@@ -6,12 +6,12 @@ import httpx
 import reqx
 
 TARGET_URL = "http://localhost:8080/json"
-WARMUP_SECONDS = 2
-MEASURE_SECONDS = 10
+WARMUP_SECONDS = 5
+MEASURE_SECONDS = 30
 CONCURRENCY_LEVELS = [
-    # 10,
-    # 50,
-    # 100,
+    10,
+    50,
+    100,
     500,
     1000,
 ]
