@@ -7,6 +7,8 @@ use reqwest::{Request};
 use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python,  pyclass, pymethods};
 use pyo3::Bound;
 
+use crate::stream::PyStreamResponse;
+
 use super::exceptions::*;
 use super::response::PyResponse;
 use super::request::{
@@ -264,6 +266,84 @@ impl PyClient {
         self.request(py, "DELETE", url, None, None, None, params, headers, auth, follow_redirects, timeout)
     }
 
+    #[pyo3(
+        signature = (
+            method, 
+            url, 
+            content=None, 
+            data=None, 
+            // files, 
+            json=None, 
+            params=None, 
+            headers=None, 
+            // cookies, 
+            auth=None, 
+            follow_redirects=None, 
+            timeout=None
+            // extensions
+        )
+    )]
+    fn stream(
+        &self, 
+        py: Python<'_>,
+        method: &str, 
+        url: &str, 
+        content: Option<&[u8]>,
+        data: Option<HashMap<String, String>>,
+        // files: &Bound<'_, PyDict>,
+        json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        // cookies: &Bound<'_, PyDict>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+        // extensions: &Bound<'_, PyDict>,
+    ) -> PyResult<PyStreamResponse> {
+
+        let start_time = std::time::Instant::now();
+
+        let request = build_client_request(
+            &self.transport.client(),
+            py,
+            method,
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            // setting default timeout from top level
+            Some(timeout.unwrap_or(self.timeout_secs))
+        )?;
+
+        let _follow_redirects = match follow_redirects {
+            Some(fr) => {fr}
+            None => {
+                self.follow_redirects
+            }
+        };
+
+        let mut resp = if _follow_redirects {
+            todo!("Implement redirect handling for stream responses.")
+            // self.send_handling_redirects(py, request)?
+        } else {
+            // self.transport.handle_request(py, request)?
+            PyStreamResponse::from_response(
+                self.transport.send_raw(py, request)?
+            )?
+        };
+
+        // collecting cookies here - though we should also accumulate them on redirects...
+        self.update_cookies_from_stream(&resp);
+
+        let end_time = std::time::Instant::now();
+        let total =  end_time - start_time;
+        resp.elapsed = total.as_secs_f64();
+        return Ok(resp);
+    }
+
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }
@@ -345,6 +425,11 @@ impl PyClient {
     }
 
     fn update_cookies(&self, resp: &PyResponse) {
+        let mut cookies = self.cookies.lock().unwrap();
+        cookies.extend(resp.cookies.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+
+    fn update_cookies_from_stream(&self, resp: &PyStreamResponse) {
         let mut cookies = self.cookies.lock().unwrap();
         cookies.extend(resp.cookies.iter().map(|(k, v)| (k.clone(), v.clone())));
     }

@@ -1,0 +1,147 @@
+use bytes::Bytes;
+use futures::{Stream, StreamExt};
+use reqwest::{Response};
+use std::collections::HashMap;
+use std::pin::{Pin};
+use std::sync::{Arc, Mutex};
+use pyo3::types::{PyAny};
+use pyo3::Bound;
+use pyo3::prelude::{PyRef, PyResult, pyclass, pymethods};
+
+use super::runtime::RUNTIME;
+use super::exceptions::*;
+
+
+#[pyclass]
+struct PyByteIterator {
+    stream: Arc<Mutex<Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>>>,
+    chunk_size: u32,
+}
+
+
+#[pymethods]
+impl PyByteIterator {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(slf: PyRef<'_, Self>) -> PyResult<Option<Vec<u8>>> {
+
+        let py = slf.py();
+        let stream = Arc::clone(&slf.stream);
+
+        let chunk = py.detach(|| {
+            RUNTIME
+                .get()
+                .ok_or_else(|| ReqxError::new_err("runtime not initialized")).unwrap()
+                .block_on(async {
+                    let mut guard = stream.lock().unwrap();
+                    guard.as_mut().next().await
+                })
+        });
+
+        match chunk {
+            Some(Ok(bytes)) => Ok(Some(bytes.to_vec())),
+            Some(Err(e)) => Err(ReqxError::new_err(format!("stream error: {e}"))),
+            None => Ok(None),
+        }
+    }
+}
+
+#[pyclass]
+pub struct PyStreamResponse {
+    #[pyo3(get)]
+    pub status_code: u16,
+
+    #[pyo3(get)]
+    pub headers: HashMap<String, String>,
+    
+    #[pyo3(get)]
+    pub url: String,
+
+    #[pyo3(get)]
+    pub(crate) elapsed: f64,
+
+    #[pyo3(get)]
+    pub(crate) num_retries: i32,
+
+    #[pyo3(get)]
+    pub(crate) retry_history: Vec<(String, f64)>,
+
+    #[pyo3(get)]
+    pub(crate) http_version: String,
+
+    #[pyo3(get)]
+    pub(crate) cookies: HashMap<String, String>,
+
+    pub(crate) response: Option<reqwest::Response>,
+}
+
+#[pymethods]
+impl PyStreamResponse {
+    #[pyo3(signature = (chunk_size=8192))]
+    fn iter_bytes(&mut self, chunk_size: u32) -> PyResult<PyByteIterator> {
+        let response = self.response.take()
+            .ok_or_else(|| ReqxError::new_err("response already consumed"))?;
+        Ok(
+            PyByteIterator {
+                stream: Arc::new(Mutex::new(Box::pin(response.bytes_stream()))),
+                chunk_size,
+            }
+        )
+    }
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+  
+    fn __exit__(
+        &mut self,
+        _exc_type: Option<&Bound<'_, PyAny>>,
+        _exc_value: Option<&Bound<'_, PyAny>>,
+        _traceback: Option<&Bound<'_, PyAny>>,
+    ) {
+        self.response = None; // drops the response, closes connection
+    }
+}
+
+impl PyStreamResponse {
+
+    pub fn from_response(response: Response) -> PyResult<PyStreamResponse> {
+        let status_code = response.status().as_u16();
+
+        let headers = response
+            .headers()
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.to_string(),
+                    v.to_str().unwrap_or("<non-utf8>").to_string(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        
+        let url = response.url().as_str().to_owned();
+        let http_version  = format!("{:?}", response.version());
+        let cookies: HashMap<String, String> = response.cookies()
+            .map(|c| (
+                c.name().to_string(), 
+                c.value().to_string())
+            )
+            .collect();
+
+        Ok(
+            PyStreamResponse  {
+                status_code: status_code,
+                headers: headers,
+                url: url,
+                elapsed: 0.0,
+                num_retries: 0,
+                retry_history: Vec::new(),
+                http_version: http_version,
+                cookies: cookies,
+                response: Some(response),
+            }
+        )
+
+    }
+}

@@ -9,6 +9,7 @@ mod response;
 mod retry;
 mod runtime;
 mod transport;
+mod stream;
 pub mod exceptions;
 
 use client::{PyClient, PyAsyncClient};

@@ -3,7 +3,7 @@ use std::f64::INFINITY;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::usize;
-use reqwest::{Client, Request};
+use reqwest::{Client, Request, Response};
 use reqwest::tls::Certificate;
 use pyo3::prelude::{PyRef, PyResult, Python,  pyclass, pymethods};
 use pyo3::types::{PyAny, PyAnyMethods, PyBool, PyString};
@@ -104,7 +104,11 @@ impl HTTPTransport {
     }
 
     fn send(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
+        let response= self.send_raw(py, request)?;
+        PyResponse::from_response(py, response)
+    }
 
+    pub fn send_raw(&self, py: Python<'_>, request: Request) -> PyResult<Response> { 
         let response = py.detach(|| {
             RUNTIME
                 .get()
@@ -132,7 +136,7 @@ impl HTTPTransport {
                         })
                 })
         })?;
-        PyResponse::from_response(py, response)
+        return Ok(response);
     }
 
     fn send_with_retries(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {

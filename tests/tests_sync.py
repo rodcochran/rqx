@@ -805,3 +805,11 @@ def test_cookies_basic():
     resp2 = client.get(f"{HTTPBIN_HOST}/cookies")
     body = resp2.json()
     assert body["cookies"]["testcookie"] == "hello"
+
+
+def test_stream():
+    client = reqx.Client()
+    with client.stream("GET", f"{HTTPBIN_HOST}/stream/5") as resp:
+        chunks = list(resp.iter_bytes(1024))
+        assert len(chunks) > 0
+        print(chunks)
