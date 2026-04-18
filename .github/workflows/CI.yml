@@ -18,6 +18,33 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy -- -W clippy::all
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      httpbin:
+        image: kennethreitz/httpbin
+        ports:
+          - 80:80
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pip install maturin
+      - run: maturin develop
+      - run: pip install pytest pytest-asyncio pytest-xdist rich
+      - run: pytest tests/ -n 8
+
   linux:
     runs-on: ${{ matrix.platform.runner }}
     strategy:
