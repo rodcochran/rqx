@@ -1,0 +1,63 @@
+{
+    "id": 1,
+    "name": "benchmark_test",
+    "description": "This is a static JSON payload used for benchmarking reqx against httpx and aiohttp. It contains enough data to reach approximately 1KB in size.",
+    "values": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+    ],
+    "metadata": {
+        "created": "2026-04-17T00: 00: 00Z",
+        "version": "1.0.0",
+        "tags": [
+            "benchmark",
+            "performance",
+            "http-client",
+            "python",
+            "rust"
+        ],
+        "nested": {
+            "level1": {
+                "level2": {
+                    "level3": "deep_value"
+                }
+            }
+        }
+    },
+    "items": [
+        {
+            "key": "alpha",
+            "value": "Lorem ipsum dolor sit amet consectetur adipiscing elit"
+        },
+        {
+            "key": "beta",
+            "value": "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua"
+        },
+        {
+            "key": "gamma",
+            "value": "Ut enim ad minim veniam quis nostrud exercitation ullamco laboris"
+        },
+        {
+            "key": "delta",
+            "value": "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum"
+        }
+    ]
+}
