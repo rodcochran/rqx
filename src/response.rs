@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use http::{StatusCode};
-use pyo3::prelude::{Py, PyAny, PyResult, Python, pyclass, pymethods};
+use pyo3::prelude::{Py, PyAny, PyModule, PyResult, Python, pyclass, pymethods};
+use pyo3::types::PyAnyMethods;
 use reqwest::{Response};
 
 use super::exceptions::{ReqxError, HTTPStatusError};
-use super::py_json::{value_to_py};
+// use super::py_json::{value_to_py};
 use super::runtime::RUNTIME;
 
 #[pyclass]
@@ -45,10 +46,18 @@ impl PyResponse {
         std::str::from_utf8(&self.content).unwrap().to_string()
     }
 
+    // Unoptimized implementation using Rust for json-parsing
+    // fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    //     serde_json::from_str(&self.text())
+    //         .map_err(|e| ReqxError::new_err(format!("invalid JSON response: {e}")))
+    //         .and_then(|v| value_to_py(py, v))
+    // }
+
     fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        serde_json::from_str(&self.text())
-            .map_err(|e| ReqxError::new_err(format!("invalid JSON response: {e}")))
-            .and_then(|v| value_to_py(py, v))
+        let json_mod = PyModule::import(py, "json")?;
+        json_mod.call_method1("loads", (self.text(),))
+            .map(|obj| obj.unbind())
+            .map_err(|_| ReqxError::new_err("invalid JSON response"))
     }
 
     fn raise_for_status(&self) -> PyResult<()> {
