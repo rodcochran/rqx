@@ -361,6 +361,16 @@ impl AsyncHTTPTransport {
         request: Request, 
         max_connection_semaphore: &Arc<Semaphore>,
     ) -> PyResult<PyResponse> {
+        let response = AsyncHTTPTransport::send_raw(client, request, max_connection_semaphore).await?;
+        let resp_future = PyResponse::from_response_async(response);
+        resp_future.await
+    }
+
+    pub async fn send_raw(
+        client: &Client, 
+        request: Request, 
+        max_connection_semaphore: &Arc<Semaphore>,
+    ) -> PyResult<Response> {
         let _permit = max_connection_semaphore
             .acquire()
             .await
@@ -376,9 +386,9 @@ impl AsyncHTTPTransport {
                 }
             }
         )?;
-        let resp_future = PyResponse::from_response_async(response);
-        resp_future.await
+        return Ok(response);
     }
+
     async fn send_with_retries(transport: &AsyncHTTPTransport, request: Request) -> PyResult<PyResponse> {
         // Retry configuration
         let r = transport.retries.as_ref().unwrap();

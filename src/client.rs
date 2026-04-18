@@ -7,7 +7,7 @@ use reqwest::{Request};
 use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python,  pyclass, pymethods};
 use pyo3::Bound;
 
-use crate::stream::PyStreamResponse;
+use crate::stream::{PyStreamResponse,PyAsyncStreamResponse};
 
 use super::exceptions::*;
 use super::response::PyResponse;
@@ -662,6 +662,90 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'a,PyAny>>{
         self.request(py, "DELETE", url, None, None, None, params, headers, auth, follow_redirects, timeout)
     }
+
+    #[pyo3(
+        signature = (
+            method, 
+            url, 
+            content=None, 
+            data=None, 
+            // files, 
+            json=None, 
+            params=None, 
+            headers=None, 
+            // cookies, 
+            auth=None, 
+            follow_redirects=None, 
+            timeout=None
+            // extensions
+        )
+    )]
+    fn stream<'a>(
+        &self, 
+        py: Python<'a>,
+        method: &str, 
+        url: &str, 
+        content: Option<&[u8]>,
+        data: Option<HashMap<String, String>>,
+        // files: &Bound<'_, PyDict>,
+        json: Option<&Bound<'_, PyAny>>,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        // cookies: &Bound<'_, PyDict>,
+        auth: Option<(String, String)>,
+        follow_redirects: Option<bool>,
+        timeout: Option<u64>,
+        // extensions: &Bound<'_, PyDict>,
+    // ) -> PyResult<PyResponse> {
+    ) -> PyResult<Bound<'a,PyAny>>{
+
+        let start_time = std::time::Instant::now();
+        
+        let request = build_client_request(
+            &self.transport.client(),
+            py,
+            method,
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            timeout
+        )?;
+
+        let _follow_redirects = match follow_redirects {
+            Some(fr) => {fr}
+            None => {
+                self.follow_redirects
+            }
+        };
+
+        let transport = self.transport.clone();
+        // let max_redirects = self.max_redirects;
+
+        let cookies = Arc::clone(&self.cookies);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut resp = if _follow_redirects {
+                // Self::send_handling_redirects(transport, request, max_redirects).await?
+                todo!("Implement async redirect handling for stream")
+            } else {
+                PyAsyncStreamResponse::from_response(
+                    AsyncHTTPTransport::send_raw(&transport.client(), request, &transport.semaphore()).await?
+                )?
+            };
+            cookies.lock().await.extend(
+                resp.cookies.iter().map(|(k, v)| (k.clone(), v.clone()))
+            );
+            let end_time = std::time::Instant::now();
+            let total =  end_time - start_time;
+            resp.elapsed = total.as_secs_f64();
+            return Ok(resp);
+        })
+
+    }
+
 
     fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {

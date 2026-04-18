@@ -598,3 +598,13 @@ async def test_cookies_basic():
     resp2 = await client.get(f"{HTTPBIN_HOST}/cookies")
     body = resp2.json()
     assert body["cookies"]["testcookie"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_async_stream():
+    async with reqx.AsyncClient() as client:
+        resp = await client.stream("GET", f"{HTTPBIN_HOST}/stream/5")
+        chunks = []
+        async for chunk in resp.iter_bytes(1024):
+            chunks.append(chunk)
+        assert len(chunks) > 0
