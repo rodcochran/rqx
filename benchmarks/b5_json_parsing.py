@@ -75,7 +75,7 @@ def main():
     print(f"JSON payload size: {len(content)} bytes")
     print(f"Iterations: {ITERATIONS}, Runs: {RUNS}\n")
 
-    print_results("reqx (serde_json → Python)", bench_reqx_json(content))
+    print_results("reqx (json.loads via pyo3)", bench_reqx_json(content))
     print_results("httpx (json.loads)", bench_httpx_json())
     print_results("stdlib json.loads", bench_stdlib_json(text))
 
