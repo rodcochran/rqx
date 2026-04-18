@@ -108,18 +108,53 @@ The results break from the pattern seen elsewhere: all three land within ~0.5 µ
 | httpx (json.loads)         | 36.4       | 0.3       | 3.6           |
 | stdlib json.loads          | **_32.9_** | **_3.0_** | **_3.3_**     |
 
----
+### Retry Overhead
 
-  3. Correctness Story (1 page)
-  - Hardest: async lifetime battles, ownership across FFI boundary, redirect handling with owned
-  requests.
-  - Cookie persistence debugging (missing cookie_store(true) in Default impl).
-  - Streaming iterator protocol — holding connection open across __next__ calls.
+To measure the overhead of configuring retries we fired off 10000 sequential requests per run across 10 runs (plus 2 warmup runs discarded) for reqx in two configurations: a baseline `AsyncClient` with no retry configured, and an `AsyncClient` with an `AsyncHTTPTransport` wrapping a `Retry(total=3, backoff_factor=0.5, status_forcelist={500, 502, 503})`. The retry path is never triggered since the target always returns 200 — we're measuring the cost of the wrapper itself, not the cost of an actual retry.
 
-  4. Comparison to pyreqwest (0.5 pages)
-  - Thinner wrapper, no httpx API compatibility, no transport/retry abstraction.
-  - Your design is more extensible but more complex.
+The results comfortably clear our 100 µs target: configuring retries adds ~27 µs per request at the median, well within budget. Notably, the retry wrapper's overhead is roughly a single-digit percent of the baseline per-request cost, which is what you'd expect from a wrapper whose fast path is one branch.
 
-  5. What Remains (0.5 pages)
-  - MockTransport, granular Timeout(connect=..., read=...), streaming + redirects, pythonize as
-  alternative to json.loads, full correctness harness (C-6/C-7 need MockTransport).
+| Configuration                      | Per call median (µs) | Per call mean (µs) | CV    |
+| ---------------------------------- | -------------------- | ------------------ | ----- |
+| No retry configured                | **_952.6_**          | **_946.7_**        | 21.5% |
+| Retry configured (never triggered) | 979.1                | 1000.9             | 15.9% |
+| **Overhead**                       | **26.5**             | **54.3**           | —     |
+
+> Run-to-run variance was high (CV ~20%) due to background activity on the benchmark host. The median overhead is the more reliable statistic here than the mean, since it's robust to outlier runs. Clean numbers from an idle machine are forthcoming; the directional finding (well under target) is not expected to change.
+
+## 3. Correctness Story
+
+Correctness of the API was challenging, not because of what to implement but on how to do it.
+
+The most challenging components were things that have been solved before but applied in a new way.
+
+- Async lifetimes
+- Ownership accross the FFI boundary
+- Redirect handling with owned reqeusts
+- Streaming over FFI - holding connection open across **next** calls
+- Cookie store variation between `reqwest` and `httpx`
+
+## 4. Comparison to pyreqwest
+
+`pyreqwest` offers a similar implementation in terms of adding a pyO3 port of reqwest.
+
+The key differences lie in the contract and feature parity with httpx.
+
+The goal of this project was to create a drop-in replacement for httpx as many frameworks are heavily reliant on httpx and would benefit greatly from a minimal API change that provides a massive performance upgrade, particularly in highly concurrent environments.
+
+## 5. What Remains
+
+This project was intended for learning. I wanted to dive deep into Rust, http, and creating something useful for python.
+
+That being said, the v0 is rough. There's plenty to do and others should feel inclined to contribute.
+
+Some open items at the time of writing the report:
+
+- MockTransport to enable testing without hitting any actual network.
+- Granular timeout configurations (on connect, read, etc.)
+- Streaming on redirects
+- Auth header cleansing
+- A full correctness harness
+- Deduplication of code
+- Documentation
+- Other optimizations
