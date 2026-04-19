@@ -2,6 +2,7 @@ import asyncio
 import time
 
 import aiohttp
+import httpr
 import httpx
 import numpy as np
 import reqx
@@ -19,7 +20,28 @@ async def bench_reqx():
         async def worker():
             for _ in range(REQUESTS_PER_WORKER):
                 start = time.perf_counter()
-                await client.get(TARGET_URL)
+                try:
+                    await client.get(TARGET_URL)
+                except Exception:
+                    continue
+                elapsed = (time.perf_counter() - start) * 1000
+                latencies.append(elapsed)
+
+        await asyncio.gather(*[worker() for _ in range(CONCURRENCY)])
+    return latencies
+
+
+async def bench_httpr():
+    latencies = []
+    async with httpr.AsyncClient() as client:
+
+        async def worker():
+            for _ in range(REQUESTS_PER_WORKER):
+                start = time.perf_counter()
+                try:
+                    await client.get(TARGET_URL)
+                except Exception:
+                    continue
                 elapsed = (time.perf_counter() - start) * 1000
                 latencies.append(elapsed)
 
@@ -34,7 +56,10 @@ async def bench_httpx():
         async def worker():
             for _ in range(REQUESTS_PER_WORKER):
                 start = time.perf_counter()
-                await client.get(TARGET_URL)
+                try:
+                    await client.get(TARGET_URL)
+                except Exception:
+                    continue
                 elapsed = (time.perf_counter() - start) * 1000
                 latencies.append(elapsed)
 
@@ -49,8 +74,11 @@ async def bench_aiohttp():
         async def worker():
             for _ in range(REQUESTS_PER_WORKER):
                 start = time.perf_counter()
-                async with session.get(TARGET_URL) as resp:
-                    await resp.read()
+                try:
+                    async with session.get(TARGET_URL) as resp:
+                        await resp.read()
+                except Exception:
+                    continue
                 elapsed = (time.perf_counter() - start) * 1000
                 latencies.append(elapsed)
 
@@ -72,6 +100,7 @@ def print_percentiles(name, latencies):
 async def main():
     for name, fn in [
         ("reqx", bench_reqx),
+        ("httpr", bench_httpr),
         ("httpx", bench_httpx),
         ("aiohttp", bench_aiohttp),
     ]:

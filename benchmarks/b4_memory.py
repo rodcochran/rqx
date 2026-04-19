@@ -3,6 +3,7 @@ import resource
 import tracemalloc
 
 import aiohttp
+import httpr
 import httpx
 import reqx
 
@@ -19,6 +20,17 @@ def get_rss_mb():
 
 async def bench_reqx():
     async with reqx.AsyncClient() as client:
+
+        async def worker():
+            for _ in range(REQUESTS_PER_WORKER):
+                resp = await client.get(TARGET_URL)
+                resp.json()
+
+        await asyncio.gather(*[worker() for _ in range(CONCURRENCY)])
+
+
+async def bench_httpr():
+    async with httpr.AsyncClient() as client:
 
         async def worker():
             for _ in range(REQUESTS_PER_WORKER):
@@ -70,6 +82,7 @@ async def measure(name, fn):
 async def main():
     for name, fn in [
         ("reqx", bench_reqx),
+        ("httpr", bench_httpr),
         ("httpx", bench_httpx),
         ("aiohttp", bench_aiohttp),
     ]:

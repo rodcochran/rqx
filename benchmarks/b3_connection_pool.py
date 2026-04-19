@@ -2,6 +2,7 @@ import asyncio
 import time
 
 import aiohttp
+import httpr
 import httpx
 import reqx
 
@@ -37,6 +38,18 @@ async def reqx_without_reuse():
             await client.get(TARGET_URL)
 
 
+async def httpr_with_reuse():
+    async with httpr.AsyncClient() as client:
+        for _ in range(TOTAL_REQUESTS):
+            await client.get(TARGET_URL)
+
+
+async def httpr_without_reuse():
+    for _ in range(TOTAL_REQUESTS):
+        async with httpr.AsyncClient() as client:
+            await client.get(TARGET_URL)
+
+
 async def httpx_with_reuse():
     async with httpx.AsyncClient() as client:
         for _ in range(TOTAL_REQUESTS):
@@ -66,6 +79,7 @@ async def aiohttp_without_reuse():
 async def main():
     for name, with_fn, without_fn in [
         ("reqx", reqx_with_reuse, reqx_without_reuse),
+        ("httpr", httpr_with_reuse, httpr_without_reuse),
         ("httpx", httpx_with_reuse, httpx_without_reuse),
         ("aiohttp", aiohttp_with_reuse, aiohttp_without_reuse),
     ]:

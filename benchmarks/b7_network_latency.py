@@ -1,3 +1,17 @@
+"""Throughput under simulated network latency.
+
+Targets the local delay server at :8081 (100ms per request). This isolates
+each client's concurrency model — localhost nginx is too fast to reveal
+differences in how requests are dispatched, queued, and driven.
+
+Expected shape:
+- A client with true multi-threaded async can have hundreds of requests
+  in flight simultaneously → RPS scales with concurrency up to a high ceiling.
+- A client backed by a thread-pool executor with N workers plateaus at roughly
+  N / per-request-seconds — e.g., 14 workers × 10 req/s = 140 RPS.
+- A client serializing requests plateaus at ~10 RPS.
+"""
+
 import asyncio
 import time
 
@@ -6,16 +20,10 @@ import httpr
 import httpx
 import reqx
 
-TARGET_URL = "http://localhost:8080/json"
-WARMUP_SECONDS = 5
-MEASURE_SECONDS = 30
-CONCURRENCY_LEVELS = [
-    10,
-    50,
-    100,
-    500,
-    1000,
-]
+TARGET_URL = "http://localhost:8081/json"
+WARMUP_SECONDS = 2
+MEASURE_SECONDS = 10
+CONCURRENCY_LEVELS = [10, 50, 100, 200, 500]
 
 
 async def bench_reqx(concurrency, duration):
@@ -92,12 +100,9 @@ async def bench_aiohttp(concurrency, duration):
 
 
 async def run_benchmark(name, bench_fn, concurrency, warmup, measure):
-    # warmup phase
     await bench_fn(concurrency, warmup)
-    # measurement phase
     count = await bench_fn(concurrency, measure)
-    rps = count / measure
-    return rps
+    return count / measure
 
 
 async def main():
@@ -115,7 +120,6 @@ async def main():
             results[(name, concurrency)] = rps
             print(f"{name} @ {concurrency}: {rps:.0f} RPS")
 
-    # print summary table
     print("\n" + "=" * 60)
     print(f"{'Client':<10} {'Concurrency':<15} {'RPS':<10}")
     print("-" * 60)

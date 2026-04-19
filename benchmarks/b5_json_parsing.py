@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 
+import httpr
 import httpx
 import reqx
 
@@ -59,6 +60,20 @@ def bench_httpx_json():
     return times
 
 
+def bench_httpr_json():
+    """Parse via httpr response (serde_json + pythonize, no Python json.loads)"""
+    client = httpr.Client()
+    resp = client.get(TARGET_URL)
+    times = []
+    for _ in range(RUNS):
+        start = time.perf_counter()
+        for _ in range(ITERATIONS):
+            resp.json()
+        elapsed = (time.perf_counter() - start) * 1000
+        times.append(elapsed)
+    return times
+
+
 def print_results(name, times):
     mean = sum(times) / len(times)
     std = (sum((t - mean) ** 2 for t in times) / len(times)) ** 0.5
@@ -76,6 +91,7 @@ def main():
     print(f"Iterations: {ITERATIONS}, Runs: {RUNS}\n")
 
     print_results("reqx (json.loads via pyo3)", bench_reqx_json(content))
+    print_results("httpr (serde_json + pythonize)", bench_httpr_json())
     print_results("httpx (json.loads)", bench_httpx_json())
     print_results("stdlib json.loads", bench_stdlib_json(text))
 
