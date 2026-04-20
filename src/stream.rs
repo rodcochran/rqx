@@ -15,6 +15,13 @@ use super::exceptions::*;
 #[pyclass]
 struct PyByteIterator {
     stream: Arc<Mutex<Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>>>,
+    // Currently accepted from the Python `iter_bytes(chunk_size=...)` call but
+    // not applied: reqwest's `Response::bytes_stream()` yields chunks as they
+    // arrive from the network, not at caller-chosen boundaries. Matching
+    // `chunk_size` semantics would require buffering here (accumulate bytes
+    // until we have `chunk_size` of them, then yield). Kept on the struct so
+    // the plumbing is in place when we implement that.
+    #[allow(dead_code)]
     chunk_size: u32,
 }
 
@@ -56,6 +63,8 @@ Async Support
 #[pyclass]
 struct PyAsyncByteIterator {
     stream: Arc<TokioMutex<Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>>>,
+    // See PyByteIterator.chunk_size — same situation on the async path.
+    #[allow(dead_code)]
     chunk_size: u32,
 }
 
@@ -116,6 +125,14 @@ pub struct PyStreamResponse {
 
 #[pymethods]
 impl PyStreamResponse {
+    /// Iterate over response bytes as they arrive.
+    ///
+    /// NOTE: `chunk_size` is currently accepted for API compatibility but is
+    /// not enforced — chunks are yielded with whatever boundaries reqwest
+    /// delivers from the network, typically 8–64 KB depending on the socket
+    /// and server behavior. If you need fixed-size chunks, buffer on the
+    /// caller side. Honoring `chunk_size` requires internal buffering that
+    /// we haven't wired up yet.
     #[pyo3(signature = (chunk_size=8192))]
     fn iter_bytes(&mut self, chunk_size: u32) -> PyResult<PyByteIterator> {
         let response = self.response.take()
@@ -216,6 +233,12 @@ pub struct PyAsyncStreamResponse {
 
 #[pymethods]
 impl PyAsyncStreamResponse {
+    /// Async iterate over response bytes as they arrive.
+    ///
+    /// NOTE: `chunk_size` is currently accepted for API compatibility but is
+    /// not enforced — chunks are yielded with whatever boundaries reqwest
+    /// delivers from the network. See PyStreamResponse::iter_bytes for the
+    /// full explanation.
     #[pyo3(signature = (chunk_size=8192))]
     fn iter_bytes(&mut self, chunk_size: u32) -> PyResult<PyAsyncByteIterator> {
         let response = self.response.take()

@@ -526,7 +526,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'a,PyAny>>{
 
         let start_time = std::time::Instant::now();
-        
+
         let request = build_client_request(
             &self.transport.client(),
             py,
@@ -538,7 +538,9 @@ impl PyAsyncClient {
             params,
             headers,
             auth,
-            timeout
+            // Fall back to the client-level default when no per-request timeout
+            // was provided, matching the sync client's behavior.
+            Some(timeout.unwrap_or(self.timeout_secs)),
         )?;
 
         let _follow_redirects = match follow_redirects {
@@ -718,7 +720,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'a,PyAny>>{
 
         let start_time = std::time::Instant::now();
-        
+
         let request = build_client_request(
             &self.transport.client(),
             py,
@@ -730,7 +732,9 @@ impl PyAsyncClient {
             params,
             headers,
             auth,
-            timeout
+            // Fall back to the client-level default when no per-request timeout
+            // was provided, matching the sync client's behavior.
+            Some(timeout.unwrap_or(self.timeout_secs)),
         )?;
 
         let _follow_redirects = match follow_redirects {
