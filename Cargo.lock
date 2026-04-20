@@ -1358,8 +1358,10 @@ name = "reqx-core"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "encoding_rs",
  "futures",
  "http",
+ "mime",
  "pyo3",
  "pyo3-async-runtimes",
  "reqwest",

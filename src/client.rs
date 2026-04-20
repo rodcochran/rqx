@@ -370,23 +370,29 @@ impl PyClient {
 
 impl PyClient {
     fn send_handling_redirects(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
-        
+
         let original_method = request.method().clone();
         let original_url = request.url().clone();
         let original_headers = request.headers().clone();
         let mut current_response = self.transport.handle_request(py, request).unwrap();
+        // Capture any cookies from the first response before we follow the
+        // redirect chain. Each intermediate hop can set cookies we'd
+        // otherwise lose, since the non-redirect return path also calls
+        // update_cookies once and would only see the final response.
+        self.update_cookies(&current_response);
 
         for _ in 1..self.max_redirects {
             if !(300..400).contains(&current_response.status_code) {
                 return Ok(current_response);
             }
             current_response = self.handle_redirect(
-                py, 
+                py,
                 &original_url,
-                &original_method, 
-                &original_headers, 
+                &original_method,
+                &original_headers,
                 &current_response,
             )?;
+            self.update_cookies(&current_response);
         }
 
         if (300..400).contains(&current_response.status_code) {
@@ -425,11 +431,20 @@ impl PyClient {
     }
 
     fn update_cookies(&self, resp: &PyResponse) {
+        // Skip the mutex when the response has no cookies — the common case.
+        // Most responses don't carry Set-Cookie, and taking the lock per
+        // request adds a serialization point on the return path under load.
+        if resp.cookies.is_empty() {
+            return;
+        }
         let mut cookies = self.cookies.lock().unwrap();
         cookies.extend(resp.cookies.iter().map(|(k, v)| (k.clone(), v.clone())));
     }
 
     fn update_cookies_from_stream(&self, resp: &PyStreamResponse) {
+        if resp.cookies.is_empty() {
+            return;
+        }
         let mut cookies = self.cookies.lock().unwrap();
         cookies.extend(resp.cookies.iter().map(|(k, v)| (k.clone(), v.clone())));
     }
@@ -539,13 +554,16 @@ impl PyAsyncClient {
         let cookies = Arc::clone(&self.cookies);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut resp = if _follow_redirects {
-                Self::send_handling_redirects(transport, request, max_redirects).await?
+                Self::send_handling_redirects(
+                    transport,
+                    request,
+                    max_redirects,
+                    Arc::clone(&cookies),
+                ).await?
             } else {
                 AsyncHTTPTransport::handle_request(transport, request).await?
             };
-            cookies.lock().await.extend(
-                resp.cookies.iter().map(|(k, v)| (k.clone(), v.clone()))
-            );
+            Self::accumulate_cookies(&cookies, &resp.cookies).await;
             let end_time = std::time::Instant::now();
             let total =  end_time - start_time;
             resp.elapsed = total.as_secs_f64();
@@ -732,12 +750,10 @@ impl PyAsyncClient {
                 todo!("Implement async redirect handling for stream")
             } else {
                 PyAsyncStreamResponse::from_response(
-                    AsyncHTTPTransport::send_raw(&transport.client(), request, &transport.semaphore()).await?
+                    AsyncHTTPTransport::send_raw(transport.client(), request, transport.semaphore()).await?
                 )?
             };
-            cookies.lock().await.extend(
-                resp.cookies.iter().map(|(k, v)| (k.clone(), v.clone()))
-            );
+            Self::accumulate_cookies(&cookies, &resp.cookies).await;
             let end_time = std::time::Instant::now();
             let total =  end_time - start_time;
             resp.elapsed = total.as_secs_f64();
@@ -772,14 +788,40 @@ impl PyAsyncClient {
 
 impl PyAsyncClient {
 
-    async fn send_handling_redirects(transport: AsyncHTTPTransport, request: Request, max_redirects: u32) -> PyResult<PyResponse> {
-        
+    /// Merge response cookies into the client's Python-visible jar.
+    ///
+    /// Skips the mutex entirely when the response carries no cookies (the
+    /// common case on a successful response), so the jar is only a
+    /// serialization point on responses that actually set cookies.
+    async fn accumulate_cookies(
+        cookies: &Arc<TokioMutex<HashMap<String, String>>>,
+        resp_cookies: &HashMap<String, String>,
+    ) {
+        if resp_cookies.is_empty() {
+            return;
+        }
+        cookies.lock().await.extend(
+            resp_cookies.iter().map(|(k, v)| (k.clone(), v.clone()))
+        );
+    }
+
+    async fn send_handling_redirects(
+        transport: AsyncHTTPTransport,
+        request: Request,
+        max_redirects: u32,
+        cookies: Arc<TokioMutex<HashMap<String, String>>>,
+    ) -> PyResult<PyResponse> {
+
         let original_method = request.method().clone();
         let original_url = request.url().clone();
         let original_headers = request.headers().clone();
         let mut current_response = AsyncHTTPTransport::
             handle_request(transport.clone(), request)
                 .await?;
+        // Capture any cookies set by the first response before we follow the
+        // redirect chain. Without this, Set-Cookie headers from intermediate
+        // hops are dropped from the Python-visible client.cookies view.
+        Self::accumulate_cookies(&cookies, &current_response.cookies).await;
 
         for _ in 1..max_redirects {
             if !(300..400).contains(&current_response.status_code) {
@@ -788,10 +830,11 @@ impl PyAsyncClient {
             current_response = Self::handle_redirect(
                 &transport,
                 &original_url,
-                &original_method, 
-                &original_headers, 
+                &original_method,
+                &original_headers,
                 &current_response,
             ).await?;
+            Self::accumulate_cookies(&cookies, &current_response.cookies).await;
         }
 
         if (300..400).contains(&current_response.status_code) {

@@ -21,7 +21,9 @@ use super::runtime::RUNTIME;
 #[derive(Clone)]
 pub struct HTTPTransport {
     http_client: Client,
-    max_connection_semaphore: Arc<Semaphore>,
+    // None when the user didn't pass max_connections — skips the atomic on
+    // every request. Some(sem) enforces the user-provided cap.
+    max_connection_semaphore: Option<Arc<Semaphore>>,
     #[pyo3(get)]
     retries: Option<PyRetry>
 }
@@ -65,10 +67,8 @@ impl HTTPTransport {
             proxy
         )?;
 
-        let max_connection_semaphore = match max_connections {
-            Some(mc) => {Arc::new(Semaphore::new(mc as usize))},
-            None => {Arc::new(Semaphore::new(Semaphore::MAX_PERMITS))}
-        };
+        let max_connection_semaphore = max_connections
+            .map(|mc| Arc::new(Semaphore::new(mc as usize)));
 
         Ok(Self {
             http_client: http_client,
@@ -86,7 +86,7 @@ impl Default for HTTPTransport {
                 .cookie_store(true)
                 .build()
                 .expect("Failed to build HTTP client"),
-            max_connection_semaphore: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
+            max_connection_semaphore: None,
             retries: None
         }
     }
@@ -108,7 +108,7 @@ impl HTTPTransport {
         PyResponse::from_response(py, response)
     }
 
-    pub fn send_raw(&self, py: Python<'_>, request: Request) -> PyResult<Response> { 
+    pub fn send_raw(&self, py: Python<'_>, request: Request) -> PyResult<Response> {
         let response = py.detach(|| {
             RUNTIME
                 .get()
@@ -120,10 +120,16 @@ impl HTTPTransport {
                 // (or invoking it from inside another tokio task) will panic — they should
                 // use the async variant of this API instead.
                 .block_on(async {
-                    let _permit = self.max_connection_semaphore
-                        .acquire()
-                        .await
-                        .map_err(|_| ReqxError::new_err("connection pool closed"))?;
+                    // Acquire a permit only when max_connections is set; otherwise skip the
+                    // atomic entirely. _permit lives to end of block regardless.
+                    let _permit = match self.max_connection_semaphore.as_ref() {
+                        Some(sem) => Some(
+                            sem.acquire()
+                                .await
+                                .map_err(|_| ReqxError::new_err("connection pool closed"))?,
+                        ),
+                        None => None,
+                    };
                     self.http_client
                         .execute(request)
                         .await
@@ -274,7 +280,9 @@ Async-compatible HTTP Transport
 #[derive(Clone)]
 pub struct AsyncHTTPTransport {
     http_client: Client,
-    max_connection_semaphore: Arc<Semaphore>,
+    // None when the user didn't pass max_connections — skips the atomic on
+    // every request. Some(sem) enforces the user-provided cap.
+    max_connection_semaphore: Option<Arc<Semaphore>>,
     #[pyo3(get)]
     retries: Option<PyRetry>
 }
@@ -318,10 +326,8 @@ impl AsyncHTTPTransport {
             proxy
         )?;
 
-        let max_connection_semaphore = match max_connections {
-            Some(mc) => {Arc::new(Semaphore::new(mc as usize))},
-            None => {Arc::new(Semaphore::new(Semaphore::MAX_PERMITS))}
-        };
+        let max_connection_semaphore = max_connections
+            .map(|mc| Arc::new(Semaphore::new(mc as usize)));
 
         Ok(Self {
             http_client: http_client,
@@ -339,7 +345,7 @@ impl Default for AsyncHTTPTransport {
                 .cookie_store(true)
                 .build()
                 .expect("Failed to build Async HTTP client"),
-            max_connection_semaphore: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
+            max_connection_semaphore: None,
             retries: None
         }
     }
@@ -357,24 +363,29 @@ impl AsyncHTTPTransport {
     }
 
     async fn send(
-        client: &Client, 
-        request: Request, 
-        max_connection_semaphore: &Arc<Semaphore>,
+        client: &Client,
+        request: Request,
+        max_connection_semaphore: &Option<Arc<Semaphore>>,
     ) -> PyResult<PyResponse> {
-        let response = AsyncHTTPTransport::send_raw(client, request, max_connection_semaphore).await?;
-        let resp_future = PyResponse::from_response_async(response);
-        resp_future.await
+        let response = Self::send_raw(client, request, max_connection_semaphore).await?;
+        PyResponse::from_response_async(response).await
     }
 
     pub async fn send_raw(
-        client: &Client, 
-        request: Request, 
-        max_connection_semaphore: &Arc<Semaphore>,
+        client: &Client,
+        request: Request,
+        max_connection_semaphore: &Option<Arc<Semaphore>>,
     ) -> PyResult<Response> {
-        let _permit = max_connection_semaphore
-            .acquire()
-            .await
-            .map_err(|_| ReqxError::new_err("connection pool closed"))?;
+        // Acquire a permit only when max_connections is set; otherwise skip the
+        // atomic entirely. _permit lives to end of scope regardless.
+        let _permit = match max_connection_semaphore.as_ref() {
+            Some(sem) => Some(
+                sem.acquire()
+                    .await
+                    .map_err(|_| ReqxError::new_err("connection pool closed"))?,
+            ),
+            None => None,
+        };
         let response = client
             .execute(request)
             .await
@@ -511,7 +522,7 @@ impl AsyncHTTPTransport {
         &self.http_client
     }
 
-    pub fn semaphore(&self) -> &Arc<Semaphore> {
+    pub fn semaphore(&self) -> &Option<Arc<Semaphore>> {
         &self.max_connection_semaphore
     }
 }

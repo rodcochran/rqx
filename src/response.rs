@@ -1,11 +1,15 @@
 use std::collections::HashMap;
-use http::{StatusCode};
-use pyo3::prelude::{Py, PyAny, PyModule, PyResult, Python, pyclass, pymethods};
-use pyo3::types::PyAnyMethods;
-use reqwest::{Response};
+use std::str::FromStr;
+
+use encoding_rs::Encoding;
+use http::StatusCode;
+use mime::Mime;
+use pyo3::prelude::{Py, PyAny, PyResult, Python, pyclass, pymethods};
+use pyo3::types::PyBytes;
+use reqwest::Response;
 
 use super::exceptions::{ReqxError, HTTPStatusError};
-// use super::py_json::{value_to_py};
+use super::py_json::value_to_py;
 use super::runtime::RUNTIME;
 
 #[pyclass]
@@ -17,7 +21,7 @@ pub struct PyResponse {
     pub headers: HashMap<String, String>,
 
     #[pyo3(get)]
-    pub content: Vec<u8>,
+    pub content: Py<PyBytes>,
     
     #[pyo3(get)]
     pub url: String,
@@ -35,29 +39,36 @@ pub struct PyResponse {
     pub(crate) http_version: String,
 
     #[pyo3(get)]
-    pub(crate) cookies: HashMap<String, String>
-
+    pub(crate) cookies: HashMap<String, String>,
 }
 
 #[pymethods]
 impl PyResponse {
-    fn text(&self) -> String {
-        // might want to revisit this... particularly the unwrap()
-        std::str::from_utf8(&self.content).unwrap().to_string()
+    /// Decoded response body as a string.
+    ///
+    /// Charset is taken from the Content-Type header (via the `mime` crate).
+    /// When there's no charset parameter, or the header is absent, we default
+    /// to UTF-8. Invalid byte sequences are replaced with U+FFFD rather than
+    /// raising — so callers never get a panic from calling `.text`.
+    #[getter]
+    fn text(&self, py: Python<'_>) -> String {
+        let bytes = self.content.as_bytes(py);
+        let encoding = detect_encoding_from_headers(&self.headers)
+            .unwrap_or(encoding_rs::UTF_8);
+        let (decoded, _, _) = encoding.decode(bytes);
+        decoded.into_owned()
     }
 
-    // Unoptimized implementation using Rust for json-parsing
-    // fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-    //     serde_json::from_str(&self.text())
-    //         .map_err(|e| ReqxError::new_err(format!("invalid JSON response: {e}")))
-    //         .and_then(|v| value_to_py(py, v))
-    // }
-
+    /// Parse the response body as JSON.
+    ///
+    /// Uses serde_json on the raw bytes and walks the resulting serde_json::Value
+    /// into Python objects via py_json::value_to_py. This skips the stdlib
+    /// json.loads round-trip (which was measurably slower than calling json.loads
+    /// directly — see benchmarks/b5_json_parsing.py / docs/improvements.md).
     fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let json_mod = PyModule::import(py, "json")?;
-        json_mod.call_method1("loads", (self.text(),))
-            .map(|obj| obj.unbind())
-            .map_err(|_| ReqxError::new_err("invalid JSON response"))
+        let value: serde_json::Value = serde_json::from_slice(self.content.as_bytes(py))
+            .map_err(|e| ReqxError::new_err(format!("invalid JSON response: {e}")))?;
+        value_to_py(py, value)
     }
 
     fn raise_for_status(&self) -> PyResult<()> {
@@ -76,6 +87,21 @@ impl PyResponse {
             }
         }
     }
+}
+
+/// Pull an encoding off the Content-Type header's charset parameter.
+///
+/// Parses the header with the `mime` crate, so we get correct handling of
+/// quoting, whitespace, multiple parameters, etc. without reinventing a
+/// MIME parser. Returns `None` if the header is missing, unparseable, has
+/// no charset parameter, or names an encoding `encoding_rs` doesn't know.
+fn detect_encoding_from_headers(
+    headers: &HashMap<String, String>,
+) -> Option<&'static Encoding> {
+    let content_type = headers.get("content-type")?;
+    let mime: Mime = Mime::from_str(content_type).ok()?;
+    let charset = mime.get_param(mime::CHARSET)?;
+    Encoding::for_label(charset.as_str().as_bytes())
 }
 
 impl PyResponse {
@@ -102,18 +128,19 @@ impl PyResponse {
             )
             .collect();
 
-        let content = py
-            .detach(|| {
-                RUNTIME
-                    .get()
-                    .ok_or_else(|| ReqxError::new_err("runtime not initialized"))?
-                    .block_on(async {
-                        response.bytes().await.map_err(|e| {
-                            ReqxError::new_err(format!("failed to read body: {e}"))
-                        })
+        let body = py.detach(|| {
+            RUNTIME
+                .get()
+                .ok_or_else(|| ReqxError::new_err("runtime not initialized"))?
+                .block_on(async {
+                    response.bytes().await.map_err(|e| {
+                        ReqxError::new_err(format!("failed to read body: {e}"))
                     })
-            })?
-            .to_vec();
+                })
+        })?;
+        // Build PyBytes once under the GIL. No Vec<u8> intermediate; callers get
+        // the same Python bytes object on every access instead of a fresh clone.
+        let content = PyBytes::new(py, &body).unbind();
 
         Ok(
             PyResponse  {
@@ -125,7 +152,7 @@ impl PyResponse {
                 num_retries: 0,
                 retry_history: Vec::new(),
                 http_version: http_version,
-                cookies: cookies
+                cookies: cookies,
             }
         )
 
@@ -154,13 +181,40 @@ impl PyResponse {
             )
             .collect();
 
-        let content = response
-            .bytes()
-            .await
-            .map_err(|e| {
-                ReqxError::new_err(format!("failed to read body: {e}"))
-            })?
-            .to_vec();
+        let body = response.bytes().await.map_err(|e| {
+            ReqxError::new_err(format!("failed to read body: {e}"))
+        })?;
+        // Briefly acquire the GIL to allocate a Python bytes object directly
+        // from the response body. No .await crosses this closure so there's
+        // no deadlock risk with the GIL acquire that pyo3-async-runtimes
+        // performs later to dispatch our result back to Python.
+        //
+        // This is one of three viable ways to get the body into Python:
+        //
+        //   1. (current) Build Py<PyBytes> here, inside the async future.
+        //      Cost: one extra GIL acquire per response (this one here,
+        //      plus the one pyo3-async-runtimes already does when it
+        //      resolves the Python future). Under heavy completion storms
+        //      those two acquires can contend for the same lock.
+        //
+        //   2. Return an intermediate struct holding bytes::Bytes from the
+        //      future, and `impl IntoPyObject` on it so PyBytes is built
+        //      during the conversion step — which runs inside the GIL
+        //      acquire that pyo3-async-runtimes already does. Zero extra
+        //      acquires per response; requires a two-struct split and an
+        //      IntoPyObject impl that has to live alongside the pyclass.
+        //
+        //   3. Keep the body as Vec<u8> on the response struct, and clone
+        //      to Python bytes on every `.content` access. Zero extra
+        //      acquires in the future, but every access allocates, and the
+        //      body lives on both heaps for its lifetime (roughly 2x RSS
+        //      on the response path).
+        //
+        // Picked (1) because it's simpler than (2) while keeping the
+        // single-allocation property of (3). If profiling ever shows the
+        // double GIL acquire showing up as tail latency at high concurrency,
+        // switch to (2).
+        let content = Python::attach(|py| PyBytes::new(py, &body).unbind());
 
         Ok(
             PyResponse  {
@@ -172,7 +226,7 @@ impl PyResponse {
                 num_retries: 0,
                 retry_history: Vec::new(),
                 http_version: http_version,
-                cookies: cookies
+                cookies: cookies,
             }
         )
 

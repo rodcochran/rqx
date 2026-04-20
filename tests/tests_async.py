@@ -308,7 +308,7 @@ async def test_get_total_elapsed_time():
 async def test_valid_text():
     client = reqx.AsyncClient()
     resp = await client.get(f"{HTTPBIN_HOST}/get")
-    text = resp.text()
+    text = resp.text
     assert text is not None
     assert isinstance(text, str)
     assert len(text) > 0
