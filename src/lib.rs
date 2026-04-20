@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_if, clippy::too_many_arguments)]
+
 use pyo3::prelude::*;
 use pyo3::exceptions::{PyRuntimeError};
 use tokio::runtime::Builder as RtBuilder;
