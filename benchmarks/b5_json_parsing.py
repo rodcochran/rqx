@@ -15,7 +15,7 @@ async def get_response_body():
     """Fetch the response body once for reuse"""
     async with reqx.AsyncClient() as client:
         resp = await client.get(TARGET_URL)
-        return resp.content, resp.text()
+        return resp.content, resp.text
 
 
 def bench_reqx_json(content):
@@ -90,7 +90,7 @@ def main():
     print(f"JSON payload size: {len(content)} bytes")
     print(f"Iterations: {ITERATIONS}, Runs: {RUNS}\n")
 
-    print_results("reqx (json.loads via pyo3)", bench_reqx_json(content))
+    print_results("reqx (serde_json + value_to_py)", bench_reqx_json(content))
     print_results("httpr (serde_json + pythonize)", bench_httpr_json())
     print_results("httpx (json.loads)", bench_httpx_json())
     print_results("stdlib json.loads", bench_stdlib_json(text))
