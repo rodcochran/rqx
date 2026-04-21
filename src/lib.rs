@@ -1,4 +1,9 @@
-#![allow(clippy::collapsible_if, clippy::too_many_arguments)]
+#![allow(
+    clippy::collapsible_if, 
+    clippy::too_many_arguments,
+    clippy::redundant_field_names,
+    clippy::needless_return,
+)]
 
 use pyo3::prelude::*;
 use pyo3::exceptions::{PyRuntimeError};

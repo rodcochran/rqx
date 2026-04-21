@@ -121,8 +121,8 @@ impl PyClient {
         let start_time = std::time::Instant::now();
 
         let request = build_client_request(
-            &self.transport.client(),
-            py,
+            self.transport.client(),
+            // py,
             method,
             url,
             content,
@@ -304,8 +304,8 @@ impl PyClient {
         let start_time = std::time::Instant::now();
 
         let request = build_client_request(
-            &self.transport.client(),
-            py,
+            self.transport.client(),
+            // py,
             method,
             url,
             content,
@@ -367,7 +367,6 @@ impl PyClient {
 ///    This impl of PyClient is for defining functions that are not to be wrapped in #pymethods, 
 ///    and therefore not exposed to Python.
 ///
-
 impl PyClient {
     fn send_handling_redirects(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
 
@@ -410,18 +409,18 @@ impl PyClient {
         original_headers: &HeaderMap,
         resp: &PyResponse,
     ) -> PyResult<PyResponse> {
-        let new_url = determine_redirect_url(&original_url, &resp)
+        let new_url = determine_redirect_url(original_url, resp)
             .map_err(|e| {
                 ReqxError::new_err(format!("Error parsing url from redirect: {e}"))
             }
         )?;
         
-        let new_method = determine_redirect_method(&original_method, &resp);
+        let new_method = determine_redirect_method(original_method, resp);
         let current_request = build_redirect_request(
-            &self.transport.client(),
+            self.transport.client(),
             new_method,
             new_url,
-            &original_headers
+            original_headers
         );
         let current_response = self.transport.handle_request(
             py, 
@@ -528,8 +527,8 @@ impl PyAsyncClient {
         let start_time = std::time::Instant::now();
 
         let request = build_client_request(
-            &self.transport.client(),
-            py,
+            self.transport.client(),
+            // py,
             method,
             url,
             content,
@@ -722,8 +721,8 @@ impl PyAsyncClient {
         let start_time = std::time::Instant::now();
 
         let request = build_client_request(
-            &self.transport.client(),
-            py,
+            self.transport.client(),
+            // py,
             method,
             url,
             content,
@@ -855,18 +854,18 @@ impl PyAsyncClient {
         original_headers: &HeaderMap,
         resp: &PyResponse,
     ) -> PyResult<PyResponse> {
-        let new_url = determine_redirect_url(&original_url, &resp)
+        let new_url = determine_redirect_url(original_url, resp)
             .map_err(|e| {
                 ReqxError::new_err(format!("Error parsing url from redirect: {e}"))
             }
         )?;
         
-        let new_method = determine_redirect_method(&original_method, &resp);
+        let new_method = determine_redirect_method(original_method, resp);
         let current_request = build_redirect_request(
-            &transport.client(),
+            transport.client(),
             new_method,
             new_url,
-            &original_headers
+            original_headers
         );
         let current_response = AsyncHTTPTransport::handle_request(
             transport.clone(),

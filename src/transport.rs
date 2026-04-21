@@ -1,14 +1,11 @@
 use std::collections::HashMap;
-use std::f64::INFINITY;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::usize;
 use reqwest::{Client, Request, Response};
 use reqwest::tls::Certificate;
 use pyo3::prelude::{PyRef, PyResult, Python,  pyclass, pymethods};
 use pyo3::types::{PyAny, PyAnyMethods, PyBool, PyString};
 use pyo3::Bound;
-use tokio;
 use tokio::sync::{Semaphore};
 
 use super::exceptions::*;
@@ -152,7 +149,7 @@ impl HTTPTransport {
         let is_retryable_method = r.allowed_methods.contains(&method);
         let backoff_max: f32 = r.backoff_max.into();
         let respect_retry = r.respect_retry_after_header;
-        let total_timeout: f64 = r.total_timeout.unwrap_or(INFINITY);
+        let total_timeout: f64 = r.total_timeout.unwrap_or(f64::INFINITY);
 
         // Stateful components to track
         let mut num_retries: i32 = 0;
@@ -177,7 +174,7 @@ impl HTTPTransport {
             }
             if attempt > 0 {
                 // increment retries
-                num_retries = num_retries + 1;
+                num_retries += 1;
 
                 let retry_after: f32 = if respect_retry {
                     current_response.as_ref()
@@ -407,7 +404,7 @@ impl AsyncHTTPTransport {
         let is_retryable_method = r.allowed_methods.contains(&method);
         let backoff_max: f32 = r.backoff_max.into();
         let respect_retry = r.respect_retry_after_header;
-        let total_timeout: f64 = r.total_timeout.unwrap_or(INFINITY);
+        let total_timeout: f64 = r.total_timeout.unwrap_or(f64::INFINITY);
 
         // Stateful components to track
         let mut num_retries: i32 = 0;
@@ -433,7 +430,7 @@ impl AsyncHTTPTransport {
 
             if attempt > 0 {
                 // increment retries
-                num_retries = num_retries + 1;
+                num_retries += 1;
 
                 let retry_after: f32 = if respect_retry {
                     current_response.as_ref()

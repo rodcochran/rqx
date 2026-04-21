@@ -20,7 +20,7 @@ pub fn value_to_py(py: Python<'_>, val: serde_json::Value) -> PyResult<Py<PyAny>
         serde_json::Value::Array(arr) => {
             let items: PyResult<Vec<Py<PyAny>>> =
                 arr.into_iter().map(|v| value_to_py(py, v)).collect();
-            Ok(items?.into_pyobject(py)?.unbind().into())
+            Ok(items?.into_pyobject(py)?.unbind())
         }
 
         serde_json::Value::Object(obj) => {
@@ -34,7 +34,10 @@ pub fn value_to_py(py: Python<'_>, val: serde_json::Value) -> PyResult<Py<PyAny>
 }
 
 
-pub fn py_to_value(py: Python<'_>, py_val: &Bound<'_, PyAny>) -> serde_json::Value  {
+pub fn py_to_value(
+    // py: Python<'_>, 
+    py_val: &Bound<'_, PyAny>,
+) -> serde_json::Value  {
 
     if py_val.is_none() {
         serde_json::Value::Null   
@@ -94,7 +97,10 @@ pub fn py_to_value(py: Python<'_>, py_val: &Bound<'_, PyAny>) -> serde_json::Val
                     |(k, v)| 
                     (
                         k.extract::<String>().unwrap(), 
-                        py_to_value(py, &v)) 
+                        py_to_value(
+                            // py, 
+                            &v
+                        )) 
                     )
                 .collect()
         )
@@ -104,7 +110,11 @@ pub fn py_to_value(py: Python<'_>, py_val: &Bound<'_, PyAny>) -> serde_json::Val
             py_val
                 .cast::<PyList>()
                 .iter()
-                .map(|v| py_to_value(py, v))
+                .map(
+                    |v| py_to_value(
+                        // py, 
+                        v
+                    ))
                 .collect()
         )
     } else {
