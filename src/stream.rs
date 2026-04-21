@@ -3,18 +3,25 @@ use futures::{Stream, StreamExt};
 use reqwest::{Response};
 use std::collections::HashMap;
 use std::pin::{Pin};
-use std::sync::{Arc, Mutex};
-use tokio::sync::{Mutex as TokioMutex};
+use std::sync::Arc;
+use tokio::sync::Mutex as TokioMutex;
 use pyo3::Bound;
 use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python, pyclass, pymethods};
 
 use super::runtime::RUNTIME;
 use super::exceptions::*;
 
+/// Streaming HTTP body source. `Pin<Box<dyn ...>>` is standard practice for
+/// storing an erased, async-trait-object Stream: `dyn Stream` is unsized
+/// (hence Box), the stream internally self-references its connection state
+/// so it must not move once polled (hence Pin), and `+ Send` lets it cross
+/// thread boundaries when shared via `Arc`.
+type ChunkStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
+
 
 #[pyclass]
 struct PyByteIterator {
-    stream: Arc<Mutex<Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>>>,
+    stream: Arc<TokioMutex<ChunkStream>>,
     // Currently accepted from the Python `iter_bytes(chunk_size=...)` call but
     // not applied: reqwest's `Response::bytes_stream()` yields chunks as they
     // arrive from the network, not at caller-chosen boundaries. Matching
@@ -40,9 +47,13 @@ impl PyByteIterator {
         let chunk = py.detach(|| {
             RUNTIME
                 .get()
-                .ok_or_else(|| ReqxError::new_err("runtime not initialized")).unwrap()
+                .expect("runtime not initialized")
                 .block_on(async {
-                    let mut guard = stream.lock().unwrap();
+                    // .lock().await on TokioMutex — yields on contention
+                    // instead of blocking the OS thread. Guard is still held
+                    // across the next await, but now it's an async-aware
+                    // guard, which is what clippy wants.
+                    let mut guard = stream.lock().await;
                     guard.as_mut().next().await
                 })
         });
@@ -62,7 +73,7 @@ Async Support
 
 #[pyclass]
 struct PyAsyncByteIterator {
-    stream: Arc<TokioMutex<Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>>>,
+    stream: Arc<TokioMutex<ChunkStream>>,
     // See PyByteIterator.chunk_size — same situation on the async path.
     #[allow(dead_code)]
     chunk_size: u32,
@@ -139,7 +150,7 @@ impl PyStreamResponse {
             .ok_or_else(|| ReqxError::new_err("response already consumed"))?;
         Ok(
             PyByteIterator {
-                stream: Arc::new(Mutex::new(Box::pin(response.bytes_stream()))),
+                stream: Arc::new(TokioMutex::new(Box::pin(response.bytes_stream()))),
                 chunk_size,
             }
         )

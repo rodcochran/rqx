@@ -50,11 +50,12 @@ impl HTTPTransport {
         // need to make it so that transport only creates default 
         // when someone passes a blank (not null) Retry object.
         // Default behavior is no retry.
-        let _retries = match retries {
-            Some(r) => Some(r.clone()),
-            // None => PyRetry::with_defaults(),
-            None => None
-        };
+        // let _retries = match retries {
+        //     Some(r) => Some(r.clone()),
+        //     // None => PyRetry::with_defaults(),
+        //     None => None
+        // };
+        let _retries = retries.map(|r| r.clone());
 
         let http_client = build_http_client(
             max_keepalive_connections, 
@@ -147,7 +148,7 @@ impl HTTPTransport {
         let r = self.retries.as_ref().unwrap();
         let method = request.method().to_string();
         let is_retryable_method = r.allowed_methods.contains(&method);
-        let backoff_max: f32 = r.backoff_max.into();
+        let backoff_max: f32 = r.backoff_max;
         let respect_retry = r.respect_retry_after_header;
         let total_timeout: f64 = r.total_timeout.unwrap_or(f64::INFINITY);
 
@@ -309,11 +310,12 @@ impl AsyncHTTPTransport {
         // need to make it so that transport only creates default 
         // when someone passes a blank (not null) Retry object.
         // Default behavior is no retry.
-        let _retries = match retries {
-            Some(r) => Some(r.clone()),
-            // None => PyRetry::with_defaults(),
-            None => None
-        };
+        // let _retries = match retries {
+        //     Some(r) => Some(r.clone()),
+        //     // None => PyRetry::with_defaults(),
+        //     None => None
+        // };
+        let _retries = retries.map(|r| r.clone()); 
 
         let http_client = build_http_client(
             max_keepalive_connections, 
@@ -402,7 +404,7 @@ impl AsyncHTTPTransport {
         let r = transport.retries.as_ref().unwrap();
         let method = request.method().to_string();
         let is_retryable_method = r.allowed_methods.contains(&method);
-        let backoff_max: f32 = r.backoff_max.into();
+        let backoff_max: f32 = r.backoff_max;
         let respect_retry = r.respect_retry_after_header;
         let total_timeout: f64 = r.total_timeout.unwrap_or(f64::INFINITY);
 
