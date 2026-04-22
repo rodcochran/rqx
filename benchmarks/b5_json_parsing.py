@@ -4,7 +4,7 @@ import time
 
 import httpr
 import httpx
-import reqx
+import rqx
 
 TARGET_URL = "http://localhost:8080/json"
 ITERATIONS = 10_000
@@ -13,14 +13,14 @@ RUNS = 5
 
 async def get_response_body():
     """Fetch the response body once for reuse"""
-    async with reqx.AsyncClient() as client:
+    async with rqx.AsyncClient() as client:
         resp = await client.get(TARGET_URL)
         return resp.content, resp.text
 
 
-def bench_reqx_json(content):
+def bench_rqx_json(content):
     """Build a PyResponse-like object and parse JSON"""
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.get(TARGET_URL)
     # Now repeatedly parse the cached body
     times = []
@@ -90,7 +90,7 @@ def main():
     print(f"JSON payload size: {len(content)} bytes")
     print(f"Iterations: {ITERATIONS}, Runs: {RUNS}\n")
 
-    print_results("reqx (serde_json + value_to_py)", bench_reqx_json(content))
+    print_results("rqx (serde_json + value_to_py)", bench_rqx_json(content))
     print_results("httpr (serde_json + pythonize)", bench_httpr_json())
     print_results("httpx (json.loads)", bench_httpx_json())
     print_results("stdlib json.loads", bench_stdlib_json(text))

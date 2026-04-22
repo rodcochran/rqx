@@ -3,17 +3,17 @@
 Isolates the cost of repeated TLS handshakes by hitting nginx with
 `keepalive_timeout 0` — every request opens a new TCP + TLS connection.
 The hypothesis: under high concurrency with no connection reuse,
-reqx's multi-threaded tokio runtime should distribute the CPU cost of
+rqx's multi-threaded tokio runtime should distribute the CPU cost of
 concurrent handshakes across worker threads, while httpr's single-
 threaded runtime serializes them through one thread. If the hypothesis
-is right, reqx should pull ahead of httpr at c >= ~100 or so.
+is right, rqx should pull ahead of httpr at c >= ~100 or so.
 
 Important caveat on TLS backends:
-  reqx inherits reqwest's default TLS feature, which on macOS resolves
+  rqx inherits reqwest's default TLS feature, which on macOS resolves
   to `native-tls` (Apple SecureTransport). httpr explicitly uses
   `rustls-tls`. So this bench compares apples-to-oranges on the TLS
   implementation as well as on the runtime architecture. Any gap
-  therefore has two plausible causes. A follow-up bench with reqx
+  therefore has two plausible causes. A follow-up bench with rqx
   rebuilt on `rustls-tls` would isolate them — not done here.
 
 Prereq:
@@ -36,7 +36,7 @@ from pathlib import Path
 import aiohttp
 import httpr
 import httpx
-import reqx
+import rqx
 
 TARGET_URL = "https://localhost:8443/json"
 CONCURRENCY_LEVELS = [10, 50, 100, 200, 500]
@@ -63,7 +63,7 @@ async def sweep(client, get_fn, concurrency, duration):
     return count / duration, failures
 
 
-async def reqx_get(client, url):
+async def rqx_get(client, url):
     return await client.get(url)
 
 
@@ -82,8 +82,8 @@ async def aiohttp_get(session, url):
         await resp.read()
 
 
-def make_reqx():
-    return reqx.AsyncClient(transport=reqx.AsyncHTTPTransport(verify=False))
+def make_rqx():
+    return rqx.AsyncClient(transport=rqx.AsyncHTTPTransport(verify=False))
 
 
 def make_httpr():
@@ -104,7 +104,7 @@ def make_aiohttp():
 
 
 CLIENTS = [
-    ("reqx",    make_reqx,    reqx_get),
+    ("rqx",    make_rqx,    rqx_get),
     ("httpr",   make_httpr,   httpr_get),
     ("httpx",   make_httpx,   httpx_get),
     ("aiohttp", make_aiohttp, aiohttp_get),

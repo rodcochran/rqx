@@ -5,7 +5,7 @@ import tracemalloc
 import aiohttp
 import httpr
 import httpx
-import reqx
+import rqx
 
 TARGET_URL = "http://localhost:8080/json"
 TOTAL_REQUESTS = 1000
@@ -18,8 +18,8 @@ def get_rss_mb():
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
 
 
-async def bench_reqx():
-    async with reqx.AsyncClient() as client:
+async def bench_rqx():
+    async with rqx.AsyncClient() as client:
 
         async def worker():
             for _ in range(REQUESTS_PER_WORKER):
@@ -81,7 +81,7 @@ async def measure(name, fn):
 
 async def main():
     for name, fn in [
-        ("reqx", bench_reqx),
+        ("rqx", bench_rqx),
         ("httpr", bench_httpr),
         ("httpx", bench_httpx),
         ("aiohttp", bench_aiohttp),

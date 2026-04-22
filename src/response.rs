@@ -8,7 +8,7 @@ use pyo3::prelude::{Py, PyAny, PyResult, Python, pyclass, pymethods};
 use pyo3::types::PyBytes;
 use reqwest::Response;
 
-use super::exceptions::{ReqxError, HTTPStatusError};
+use super::exceptions::{RqxError, HTTPStatusError};
 use super::py_json::value_to_py;
 use super::runtime::RUNTIME;
 
@@ -67,7 +67,7 @@ impl PyResponse {
     /// directly — see benchmarks/b5_json_parsing.py / docs/improvements.md).
     fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let value: serde_json::Value = serde_json::from_slice(self.content.as_bytes(py))
-            .map_err(|e| ReqxError::new_err(format!("invalid JSON response: {e}")))?;
+            .map_err(|e| RqxError::new_err(format!("invalid JSON response: {e}")))?;
         value_to_py(py, value)
     }
 
@@ -83,7 +83,7 @@ impl PyResponse {
                 }
             }
             Err(e) => {
-                Err(ReqxError::new_err(format!("invalid Status Code: {e}")))
+                Err(RqxError::new_err(format!("invalid Status Code: {e}")))
             }
         }
     }
@@ -131,10 +131,10 @@ impl PyResponse {
         let body = py.detach(|| {
             RUNTIME
                 .get()
-                .ok_or_else(|| ReqxError::new_err("runtime not initialized"))?
+                .ok_or_else(|| RqxError::new_err("runtime not initialized"))?
                 .block_on(async {
                     response.bytes().await.map_err(|e| {
-                        ReqxError::new_err(format!("failed to read body: {e}"))
+                        RqxError::new_err(format!("failed to read body: {e}"))
                     })
                 })
         })?;
@@ -182,7 +182,7 @@ impl PyResponse {
             .collect();
 
         let body = response.bytes().await.map_err(|e| {
-            ReqxError::new_err(format!("failed to read body: {e}"))
+            RqxError::new_err(format!("failed to read body: {e}"))
         })?;
         // Briefly acquire the GIL to allocate a Python bytes object directly
         // from the response body. No .await crosses this closure so there's

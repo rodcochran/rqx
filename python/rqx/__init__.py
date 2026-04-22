@@ -1,5 +1,5 @@
 # import from the compiled Rust extension module
-from ._reqx import (
+from ._rqx import (
     AsyncHTTPTransport,
     ConnectError,
     ConnectTimeout,
@@ -14,7 +14,7 @@ from ._reqx import (
     PyRetry,
     ReadError,
     ReadTimeout,
-    ReqxError,
+    RqxError,
     TimeoutException,
     TooManyRedirects,
     TransportError,
@@ -42,7 +42,7 @@ __all__ = [
     "ReadError",
     "ReadTimeout",
     "Retry",
-    "ReqxError",
+    "RqxError",
     "TimeoutException",
     "TooManyRedirects",
     "TransportError",

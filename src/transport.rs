@@ -110,7 +110,7 @@ impl HTTPTransport {
         let response = py.detach(|| {
             RUNTIME
                 .get()
-                .ok_or_else(|| ReqxError::new_err("runtime not initialized"))?
+                .ok_or_else(|| RqxError::new_err("runtime not initialized"))?
                 // NOTE: block_on panics if called from within an existing tokio runtime
                 // context ("Cannot start a runtime from within a runtime"). Safe here
                 // because Python is the caller and py.detach releases the GIL without
@@ -124,7 +124,7 @@ impl HTTPTransport {
                         Some(sem) => Some(
                             sem.acquire()
                                 .await
-                                .map_err(|_| ReqxError::new_err("connection pool closed"))?,
+                                .map_err(|_| RqxError::new_err("connection pool closed"))?,
                         ),
                         None => None,
                     };
@@ -135,7 +135,7 @@ impl HTTPTransport {
                             if e.is_timeout() {
                                 TimeoutException::new_err(format!("request timed out: {e}"))
                             } else {
-                                ReqxError::new_err(format!("request failed: {e}"))
+                                RqxError::new_err(format!("request failed: {e}"))
                             }
                         })
                 })
@@ -201,7 +201,7 @@ impl HTTPTransport {
             request_copy = request
                 .try_clone()
                 .ok_or_else(
-                    || ReqxError::new_err("Streaming request bodies cannot be retried")
+                    || RqxError::new_err("Streaming request bodies cannot be retried")
                 )?;
             
             let attempt_start = std::time::Instant::now();
@@ -381,7 +381,7 @@ impl AsyncHTTPTransport {
             Some(sem) => Some(
                 sem.acquire()
                     .await
-                    .map_err(|_| ReqxError::new_err("connection pool closed"))?,
+                    .map_err(|_| RqxError::new_err("connection pool closed"))?,
             ),
             None => None,
         };
@@ -392,7 +392,7 @@ impl AsyncHTTPTransport {
                 if e.is_timeout() {
                     TimeoutException::new_err(format!("request timed out: {e}"))
                 } else {
-                    ReqxError::new_err(format!("request failed: {e}"))
+                    RqxError::new_err(format!("request failed: {e}"))
                 }
             }
         )?;
@@ -453,7 +453,7 @@ impl AsyncHTTPTransport {
             request_copy = request
                 .try_clone()
                 .ok_or_else(
-                    || ReqxError::new_err("Streaming request bodies cannot be retried")
+                    || RqxError::new_err("Streaming request bodies cannot be retried")
                 )?;
             
             let attempt_start = std::time::Instant::now();
@@ -567,11 +567,11 @@ fn build_http_client(
         else if v.is_instance_of::<PyString>() {
             let path = v
                 .extract::<String>()
-                .map_err(|e| ReqxError::new_err(format!("failed to parse CA cert path: {e}")))?;
+                .map_err(|e| RqxError::new_err(format!("failed to parse CA cert path: {e}")))?;
             let bytes = std::fs::read(&path)
-                .map_err(|e| ReqxError::new_err(format!("failed to read CA cert: {e}")))?;
+                .map_err(|e| RqxError::new_err(format!("failed to read CA cert: {e}")))?;
             let cert = Certificate::from_pem(&bytes)
-                .map_err(|e| ReqxError::new_err(format!("failed to construct CA cert: {e}")))?;
+                .map_err(|e| RqxError::new_err(format!("failed to construct CA cert: {e}")))?;
 
             http_client_builder = http_client_builder.add_root_certificate(cert);
         }
@@ -583,7 +583,7 @@ fn build_http_client(
                 "http" => reqwest::Proxy::http(&url),
                 "https" => reqwest::Proxy::https(&url),
                 _ => continue,
-            }.map_err(|e| ReqxError::new_err(format!("invalid proxy: {e}")))?;
+            }.map_err(|e| RqxError::new_err(format!("invalid proxy: {e}")))?;
             http_client_builder = http_client_builder.proxy(p);
         }
     }

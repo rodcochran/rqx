@@ -4,7 +4,7 @@ import time
 import aiohttp
 import httpr
 import httpx
-import reqx
+import rqx
 
 TARGET_URL = "http://localhost:8080/json"
 TOTAL_REQUESTS = 1000
@@ -26,15 +26,15 @@ async def bench_without_reuse(name, bench_fn):
     return elapsed
 
 
-async def reqx_with_reuse():
-    async with reqx.AsyncClient() as client:
+async def rqx_with_reuse():
+    async with rqx.AsyncClient() as client:
         for _ in range(TOTAL_REQUESTS):
             await client.get(TARGET_URL)
 
 
-async def reqx_without_reuse():
+async def rqx_without_reuse():
     for _ in range(TOTAL_REQUESTS):
-        async with reqx.AsyncClient() as client:
+        async with rqx.AsyncClient() as client:
             await client.get(TARGET_URL)
 
 
@@ -78,7 +78,7 @@ async def aiohttp_without_reuse():
 
 async def main():
     for name, with_fn, without_fn in [
-        ("reqx", reqx_with_reuse, reqx_without_reuse),
+        ("rqx", rqx_with_reuse, rqx_without_reuse),
         ("httpr", httpr_with_reuse, httpr_without_reuse),
         ("httpx", httpx_with_reuse, httpx_without_reuse),
         ("aiohttp", aiohttp_with_reuse, aiohttp_without_reuse),

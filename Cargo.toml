@@ -1,11 +1,11 @@
 # Cargo.toml
 [package]
-name = "reqx-core"
+name = "rqx-core"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "_reqx"
+name = "_rqx"
 crate-type = ["cdylib"]
 
 [dependencies]

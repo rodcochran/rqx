@@ -27,7 +27,7 @@ use transport::{HTTPTransport, AsyncHTTPTransport};
 
 
 #[pymodule]
-fn _reqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _rqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Multi-threaded tokio runtime (default worker count = num_cpus). H3 tried
     // worker_threads(1) but regressed throughput at c>=500 by ~20%; see
     // docs/improvements.md for the H3 experiment outcome.
@@ -51,7 +51,7 @@ fn _reqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRetry>()?;
     m.add_class::<HTTPTransport>()?;
     m.add_class::<AsyncHTTPTransport>()?;
-    m.add("ReqxError", m.py().get_type::<ReqxError>())?;
+    m.add("RqxError", m.py().get_type::<RqxError>())?;
     m.add("RequestError", m.py().get_type::<RequestError>())?;
     m.add("MaxRetriesExceeded", m.py().get_type::<MaxRetriesExceeded>())?;
     m.add("TransportError", m.py().get_type::<TransportError>())?;

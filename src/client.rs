@@ -411,7 +411,7 @@ impl PyClient {
     ) -> PyResult<PyResponse> {
         let new_url = determine_redirect_url(original_url, resp)
             .map_err(|e| {
-                ReqxError::new_err(format!("Error parsing url from redirect: {e}"))
+                RqxError::new_err(format!("Error parsing url from redirect: {e}"))
             }
         )?;
         
@@ -856,7 +856,7 @@ impl PyAsyncClient {
     ) -> PyResult<PyResponse> {
         let new_url = determine_redirect_url(original_url, resp)
             .map_err(|e| {
-                ReqxError::new_err(format!("Error parsing url from redirect: {e}"))
+                RqxError::new_err(format!("Error parsing url from redirect: {e}"))
             }
         )?;
         

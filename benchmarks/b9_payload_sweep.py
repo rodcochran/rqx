@@ -11,11 +11,11 @@ A note on payload size ceiling:
   crashes under sustained load. We intentionally stop at 100 KB here. A real
   1-MB-payload bench needs nginx running on the host, not in Docker, which
   is a bigger setup change worth doing separately if/when the question is
-  specifically "what does reqx do at file-download-sized responses?"
+  specifically "what does rqx do at file-download-sized responses?"
 
 A note on concurrency per payload:
   Large payloads + high concurrency combine multiplicatively on Docker
-  networking. At 100 KB × c=100, we saw reqx hit Docker's bandwidth ceiling
+  networking. At 100 KB × c=100, we saw rqx hit Docker's bandwidth ceiling
   and get ~5% request failures. Dropping to c=30 at 100 KB keeps total
   bytes-in-flight under ~3 MB and stays well below the ceiling. For the
   smaller payloads the Docker cap isn't binding so we keep c=100.
@@ -38,7 +38,7 @@ from pathlib import Path
 import aiohttp
 import httpr
 import httpx
-import reqx
+import rqx
 
 DEFAULT_BASE_URL = "http://localhost:8080"
 
@@ -89,7 +89,7 @@ async def sweep(client, get_fn, url, concurrency, duration):
     return count / duration, total_bytes, failures
 
 
-async def reqx_get(client, url):
+async def rqx_get(client, url):
     return await client.get(url)
 
 
@@ -170,7 +170,7 @@ async def main(json_path=None, base_url=DEFAULT_BASE_URL, payload_filter=None):
     results = {}
 
     clients = [
-        ("reqx", reqx.AsyncClient, reqx_get),
+        ("rqx", rqx.AsyncClient, rqx_get),
         ("httpr", httpr.AsyncClient, httpr_get),
         ("httpx", httpx.AsyncClient, httpx_get),
         ("aiohttp", aiohttp.ClientSession, aiohttp_get),

@@ -18,7 +18,7 @@ import time
 import aiohttp
 import httpr
 import httpx
-import reqx
+import rqx
 
 TARGET_URL = "http://localhost:8081/json"
 WARMUP_SECONDS = 2
@@ -26,8 +26,8 @@ MEASURE_SECONDS = 10
 CONCURRENCY_LEVELS = [10, 50, 100, 200, 500]
 
 
-async def bench_reqx(concurrency, duration):
-    async with reqx.AsyncClient() as client:
+async def bench_rqx(concurrency, duration):
+    async with rqx.AsyncClient() as client:
         count = 0
 
         async def worker():
@@ -109,7 +109,7 @@ async def main():
     results = {}
     for concurrency in CONCURRENCY_LEVELS:
         for name, fn in [
-            ("reqx", bench_reqx),
+            ("rqx", bench_rqx),
             ("httpr", bench_httpr),
             ("httpx", bench_httpx),
             ("aiohttp", bench_aiohttp),

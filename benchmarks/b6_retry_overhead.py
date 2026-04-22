@@ -2,7 +2,7 @@ import asyncio
 import statistics
 import time
 
-import reqx
+import rqx
 
 TARGET_URL = "http://localhost:8080/json"
 ITERATIONS = 10_000
@@ -17,7 +17,7 @@ async def _run_loop(client, iterations):
 
 async def bench_no_retry():
     """Baseline - no retry configured"""
-    async with reqx.AsyncClient() as client:
+    async with rqx.AsyncClient() as client:
         # Warmup - discarded
         for _ in range(WARMUP_RUNS):
             await _run_loop(client, ITERATIONS)
@@ -33,14 +33,14 @@ async def bench_no_retry():
 
 async def bench_with_retry():
     """Retry configured but never triggered (first attempt succeeds)"""
-    transport = reqx.AsyncHTTPTransport(
-        retries=reqx.Retry(
+    transport = rqx.AsyncHTTPTransport(
+        retries=rqx.Retry(
             total=3,
             backoff_factor=0.5,
             status_forcelist={500, 502, 503},
         )
     )
-    async with reqx.AsyncClient(transport=transport) as client:
+    async with rqx.AsyncClient(transport=transport) as client:
         # Warmup - discarded
         for _ in range(WARMUP_RUNS):
             await _run_loop(client, ITERATIONS)

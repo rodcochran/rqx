@@ -60,7 +60,7 @@ impl PyByteIterator {
 
         match chunk {
             Some(Ok(bytes)) => Ok(Some(bytes.to_vec())),
-            Some(Err(e)) => Err(ReqxError::new_err(format!("stream error: {e}"))),
+            Some(Err(e)) => Err(RqxError::new_err(format!("stream error: {e}"))),
             None => Ok(None),
         }
     }
@@ -93,7 +93,7 @@ impl PyAsyncByteIterator {
             let mut guard = stream.lock().await;
             match guard.as_mut().next().await {
                 Some(Ok(bytes)) => Ok(Some(bytes.to_vec())),
-                Some(Err(e)) => Err(ReqxError::new_err(format!("stream error: {e}"))),
+                Some(Err(e)) => Err(RqxError::new_err(format!("stream error: {e}"))),
                 None => Err(pyo3::exceptions::PyStopAsyncIteration::new_err(())),
             }
         })
@@ -147,7 +147,7 @@ impl PyStreamResponse {
     #[pyo3(signature = (chunk_size=8192))]
     fn iter_bytes(&mut self, chunk_size: u32) -> PyResult<PyByteIterator> {
         let response = self.response.take()
-            .ok_or_else(|| ReqxError::new_err("response already consumed"))?;
+            .ok_or_else(|| RqxError::new_err("response already consumed"))?;
         Ok(
             PyByteIterator {
                 stream: Arc::new(TokioMutex::new(Box::pin(response.bytes_stream()))),
@@ -253,7 +253,7 @@ impl PyAsyncStreamResponse {
     #[pyo3(signature = (chunk_size=8192))]
     fn iter_bytes(&mut self, chunk_size: u32) -> PyResult<PyAsyncByteIterator> {
         let response = self.response.take()
-            .ok_or_else(|| ReqxError::new_err("response already consumed"))?;
+            .ok_or_else(|| RqxError::new_err("response already consumed"))?;
         Ok(
             PyAsyncByteIterator {
                 stream: Arc::new(TokioMutex::new(Box::pin(response.bytes_stream()))),

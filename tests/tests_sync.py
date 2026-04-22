@@ -3,7 +3,7 @@ import threading
 import time
 
 import pytest
-import reqx
+import rqx
 from rich import print
 
 # HTTPBIN_HOST = "https://httpbin.org"
@@ -16,7 +16,7 @@ HTTPBIN_HOST = "http://localhost"
 
 
 def test_true_200():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/get")
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -27,34 +27,34 @@ def test_true_200():
 
 
 def test_400():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/status/400")
     assert resp.status_code == 400
     assert "content-type" in resp.headers
-    with pytest.raises(reqx.ReqxError):
+    with pytest.raises(rqx.RqxError):
         resp.json()
 
 
 def test_404():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/status/404")
     assert resp.status_code == 404
     assert "content-type" in resp.headers
-    with pytest.raises(reqx.ReqxError):
+    with pytest.raises(rqx.RqxError):
         resp.json()
 
 
 def test_500():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/status/500")
     assert resp.status_code == 500
     assert "content-type" in resp.headers
-    with pytest.raises(reqx.ReqxError):
+    with pytest.raises(rqx.RqxError):
         resp.json()
 
 
 def test_body():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/get")
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -67,7 +67,7 @@ def test_body():
 
 
 def test_valid_text():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/get")
     text = resp.text
     assert text is not None
@@ -78,7 +78,7 @@ def test_valid_text():
 
 
 def test_valid_bytes():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/get")
     content = resp.content
     assert content is not None
@@ -89,7 +89,7 @@ def test_valid_bytes():
 
 
 def test_headers():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/get")
     headers = resp.headers
     assert headers is not None
@@ -102,7 +102,7 @@ def test_headers():
 def test_nested_json():
     # httpbin's /get?foo=bar&baz=123 will give you query params in the args field.
     # Good way to test that nested JSON values come through correctly.
-    client = reqx.Client()
+    client = rqx.Client()
 
     key1 = "baz"
     val1 = "123"
@@ -127,7 +127,7 @@ def test_gil_release():
         assert resp.status_code == 200
         assert "content-type" in resp.headers
 
-    client = reqx.Client()
+    client = rqx.Client()
 
     wait_time_1 = 1
     wait_time_2 = 2
@@ -156,7 +156,7 @@ def test_gil_release():
 
 
 def test_blank_post():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.post(f"{HTTPBIN_HOST}/post", json=None)
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -167,7 +167,7 @@ def test_blank_post():
 
 
 def test_sample_json_params_post():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.post(f"{HTTPBIN_HOST}/post", json={"special_param": 1})
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -178,7 +178,7 @@ def test_sample_json_params_post():
 
 
 def test_blank_options():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.options(f"{HTTPBIN_HOST}/get")
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -186,7 +186,7 @@ def test_blank_options():
 
 
 def test_blank_head():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.head(f"{HTTPBIN_HOST}/get")
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -194,14 +194,14 @@ def test_blank_head():
 
 
 def test_blank_put():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.put(f"{HTTPBIN_HOST}/put", json=None)
     assert resp.status_code == 200
     assert "content-type" in resp.headers
 
 
 def test_sample_json_params_put():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.put(f"{HTTPBIN_HOST}/put", json={"special_param": 1})
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -212,14 +212,14 @@ def test_sample_json_params_put():
 
 
 def test_blank_patch():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.patch(f"{HTTPBIN_HOST}/patch", json=None)
     assert resp.status_code == 200
     assert "content-type" in resp.headers
 
 
 def test_sample_json_params_patch():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.patch(f"{HTTPBIN_HOST}/patch", json={"special_param": 1})
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -230,7 +230,7 @@ def test_sample_json_params_patch():
 
 
 def test_blank_delete():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.delete(f"{HTTPBIN_HOST}/delete")
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -241,7 +241,7 @@ def test_post_with_query_params():
     query_param_1_key = "q_param_1"
     query_param_1_value = "hey"
 
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.post(
         f"{HTTPBIN_HOST}/post",
         params={query_param_1_key: query_param_1_value},
@@ -265,7 +265,7 @@ def test_post_with_query_params_and_json():
     json_param_1_key = "special_param"
     json_param_1_value = 1
 
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.post(
         f"{HTTPBIN_HOST}/post",
         json={json_param_1_key: json_param_1_value},
@@ -288,7 +288,7 @@ def test_put_with_query_params():
     query_param_1_key = "q_param_1"
     query_param_1_value = "hey"
 
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.put(
         f"{HTTPBIN_HOST}/put",
         params={query_param_1_key: query_param_1_value},
@@ -312,7 +312,7 @@ def test_put_with_query_params_and_json():
     json_param_1_key = "special_param"
     json_param_1_value = 1
 
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.put(
         f"{HTTPBIN_HOST}/put",
         json={json_param_1_key: json_param_1_value},
@@ -335,7 +335,7 @@ def test_patch_with_query_params():
     query_param_1_key = "q_param_1"
     query_param_1_value = "hey"
 
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.patch(
         f"{HTTPBIN_HOST}/patch",
         params={query_param_1_key: query_param_1_value},
@@ -359,7 +359,7 @@ def test_patch_with_query_params_and_json():
     json_param_1_key = "special_param"
     json_param_1_value = 1
 
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.patch(
         f"{HTTPBIN_HOST}/patch",
         json={json_param_1_key: json_param_1_value},
@@ -384,7 +384,7 @@ def test_get_with_headers():
         "X-API-Key": "your_api_key_string",
     }
 
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/get", headers=headers)
 
     print("")
@@ -412,13 +412,13 @@ def test_get_with_headers():
 
 
 def test_get_with_timeout():
-    client = reqx.Client()
-    with pytest.raises(reqx.TimeoutException):
+    client = rqx.Client()
+    with pytest.raises(rqx.TimeoutException):
         client.get(f"{HTTPBIN_HOST}/delay/5", timeout=1)
 
 
 def test_context_manger_200():
-    with reqx.Client() as client:
+    with rqx.Client() as client:
         resp = client.get(f"{HTTPBIN_HOST}/get")
         assert resp.status_code == 200
         assert "content-type" in resp.headers
@@ -429,18 +429,18 @@ def test_context_manger_200():
 
 
 def test_raise_for_status():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/status/400")
     assert resp.status_code == 400
     assert "content-type" in resp.headers
-    with pytest.raises(reqx.HTTPStatusError):
+    with pytest.raises(rqx.HTTPStatusError):
         resp.raise_for_status()
 
 
 def test_post_with_content():
     content_str = '{"raw_content": "hello"}'
     content_bytes = content_str.encode()
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.post(f"{HTTPBIN_HOST}/post", content=content_bytes)
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -453,7 +453,7 @@ def test_post_with_content():
 
 def test_post_with_data():
     data = {"hi": "goodbye", "hey": "2"}
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.post(f"{HTTPBIN_HOST}/post", data=data)
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -467,13 +467,13 @@ def test_basic_auth():
     u = "User"
     p = "Password"
     auth = (u, p)
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/basic-auth/{u}/{p}", auth=auth)
     assert resp.status_code == 200
 
 
 def test_basic_client_based_redirect():
-    client = reqx.Client(follow_redirects=True)
+    client = rqx.Client(follow_redirects=True)
     resp = client.get(
         f"{HTTPBIN_HOST}/redirect/3",
     )
@@ -481,7 +481,7 @@ def test_basic_client_based_redirect():
 
 
 def test_basic_request_based_redirect():
-    client = reqx.Client(follow_redirects=False)
+    client = rqx.Client(follow_redirects=False)
     resp = client.get(
         f"{HTTPBIN_HOST}/redirect/3",
         follow_redirects=True,
@@ -490,7 +490,7 @@ def test_basic_request_based_redirect():
 
 
 def test_false_follow_redirects_returns_302():
-    client = reqx.Client(follow_redirects=False)
+    client = rqx.Client(follow_redirects=False)
     resp = client.get(
         f"{HTTPBIN_HOST}/redirect/3",
         follow_redirects=False,
@@ -499,14 +499,14 @@ def test_false_follow_redirects_returns_302():
 
 
 def test_raise_error_on_redirects_exeeding_max_redirects():
-    client = reqx.Client(follow_redirects=True, max_redirects=1)
-    with pytest.raises(reqx.TooManyRedirects):
+    client = rqx.Client(follow_redirects=True, max_redirects=1)
+    with pytest.raises(rqx.TooManyRedirects):
         client.get(f"{HTTPBIN_HOST}/redirect/3")
 
 
 def test_get_total_elapsed_time():
     delay_time = 1
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/delay/{delay_time}")
     assert resp.elapsed is not None
     assert resp.elapsed > delay_time
@@ -515,20 +515,20 @@ def test_get_total_elapsed_time():
 
 
 def test_basic_final_url_in_output():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/get")
     assert resp.url == f"{HTTPBIN_HOST}/get"
 
 
 def test_redirected_final_url_in_output():
-    client = reqx.Client()
+    client = rqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/redirect/3", follow_redirects=True)
     assert resp.url == f"{HTTPBIN_HOST}/get"
 
 
 def test_bad_url_raises():
-    client = reqx.Client()
-    with pytest.raises(reqx.ReqxError):
+    client = rqx.Client()
+    with pytest.raises(rqx.RqxError):
         client.get("Bad URL")
 
 
@@ -539,7 +539,7 @@ def test_bad_url_raises():
 
 def test_retry_init():
 
-    retry = reqx.Retry()
+    retry = rqx.Retry()
 
     assert retry is not None
 
@@ -573,66 +573,66 @@ def test_retry_init():
 
 def test_transport_init():
 
-    transport = reqx.HTTPTransport()
+    transport = rqx.HTTPTransport()
 
     assert transport is not None
     assert transport.retries is None
 
 
 def test_retry_on_flaky_server(flaky_server):
-    transport = reqx.HTTPTransport(
-        retries=reqx.Retry(
+    transport = rqx.HTTPTransport(
+        retries=rqx.Retry(
             total=5,
             backoff_factor=0.1,
             status_forcelist={503},
         )
     )
-    client = reqx.Client(transport=transport)
+    client = rqx.Client(transport=transport)
     resp = client.get(f"{flaky_server}/flaky?request_id=test1")
     assert resp.status_code == 200
 
 
 def test_exceeded_retries_on_flaky_server(flaky_server):
-    transport = reqx.HTTPTransport(
-        retries=reqx.Retry(
+    transport = rqx.HTTPTransport(
+        retries=rqx.Retry(
             total=1,
             backoff_factor=0.1,
             status_forcelist={503},
         )
     )
-    client = reqx.Client(transport=transport)
+    client = rqx.Client(transport=transport)
 
-    with pytest.raises(reqx.MaxRetriesExceeded):
+    with pytest.raises(rqx.MaxRetriesExceeded):
         client.get(f"{flaky_server}/flaky?request_id=test2")
 
 
 def test_404_is_not_retried():
-    transport = reqx.HTTPTransport(
-        retries=reqx.Retry(
+    transport = rqx.HTTPTransport(
+        retries=rqx.Retry(
             total=1,
             backoff_factor=0.1,
             status_forcelist={503},
         )
     )
-    client = reqx.Client(transport=transport)
+    client = rqx.Client(transport=transport)
 
     resp = client.get(f"{HTTPBIN_HOST}/status/404")
     assert resp.status_code == 404
     assert "content-type" in resp.headers
-    with pytest.raises(reqx.ReqxError):
+    with pytest.raises(rqx.RqxError):
         resp.json()
 
 
 def test_not_allowed_method_is_not_retried(flaky_server):
-    transport = reqx.HTTPTransport(
-        retries=reqx.Retry(
+    transport = rqx.HTTPTransport(
+        retries=rqx.Retry(
             total=1,
             backoff_factor=0.1,
             status_forcelist={503},
             allowed_methods={"POST"},
         )
     )
-    client = reqx.Client(transport=transport)
+    client = rqx.Client(transport=transport)
     resp = client.get(f"{flaky_server}/flaky?request_id=test3")
 
     assert resp.status_code == 503
@@ -640,14 +640,14 @@ def test_not_allowed_method_is_not_retried(flaky_server):
 
 
 def test_retry_history_populated(flaky_server):
-    transport = reqx.HTTPTransport(
-        retries=reqx.Retry(
+    transport = rqx.HTTPTransport(
+        retries=rqx.Retry(
             total=5,
             backoff_factor=0.1,
             status_forcelist={503},
         )
     )
-    client = reqx.Client(transport=transport)
+    client = rqx.Client(transport=transport)
     resp = client.get(f"{flaky_server}/flaky?request_id=test4")
     assert resp.status_code == 200
     assert resp.num_retries == 2
@@ -658,29 +658,29 @@ def test_retry_history_populated(flaky_server):
 
 
 def test_total_timeout_exceeded(flaky_server):
-    transport = reqx.HTTPTransport(
-        retries=reqx.Retry(
+    transport = rqx.HTTPTransport(
+        retries=rqx.Retry(
             total=5,
             backoff_factor=2.0,
             status_forcelist={503},
             total_timeout=1.0,
         )
     )
-    client = reqx.Client(transport=transport)
-    with pytest.raises(reqx.MaxRetriesExceeded):
+    client = rqx.Client(transport=transport)
+    with pytest.raises(rqx.MaxRetriesExceeded):
         client.get(f"{flaky_server}/flaky?request_id=test5")
 
 
 def test_total_timeout_not_exceeded(flaky_server):
-    transport = reqx.HTTPTransport(
-        retries=reqx.Retry(
+    transport = rqx.HTTPTransport(
+        retries=rqx.Retry(
             total=5,
             backoff_factor=0.1,
             status_forcelist={503},
             total_timeout=30.0,
         )
     )
-    client = reqx.Client(transport=transport)
+    client = rqx.Client(transport=transport)
     resp = client.get(f"{flaky_server}/flaky?request_id=test6")
     assert resp.status_code == 200
     assert resp.num_retries == 2
@@ -704,8 +704,8 @@ def test_max_connections_with_freed_gil():
         assert resp.status_code == 200
         assert "content-type" in resp.headers
 
-    transport = reqx.HTTPTransport(max_connections=2)
-    client = reqx.Client(transport=transport)
+    transport = rqx.HTTPTransport(max_connections=2)
+    client = rqx.Client(transport=transport)
 
     wait_time_1 = 1
     wait_time_2 = 1
@@ -753,44 +753,44 @@ def test_max_connections_with_freed_gil():
 
 
 def test_basic_http2():
-    transport = reqx.HTTPTransport(http2=True)
-    client = reqx.Client(transport=transport)
+    transport = rqx.HTTPTransport(http2=True)
+    client = rqx.Client(transport=transport)
     url = "https://nghttp2.org/httpbin/get"
     resp = client.get(url=url)
     assert resp.http_version == "HTTP/2.0"
 
 
 def test_basic_http2_explicit_opt_out():
-    transport = reqx.HTTPTransport(http2=False)
-    client = reqx.Client(transport=transport)
+    transport = rqx.HTTPTransport(http2=False)
+    client = rqx.Client(transport=transport)
     url = "https://nghttp2.org/httpbin/get"
     resp = client.get(url=url)
     assert resp.http_version != "HTTP/2.0"
 
 
 def test_basic_http2_implicit_opt_out():
-    transport = reqx.HTTPTransport()
-    client = reqx.Client(transport=transport)
+    transport = rqx.HTTPTransport()
+    client = rqx.Client(transport=transport)
     url = "https://nghttp2.org/httpbin/get"
     resp = client.get(url=url)
     assert resp.http_version != "HTTP/2.0"
 
 
 def test_proxy_config():
-    transport = reqx.HTTPTransport(proxy={"https": "http://localhost:8080"})
+    transport = rqx.HTTPTransport(proxy={"https": "http://localhost:8080"})
     assert transport is not None
 
 
 def test_verify_is_false_returns_200_on_unsigned_url():
-    transport = reqx.HTTPTransport(verify=False)
-    client = reqx.Client(transport=transport)
+    transport = rqx.HTTPTransport(verify=False)
+    client = rqx.Client(transport=transport)
     # hitting a normal HTTPS endpoint still works
     resp = client.get("https://nghttp2.org/httpbin/get")
     assert resp.status_code == 200
 
 
 def test_cookies_basic():
-    client = reqx.Client()
+    client = rqx.Client()
 
     # First request sets the cookie
     resp1 = client.get(f"{HTTPBIN_HOST}/cookies/set/testcookie/hello")
@@ -808,7 +808,7 @@ def test_cookies_basic():
 
 
 def test_stream():
-    client = reqx.Client()
+    client = rqx.Client()
     with client.stream("GET", f"{HTTPBIN_HOST}/stream/5") as resp:
         chunks = list(resp.iter_bytes(1024))
         assert len(chunks) > 0

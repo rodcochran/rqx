@@ -1,6 +1,6 @@
 """Concurrency sweep — end-to-end latency distribution at varying concurrency.
 
-Runs reqx and httpr at c = 1, 10, 50, 100 against localhost nginx. For each
+Runs rqx and httpr at c = 1, 10, 50, 100 against localhost nginx. For each
 (client, concurrency) we capture the full end-to-end latency distribution
 (percentiles + histogram) so we can see how the p99/p50 ratio behaves.
 
@@ -14,7 +14,7 @@ Design notes:
 - 3 runs by default. Reports per-run numbers and the median. Run-to-run
   variance is visible.
 - Failures are counted and printed, not silently swallowed.
-- Order alternates across runs (reqx first / httpr first) to dilute order
+- Order alternates across runs (rqx first / httpr first) to dilute order
   effects.
 
 Usage:
@@ -30,7 +30,7 @@ from collections import defaultdict
 
 import httpr
 import numpy as np
-import reqx
+import rqx
 
 TARGET_URL = "http://localhost:8080/json"
 CONCURRENCY_LEVELS = [1, 10, 50, 100]
@@ -63,7 +63,7 @@ async def sweep(client, get_fn, concurrency, duration):
     return latencies, failures
 
 
-async def reqx_get(client, url):
+async def rqx_get(client, url):
     return await client.get(url)
 
 
@@ -159,11 +159,11 @@ async def main(json_path=None, runs=DEFAULT_RUNS):
 
     for run_idx in range(runs):
         client_order = (
-            [("reqx", reqx.AsyncClient, reqx_get),
+            [("rqx", rqx.AsyncClient, rqx_get),
              ("httpr", httpr.AsyncClient, httpr_get)]
             if run_idx % 2 == 0 else
             [("httpr", httpr.AsyncClient, httpr_get),
-             ("reqx", reqx.AsyncClient, reqx_get)]
+             ("rqx", rqx.AsyncClient, rqx_get)]
         )
         print(f"\n\n########  RUN {run_idx + 1} / {runs}  ########")
         for name, cls, get_fn in client_order:
@@ -191,7 +191,7 @@ async def main(json_path=None, runs=DEFAULT_RUNS):
 
     final = {}
     for concurrency in CONCURRENCY_LEVELS:
-        for name in ["reqx", "httpr"]:
+        for name in ["rqx", "httpr"]:
             key = (name, concurrency)
             med = print_sweep_result(
                 name, concurrency,
@@ -213,7 +213,7 @@ async def main(json_path=None, runs=DEFAULT_RUNS):
     for c in CONCURRENCY_LEVELS:
         print(f"  c={c:<4d}", end="")
     print()
-    for name in ["reqx", "httpr"]:
+    for name in ["rqx", "httpr"]:
         print(f"  {name:<10s}", end="")
         for c in CONCURRENCY_LEVELS:
             r = final[f"{name}_c{c}"]["median_stats"]["p99_over_p50"]
@@ -225,7 +225,7 @@ async def main(json_path=None, runs=DEFAULT_RUNS):
     print("VARIANCE CHECK: p99 across runs (sorted / spread)")
     print("=" * 72)
     print(f"  {'client':<10s} {'c':<5s} {'runs p99 (ms)':<30s} {'spread':<10s}")
-    for name in ["reqx", "httpr"]:
+    for name in ["rqx", "httpr"]:
         for c in CONCURRENCY_LEVELS:
             key = (name, c)
             p99s = sorted([s["p99"] for s in per_run_stats[key]])

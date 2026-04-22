@@ -5,7 +5,7 @@ import aiohttp
 import httpr
 import httpx
 import numpy as np
-import reqx
+import rqx
 
 TARGET_URL = "http://localhost:8080/json"
 CONCURRENCY = 100
@@ -13,9 +13,9 @@ TOTAL_REQUESTS = 10_000
 REQUESTS_PER_WORKER = TOTAL_REQUESTS // CONCURRENCY  # 100 each
 
 
-async def bench_reqx():
+async def bench_rqx():
     latencies = []
-    async with reqx.AsyncClient() as client:
+    async with rqx.AsyncClient() as client:
 
         async def worker():
             for _ in range(REQUESTS_PER_WORKER):
@@ -99,7 +99,7 @@ def print_percentiles(name, latencies):
 
 async def main():
     for name, fn in [
-        ("reqx", bench_reqx),
+        ("rqx", bench_rqx),
         ("httpr", bench_httpr),
         ("httpx", bench_httpx),
         ("aiohttp", bench_aiohttp),

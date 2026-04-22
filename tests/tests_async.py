@@ -2,7 +2,7 @@ import asyncio
 import time
 
 import pytest
-import reqx
+import rqx
 from rich import print
 
 HTTPBIN_HOST = "http://localhost"
@@ -10,13 +10,13 @@ HTTPBIN_HOST = "http://localhost"
 
 @pytest.mark.asyncio
 async def test_context_mangers():
-    async with reqx.AsyncClient() as client:
+    async with rqx.AsyncClient() as client:
         assert client is not None
 
 
 @pytest.mark.asyncio
 async def test_get():
-    async with reqx.AsyncClient() as client:
+    async with rqx.AsyncClient() as client:
         assert client is not None
 
         future = client.get(f"{HTTPBIN_HOST}/get")
@@ -32,7 +32,7 @@ async def test_get():
 
 @pytest.mark.asyncio
 async def test_concurrent_gets():
-    async with reqx.AsyncClient() as client:
+    async with rqx.AsyncClient() as client:
         assert client is not None
 
         async def task(wait_time):
@@ -57,7 +57,7 @@ async def test_concurrent_gets():
 
 @pytest.mark.asyncio
 async def test_post():
-    async with reqx.AsyncClient() as client:
+    async with rqx.AsyncClient() as client:
         assert client is not None
 
         future = client.post(f"{HTTPBIN_HOST}/post")
@@ -73,7 +73,7 @@ async def test_post():
 
 @pytest.mark.asyncio
 async def test_patch():
-    async with reqx.AsyncClient() as client:
+    async with rqx.AsyncClient() as client:
         assert client is not None
 
         future = client.patch(f"{HTTPBIN_HOST}/patch")
@@ -89,7 +89,7 @@ async def test_patch():
 
 @pytest.mark.asyncio
 async def test_put():
-    async with reqx.AsyncClient() as client:
+    async with rqx.AsyncClient() as client:
         assert client is not None
 
         future = client.put(f"{HTTPBIN_HOST}/put")
@@ -105,7 +105,7 @@ async def test_put():
 
 @pytest.mark.asyncio
 async def test_delete():
-    async with reqx.AsyncClient() as client:
+    async with rqx.AsyncClient() as client:
         assert client is not None
 
         future = client.delete(f"{HTTPBIN_HOST}/delete")
@@ -121,7 +121,7 @@ async def test_delete():
 
 @pytest.mark.asyncio
 async def test_options():
-    async with reqx.AsyncClient() as client:
+    async with rqx.AsyncClient() as client:
         assert client is not None
 
         future = client.options(f"{HTTPBIN_HOST}/get")
@@ -134,7 +134,7 @@ async def test_options():
 
 @pytest.mark.asyncio
 async def test_sample_json_params_post():
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
     resp = await client.post(f"{HTTPBIN_HOST}/post", json={"special_param": 1})
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -146,7 +146,7 @@ async def test_sample_json_params_post():
 
 @pytest.mark.asyncio
 async def test_basic_client_based_redirect():
-    client = reqx.AsyncClient(follow_redirects=True)
+    client = rqx.AsyncClient(follow_redirects=True)
     resp = await client.get(
         f"{HTTPBIN_HOST}/redirect/3",
     )
@@ -155,7 +155,7 @@ async def test_basic_client_based_redirect():
 
 @pytest.mark.asyncio
 async def test_basic_request_based_redirect():
-    client = reqx.AsyncClient(follow_redirects=False)
+    client = rqx.AsyncClient(follow_redirects=False)
     resp = await client.get(
         f"{HTTPBIN_HOST}/redirect/3",
         follow_redirects=True,
@@ -165,7 +165,7 @@ async def test_basic_request_based_redirect():
 
 @pytest.mark.asyncio
 async def test_false_follow_redirects_returns_302():
-    client = reqx.AsyncClient(follow_redirects=False)
+    client = rqx.AsyncClient(follow_redirects=False)
     resp = await client.get(
         f"{HTTPBIN_HOST}/redirect/3",
         follow_redirects=False,
@@ -175,18 +175,18 @@ async def test_false_follow_redirects_returns_302():
 
 @pytest.mark.asyncio
 async def test_raise_error_on_redirects_exeeding_max_redirects():
-    client = reqx.AsyncClient(follow_redirects=True, max_redirects=1)
-    with pytest.raises(reqx.TooManyRedirects):
+    client = rqx.AsyncClient(follow_redirects=True, max_redirects=1)
+    with pytest.raises(rqx.TooManyRedirects):
         await client.get(f"{HTTPBIN_HOST}/redirect/3")
 
 
 @pytest.mark.asyncio
 async def test_raise_for_status():
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
     resp = await client.get(f"{HTTPBIN_HOST}/status/400")
     assert resp.status_code == 400
     assert "content-type" in resp.headers
-    with pytest.raises(reqx.HTTPStatusError):
+    with pytest.raises(rqx.HTTPStatusError):
         resp.raise_for_status()
 
 
@@ -194,7 +194,7 @@ async def test_raise_for_status():
 async def test_post_with_content():
     content_str = '{"raw_content": "hello"}'
     content_bytes = content_str.encode()
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
     resp = await client.post(f"{HTTPBIN_HOST}/post", content=content_bytes)
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -208,7 +208,7 @@ async def test_post_with_content():
 @pytest.mark.asyncio
 async def test_post_with_data():
     data = {"hi": "goodbye", "hey": "2"}
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
     resp = await client.post(f"{HTTPBIN_HOST}/post", data=data)
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -223,44 +223,44 @@ async def test_basic_auth():
     u = "User"
     p = "Password"
     auth = (u, p)
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
     resp = await client.get(f"{HTTPBIN_HOST}/basic-auth/{u}/{p}", auth=auth)
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_400():
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
     resp = await client.get(f"{HTTPBIN_HOST}/status/400")
     assert resp.status_code == 400
     assert "content-type" in resp.headers
-    with pytest.raises(reqx.ReqxError):
+    with pytest.raises(rqx.RqxError):
         resp.json()
 
 
 @pytest.mark.asyncio
 async def test_404():
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
     resp = await client.get(f"{HTTPBIN_HOST}/status/404")
     assert resp.status_code == 404
     assert "content-type" in resp.headers
-    with pytest.raises(reqx.ReqxError):
+    with pytest.raises(rqx.RqxError):
         resp.json()
 
 
 @pytest.mark.asyncio
 async def test_500():
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
     resp = await client.get(f"{HTTPBIN_HOST}/status/500")
     assert resp.status_code == 500
     assert "content-type" in resp.headers
-    with pytest.raises(reqx.ReqxError):
+    with pytest.raises(rqx.RqxError):
         resp.json()
 
 
 @pytest.mark.asyncio
 async def test_body():
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
     resp = await client.get(f"{HTTPBIN_HOST}/get")
     assert resp.status_code == 200
     assert "content-type" in resp.headers
@@ -274,29 +274,29 @@ async def test_body():
 
 @pytest.mark.asyncio
 async def test_basic_final_url_in_output():
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
     resp = await client.get(f"{HTTPBIN_HOST}/get")
     assert resp.url == f"{HTTPBIN_HOST}/get"
 
 
 @pytest.mark.asyncio
 async def test_redirected_final_url_in_output():
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
     resp = await client.get(f"{HTTPBIN_HOST}/redirect/3", follow_redirects=True)
     assert resp.url == f"{HTTPBIN_HOST}/get"
 
 
 @pytest.mark.asyncio
 async def test_bad_url_raises():
-    client = reqx.AsyncClient()
-    with pytest.raises(reqx.ReqxError):
+    client = rqx.AsyncClient()
+    with pytest.raises(rqx.RqxError):
         await client.get("Bad URL")
 
 
 @pytest.mark.asyncio
 async def test_get_total_elapsed_time():
     delay_time = 1
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
     resp = await client.get(f"{HTTPBIN_HOST}/delay/{delay_time}")
     assert resp.elapsed is not None
     assert resp.elapsed > delay_time
@@ -306,7 +306,7 @@ async def test_get_total_elapsed_time():
 
 @pytest.mark.asyncio
 async def test_valid_text():
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
     resp = await client.get(f"{HTTPBIN_HOST}/get")
     text = resp.text
     assert text is not None
@@ -318,7 +318,7 @@ async def test_valid_text():
 
 @pytest.mark.asyncio
 async def test_valid_bytes():
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
     resp = await client.get(f"{HTTPBIN_HOST}/get")
     content = resp.content
     assert content is not None
@@ -330,7 +330,7 @@ async def test_valid_bytes():
 
 @pytest.mark.asyncio
 async def test_headers():
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
     resp = await client.get(f"{HTTPBIN_HOST}/get")
     headers = resp.headers
     assert headers is not None
@@ -344,7 +344,7 @@ async def test_headers():
 async def test_nested_json():
     # httpbin's /get?foo=bar&baz=123 will give you query params in the args field.
     # Good way to test that nested JSON values come through correctly.
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
 
     key1 = "baz"
     val1 = "123"
@@ -362,8 +362,8 @@ async def test_nested_json():
 
 @pytest.mark.asyncio
 async def test_get_with_timeout():
-    client = reqx.AsyncClient()
-    with pytest.raises(reqx.TimeoutException):
+    client = rqx.AsyncClient()
+    with pytest.raises(rqx.TimeoutException):
         await client.get(f"{HTTPBIN_HOST}/delay/5", timeout=1)
 
 
@@ -375,7 +375,7 @@ async def test_get_with_timeout():
 @pytest.mark.asyncio
 async def test_transport_init():
 
-    transport = reqx.AsyncHTTPTransport()
+    transport = rqx.AsyncHTTPTransport()
 
     assert transport is not None
     assert transport.retries is None
@@ -383,62 +383,62 @@ async def test_transport_init():
 
 @pytest.mark.asyncio
 async def test_retry_on_flaky_server(flaky_server):
-    transport = reqx.AsyncHTTPTransport(
-        retries=reqx.Retry(
+    transport = rqx.AsyncHTTPTransport(
+        retries=rqx.Retry(
             total=5,
             backoff_factor=0.1,
             status_forcelist={503},
         )
     )
-    client = reqx.AsyncClient(transport=transport)
+    client = rqx.AsyncClient(transport=transport)
     resp = await client.get(f"{flaky_server}/flaky?request_id=asynctest1")
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_exceeded_retries_on_flaky_server(flaky_server):
-    transport = reqx.AsyncHTTPTransport(
-        retries=reqx.Retry(
+    transport = rqx.AsyncHTTPTransport(
+        retries=rqx.Retry(
             total=1,
             backoff_factor=0.1,
             status_forcelist={503},
         )
     )
-    client = reqx.AsyncClient(transport=transport)
+    client = rqx.AsyncClient(transport=transport)
 
-    with pytest.raises(reqx.MaxRetriesExceeded):
+    with pytest.raises(rqx.MaxRetriesExceeded):
         await client.get(f"{flaky_server}/flaky?request_id=asynctest2")
 
 
 @pytest.mark.asyncio
 async def test_404_is_not_retried():
-    transport = reqx.AsyncHTTPTransport(
-        retries=reqx.Retry(
+    transport = rqx.AsyncHTTPTransport(
+        retries=rqx.Retry(
             total=1,
             backoff_factor=0.1,
             status_forcelist={503},
         )
     )
-    client = reqx.AsyncClient(transport=transport)
+    client = rqx.AsyncClient(transport=transport)
 
     resp = await client.get(f"{HTTPBIN_HOST}/status/404")
     assert resp.status_code == 404
     assert "content-type" in resp.headers
-    with pytest.raises(reqx.ReqxError):
+    with pytest.raises(rqx.RqxError):
         resp.json()
 
 
 @pytest.mark.asyncio
 async def test_not_allowed_method_is_not_retried(flaky_server):
-    transport = reqx.AsyncHTTPTransport(
-        retries=reqx.Retry(
+    transport = rqx.AsyncHTTPTransport(
+        retries=rqx.Retry(
             total=1,
             backoff_factor=0.1,
             status_forcelist={503},
             allowed_methods={"POST"},
         )
     )
-    client = reqx.AsyncClient(transport=transport)
+    client = rqx.AsyncClient(transport=transport)
     resp = await client.get(f"{flaky_server}/flaky?request_id=asynctest3")
 
     assert resp.status_code == 503
@@ -447,14 +447,14 @@ async def test_not_allowed_method_is_not_retried(flaky_server):
 
 @pytest.mark.asyncio
 async def test_retry_history_populated(flaky_server):
-    transport = reqx.AsyncHTTPTransport(
-        retries=reqx.Retry(
+    transport = rqx.AsyncHTTPTransport(
+        retries=rqx.Retry(
             total=5,
             backoff_factor=0.1,
             status_forcelist={503},
         )
     )
-    client = reqx.AsyncClient(transport=transport)
+    client = rqx.AsyncClient(transport=transport)
     resp = await client.get(f"{flaky_server}/flaky?request_id=asynctest4")
     assert resp.status_code == 200
     assert resp.num_retries == 2
@@ -466,30 +466,30 @@ async def test_retry_history_populated(flaky_server):
 
 @pytest.mark.asyncio
 async def test_total_timeout_exceeded(flaky_server):
-    transport = reqx.AsyncHTTPTransport(
-        retries=reqx.Retry(
+    transport = rqx.AsyncHTTPTransport(
+        retries=rqx.Retry(
             total=5,
             backoff_factor=2.0,
             status_forcelist={503},
             total_timeout=1.0,
         )
     )
-    client = reqx.AsyncClient(transport=transport)
-    with pytest.raises(reqx.MaxRetriesExceeded):
+    client = rqx.AsyncClient(transport=transport)
+    with pytest.raises(rqx.MaxRetriesExceeded):
         await client.get(f"{flaky_server}/flaky?request_id=asynctest5")
 
 
 @pytest.mark.asyncio
 async def test_total_timeout_not_exceeded(flaky_server):
-    transport = reqx.AsyncHTTPTransport(
-        retries=reqx.Retry(
+    transport = rqx.AsyncHTTPTransport(
+        retries=rqx.Retry(
             total=5,
             backoff_factor=0.1,
             status_forcelist={503},
             total_timeout=30.0,
         )
     )
-    client = reqx.AsyncClient(transport=transport)
+    client = rqx.AsyncClient(transport=transport)
     resp = await client.get(f"{flaky_server}/flaky?request_id=asynctest6")
     assert resp.status_code == 200
     assert resp.num_retries == 2
@@ -506,8 +506,8 @@ async def test_total_timeout_not_exceeded(flaky_server):
 
 @pytest.mark.asyncio
 async def test_max_connections():
-    async with reqx.AsyncClient(
-        transport=reqx.AsyncHTTPTransport(max_connections=2)
+    async with rqx.AsyncClient(
+        transport=rqx.AsyncHTTPTransport(max_connections=2)
     ) as client:
         assert client is not None
 
@@ -542,8 +542,8 @@ async def test_max_connections():
 
 @pytest.mark.asyncio
 async def test_basic_http2():
-    transport = reqx.AsyncHTTPTransport(http2=True)
-    client = reqx.AsyncClient(transport=transport)
+    transport = rqx.AsyncHTTPTransport(http2=True)
+    client = rqx.AsyncClient(transport=transport)
     url = "https://nghttp2.org/httpbin/get"
     resp = await client.get(url=url)
     assert resp.http_version == "HTTP/2.0"
@@ -551,8 +551,8 @@ async def test_basic_http2():
 
 @pytest.mark.asyncio
 async def test_basic_http2_explicit_opt_out():
-    transport = reqx.AsyncHTTPTransport(http2=False)
-    client = reqx.AsyncClient(transport=transport)
+    transport = rqx.AsyncHTTPTransport(http2=False)
+    client = rqx.AsyncClient(transport=transport)
     url = "https://nghttp2.org/httpbin/get"
     resp = await client.get(url=url)
     assert resp.http_version != "HTTP/2.0"
@@ -560,22 +560,22 @@ async def test_basic_http2_explicit_opt_out():
 
 @pytest.mark.asyncio
 async def test_basic_http2_implicit_opt_out():
-    transport = reqx.AsyncHTTPTransport()
-    client = reqx.AsyncClient(transport=transport)
+    transport = rqx.AsyncHTTPTransport()
+    client = rqx.AsyncClient(transport=transport)
     url = "https://nghttp2.org/httpbin/get"
     resp = await client.get(url=url)
     assert resp.http_version != "HTTP/2.0"
 
 
 def test_proxy_config():
-    transport = reqx.AsyncHTTPTransport(proxy={"https": "http://localhost:8080"})
+    transport = rqx.AsyncHTTPTransport(proxy={"https": "http://localhost:8080"})
     assert transport is not None
 
 
 @pytest.mark.asyncio
 async def test_verify_is_false_returns_200_on_unsigned_url():
-    transport = reqx.AsyncHTTPTransport(verify=False)
-    client = reqx.AsyncClient(transport=transport)
+    transport = rqx.AsyncHTTPTransport(verify=False)
+    client = rqx.AsyncClient(transport=transport)
     # hitting a normal HTTPS endpoint still works
     resp = await client.get("https://nghttp2.org/httpbin/get")
     assert resp.status_code == 200
@@ -583,7 +583,7 @@ async def test_verify_is_false_returns_200_on_unsigned_url():
 
 @pytest.mark.asyncio
 async def test_cookies_basic():
-    client = reqx.AsyncClient()
+    client = rqx.AsyncClient()
 
     # First request sets the cookie
     resp1 = await client.get(f"{HTTPBIN_HOST}/cookies/set/testcookie/hello")
@@ -602,7 +602,7 @@ async def test_cookies_basic():
 
 @pytest.mark.asyncio
 async def test_async_stream():
-    async with reqx.AsyncClient() as client:
+    async with rqx.AsyncClient() as client:
         resp = await client.stream("GET", f"{HTTPBIN_HOST}/stream/5")
         chunks = []
         async for chunk in resp.iter_bytes(1024):
