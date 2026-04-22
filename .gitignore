@@ -75,3 +75,8 @@ docs/_build/
 # AI 
 .claude/
 CLAUDE.md
+
+# Benchmark stuff
+benchmarks/nginx/certs/
+benchmarks/nginx/*.json
+docs/bench_results/
