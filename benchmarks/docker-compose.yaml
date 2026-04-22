@@ -6,3 +6,5 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
       - ./nginx/response.json:/usr/share/nginx/html/response.json
+      - ./nginx/response-10kb.json:/usr/share/nginx/html/response-10kb.json
+      - ./nginx/response-100kb.json:/usr/share/nginx/html/response-100kb.json
