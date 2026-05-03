@@ -80,3 +80,6 @@ CLAUDE.md
 benchmarks/nginx/certs/
 benchmarks/nginx/*.json
 docs/bench_results/
+
+# certs stuf
+*.pem

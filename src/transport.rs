@@ -1,18 +1,17 @@
+use pyo3::Bound;
+use pyo3::prelude::{PyRef, PyResult, Python, pyclass, pymethods};
+use pyo3::types::{PyAny, PyAnyMethods, PyBool, PyBytes, PyString, PyTuple};
+use reqwest::tls::{Certificate, Identity};
+use reqwest::{Client, Request, Response};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use reqwest::{Client, Request, Response};
-use reqwest::tls::Certificate;
-use pyo3::prelude::{PyRef, PyResult, Python,  pyclass, pymethods};
-use pyo3::types::{PyAny, PyAnyMethods, PyBool, PyString};
-use pyo3::Bound;
-use tokio::sync::{Semaphore};
+use tokio::sync::Semaphore;
 
 use super::exceptions::*;
 use super::response::PyResponse;
 use super::retry::PyRetry;
 use super::runtime::RUNTIME;
-
 
 #[pyclass(skip_from_py_object)]
 #[derive(Clone)]
@@ -22,19 +21,20 @@ pub struct HTTPTransport {
     // every request. Some(sem) enforces the user-provided cap.
     max_connection_semaphore: Option<Arc<Semaphore>>,
     #[pyo3(get)]
-    retries: Option<PyRetry>
+    retries: Option<PyRetry>,
 }
 
 #[pymethods]
 impl HTTPTransport {
     #[new]
     #[pyo3(signature = (
-        retries=None, 
-        max_connections=None, 
-        max_keepalive_connections=None, 
-        keepalive_expiry=None, 
+        retries=None,
+        max_connections=None,
+        max_keepalive_connections=None,
+        keepalive_expiry=None,
         http2=None,
         verify=None,
+        cert=None,
         proxy=None,
     ))]
     fn __new__(
@@ -44,34 +44,27 @@ impl HTTPTransport {
         keepalive_expiry: Option<f64>,
         http2: Option<bool>,
         verify: Option<&Bound<'_, PyAny>>,
-        proxy: Option<HashMap<String, String>>
+        cert: Option<&Bound<'_, PyAny>>,
+        proxy: Option<HashMap<String, String>>,
     ) -> PyResult<Self> {
-
-        // need to make it so that transport only creates default 
-        // when someone passes a blank (not null) Retry object.
-        // Default behavior is no retry.
-        // let _retries = match retries {
-        //     Some(r) => Some(r.clone()),
-        //     // None => PyRetry::with_defaults(),
-        //     None => None
-        // };
         let _retries = retries.map(|r| r.clone());
 
         let http_client = build_http_client(
-            max_keepalive_connections, 
-            keepalive_expiry, 
-            http2, 
-            verify, 
-            proxy
+            max_keepalive_connections,
+            keepalive_expiry,
+            http2,
+            verify,
+            cert,
+            proxy,
         )?;
 
-        let max_connection_semaphore = max_connections
-            .map(|mc| Arc::new(Semaphore::new(mc as usize)));
+        let max_connection_semaphore =
+            max_connections.map(|mc| Arc::new(Semaphore::new(mc as usize)));
 
         Ok(Self {
             http_client: http_client,
             max_connection_semaphore: max_connection_semaphore,
-            retries: _retries
+            retries: _retries,
         })
     }
 }
@@ -85,7 +78,7 @@ impl Default for HTTPTransport {
                 .build()
                 .expect("Failed to build HTTP client"),
             max_connection_semaphore: None,
-            retries: None
+            retries: None,
         }
     }
 }
@@ -98,11 +91,11 @@ impl HTTPTransport {
         } else {
             // don't do any retries
             self.send(py, request)
-        }   
+        }
     }
 
     fn send(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
-        let response= self.send_raw(py, request)?;
+        let response = self.send_raw(py, request)?;
         PyResponse::from_response(py, response)
     }
 
@@ -128,16 +121,13 @@ impl HTTPTransport {
                         ),
                         None => None,
                     };
-                    self.http_client
-                        .execute(request)
-                        .await
-                        .map_err(|e| {
-                            if e.is_timeout() {
-                                TimeoutException::new_err(format!("request timed out: {e}"))
-                            } else {
-                                RqxError::new_err(format!("request failed: {e}"))
-                            }
-                        })
+                    self.http_client.execute(request).await.map_err(|e| {
+                        if e.is_timeout() {
+                            TimeoutException::new_err(format!("request timed out: {e}"))
+                        } else {
+                            RqxError::new_err(format!("request failed: {e}"))
+                        }
+                    })
                 })
         })?;
         return Ok(response);
@@ -157,35 +147,31 @@ impl HTTPTransport {
         let mut retry_history: Vec<(String, f64)> = Vec::new();
         let mut current_response: Option<PyResponse> = None;
         let mut request_copy: Request;
-        
+
         // Timer for total time in retry
         let start_time = Instant::now();
 
         for attempt in 0..=r.total {
             if start_time.elapsed().as_secs_f64() > total_timeout {
-                return Err(
-                    MaxRetriesExceeded::new_err(
-                        format!(
-                            "total timeout of {}s exceeded after {} retries", 
-                            total_timeout,
-                            num_retries,
-                        )
-                    )
-                )
+                return Err(MaxRetriesExceeded::new_err(format!(
+                    "total timeout of {}s exceeded after {} retries",
+                    total_timeout, num_retries,
+                )));
             }
             if attempt > 0 {
                 // increment retries
                 num_retries += 1;
 
                 let retry_after: f32 = if respect_retry {
-                    current_response.as_ref()
+                    current_response
+                        .as_ref()
                         .and_then(|r| r.headers.get("retry-after"))
                         .and_then(|v| v.parse::<f32>().ok())
                         .unwrap_or(0.0)
                 } else {
                     0.0
                 };
-              
+
                 let calculated_backoff = r.backoff_factor * 2_f32.powi(attempt);
                 let backoff_time = f32::min(f32::max(calculated_backoff, retry_after), backoff_max);
                 // Run tokio sleep in Rust's runtime
@@ -197,17 +183,15 @@ impl HTTPTransport {
                             tokio::time::sleep(Duration::from_secs_f32(backoff_time)).await
                         })
                 });
-            }            
+            }
             request_copy = request
                 .try_clone()
-                .ok_or_else(
-                    || RqxError::new_err("Streaming request bodies cannot be retried")
-                )?;
-            
+                .ok_or_else(|| RqxError::new_err("Streaming request bodies cannot be retried"))?;
+
             let attempt_start = std::time::Instant::now();
             match self.send(py, request_copy) {
                 Ok(resp) => {
-                    if !is_retryable_method { 
+                    if !is_retryable_method {
                         return Ok(resp);
                     }
 
@@ -216,8 +200,7 @@ impl HTTPTransport {
                         retry_history.push((resp.status_code.to_string(), attempt_elapsed));
                     }
                     current_response = Some(resp);
-
-                },
+                }
                 Err(e) => {
                     let attempt_elapsed = attempt_start.elapsed().as_millis() as f64;
                     current_response = None;
@@ -242,26 +225,26 @@ impl HTTPTransport {
         match current_response {
             Some(mut cr) => {
                 if r.status_forcelist.contains(&cr.status_code) {
-                    return Err(
-                        MaxRetriesExceeded::new_err(format!("max retries exeeded: {}", r.total))
-                    )
+                    return Err(MaxRetriesExceeded::new_err(format!(
+                        "max retries exeeded: {}",
+                        r.total
+                    )));
                 }
                 cr.num_retries = num_retries;
                 cr.retry_history = retry_history;
                 return Ok(cr);
             }
             None => {
-                return Err(
-                    MaxRetriesExceeded::new_err(format!("max retries exeeded: {}", r.total))
-                )
+                return Err(MaxRetriesExceeded::new_err(format!(
+                    "max retries exeeded: {}",
+                    r.total
+                )));
             }
         }
     }
-
 }
 
-
-/* 
+/*
 Accessors etc.
 */
 impl HTTPTransport {
@@ -282,19 +265,20 @@ pub struct AsyncHTTPTransport {
     // every request. Some(sem) enforces the user-provided cap.
     max_connection_semaphore: Option<Arc<Semaphore>>,
     #[pyo3(get)]
-    retries: Option<PyRetry>
+    retries: Option<PyRetry>,
 }
 
 #[pymethods]
 impl AsyncHTTPTransport {
     #[new]
     #[pyo3(signature = (
-        retries=None, 
-        max_connections=None, 
-        max_keepalive_connections=None, 
+        retries=None,
+        max_connections=None,
+        max_keepalive_connections=None,
         keepalive_expiry=None,
         http2=None,
         verify=None,
+        cert=None,
         proxy=None,
     ))]
     fn __new__(
@@ -304,10 +288,10 @@ impl AsyncHTTPTransport {
         keepalive_expiry: Option<f64>,
         http2: Option<bool>,
         verify: Option<&Bound<'_, PyAny>>,
-        proxy: Option<HashMap<String, String>>
+        cert: Option<&Bound<'_, PyAny>>,
+        proxy: Option<HashMap<String, String>>,
     ) -> PyResult<Self> {
-
-        // need to make it so that transport only creates default 
+        // need to make it so that transport only creates default
         // when someone passes a blank (not null) Retry object.
         // Default behavior is no retry.
         // let _retries = match retries {
@@ -315,23 +299,24 @@ impl AsyncHTTPTransport {
         //     // None => PyRetry::with_defaults(),
         //     None => None
         // };
-        let _retries = retries.map(|r| r.clone()); 
+        let _retries = retries.map(|r| r.clone());
 
         let http_client = build_http_client(
-            max_keepalive_connections, 
-            keepalive_expiry, 
-            http2, 
-            verify, 
-            proxy
+            max_keepalive_connections,
+            keepalive_expiry,
+            http2,
+            verify,
+            cert,
+            proxy,
         )?;
 
-        let max_connection_semaphore = max_connections
-            .map(|mc| Arc::new(Semaphore::new(mc as usize)));
+        let max_connection_semaphore =
+            max_connections.map(|mc| Arc::new(Semaphore::new(mc as usize)));
 
         Ok(Self {
             http_client: http_client,
             max_connection_semaphore: max_connection_semaphore,
-            retries: _retries
+            retries: _retries,
         })
     }
 }
@@ -345,13 +330,16 @@ impl Default for AsyncHTTPTransport {
                 .build()
                 .expect("Failed to build Async HTTP client"),
             max_connection_semaphore: None,
-            retries: None
+            retries: None,
         }
     }
 }
 
 impl AsyncHTTPTransport {
-    pub async fn handle_request(transport: AsyncHTTPTransport, request: Request) -> PyResult<PyResponse> {
+    pub async fn handle_request(
+        transport: AsyncHTTPTransport,
+        request: Request,
+    ) -> PyResult<PyResponse> {
         if transport.retries.is_some() {
             // Handle retries etc.
             Self::send_with_retries(&transport, request).await
@@ -385,21 +373,20 @@ impl AsyncHTTPTransport {
             ),
             None => None,
         };
-        let response = client
-            .execute(request)
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    TimeoutException::new_err(format!("request timed out: {e}"))
-                } else {
-                    RqxError::new_err(format!("request failed: {e}"))
-                }
+        let response = client.execute(request).await.map_err(|e| {
+            if e.is_timeout() {
+                TimeoutException::new_err(format!("request timed out: {e}"))
+            } else {
+                RqxError::new_err(format!("request failed: {e}"))
             }
-        )?;
+        })?;
         return Ok(response);
     }
 
-    async fn send_with_retries(transport: &AsyncHTTPTransport, request: Request) -> PyResult<PyResponse> {
+    async fn send_with_retries(
+        transport: &AsyncHTTPTransport,
+        request: Request,
+    ) -> PyResult<PyResponse> {
         // Retry configuration
         let r = transport.retries.as_ref().unwrap();
         let method = request.method().to_string();
@@ -419,15 +406,10 @@ impl AsyncHTTPTransport {
 
         for attempt in 0..=r.total {
             if start_time.elapsed().as_secs_f64() > total_timeout {
-                return Err(
-                    MaxRetriesExceeded::new_err(
-                        format!(
-                            "total timeout of {}s exceeded after {} retries", 
-                            total_timeout,
-                            num_retries,
-                        )
-                    )
-                )
+                return Err(MaxRetriesExceeded::new_err(format!(
+                    "total timeout of {}s exceeded after {} retries",
+                    total_timeout, num_retries,
+                )));
             }
 
             if attempt > 0 {
@@ -435,14 +417,15 @@ impl AsyncHTTPTransport {
                 num_retries += 1;
 
                 let retry_after: f32 = if respect_retry {
-                    current_response.as_ref()
+                    current_response
+                        .as_ref()
                         .and_then(|r| r.headers.get("retry-after"))
                         .and_then(|v| v.parse::<f32>().ok())
                         .unwrap_or(0.0)
                 } else {
                     0.0
                 };
-              
+
                 let calculated_backoff = r.backoff_factor * 2_f32.powi(attempt);
                 let backoff_time = f32::min(f32::max(calculated_backoff, retry_after), backoff_max);
 
@@ -452,14 +435,12 @@ impl AsyncHTTPTransport {
 
             request_copy = request
                 .try_clone()
-                .ok_or_else(
-                    || RqxError::new_err("Streaming request bodies cannot be retried")
-                )?;
-            
+                .ok_or_else(|| RqxError::new_err("Streaming request bodies cannot be retried"))?;
+
             let attempt_start = std::time::Instant::now();
             match Self::send(transport.client(), request_copy, transport.semaphore()).await {
                 Ok(resp) => {
-                    if !is_retryable_method { 
+                    if !is_retryable_method {
                         return Ok(resp);
                     }
 
@@ -468,8 +449,7 @@ impl AsyncHTTPTransport {
                         retry_history.push((resp.status_code.to_string(), attempt_elapsed));
                     }
                     current_response = Some(resp);
-
-                },
+                }
                 Err(e) => {
                     let attempt_elapsed = attempt_start.elapsed().as_millis() as f64;
                     current_response = None;
@@ -489,31 +469,31 @@ impl AsyncHTTPTransport {
                     return Ok(resp);
                 }
             }
-            
-            
         }
 
         match current_response {
             Some(mut cr) => {
                 if r.status_forcelist.contains(&cr.status_code) {
-                    return Err(
-                        MaxRetriesExceeded::new_err(format!("max retries exeeded: {}", r.total))
-                    )
+                    return Err(MaxRetriesExceeded::new_err(format!(
+                        "max retries exeeded: {}",
+                        r.total
+                    )));
                 }
                 cr.num_retries = num_retries;
                 cr.retry_history = retry_history;
                 return Ok(cr);
             }
             None => {
-                return Err(
-                    MaxRetriesExceeded::new_err(format!("max retries exeeded: {}", r.total))
-                )
+                return Err(MaxRetriesExceeded::new_err(format!(
+                    "max retries exeeded: {}",
+                    r.total
+                )));
             }
         }
     }
 }
 
-/* 
+/*
 Accessors etc.
 */
 impl AsyncHTTPTransport {
@@ -536,9 +516,10 @@ fn build_http_client(
     keepalive_expiry: Option<f64>,
     http2: Option<bool>,
     verify: Option<&Bound<'_, PyAny>>,
-    proxy: Option<HashMap<String, String>>
+    cert: Option<&Bound<'_, PyAny>>,
+    proxy: Option<HashMap<String, String>>,
 ) -> PyResult<Client> {
-    let mut http_client_builder =  Client::builder()
+    let mut http_client_builder = Client::builder()
         // Explicitly add no redirects at the transport level, as we let the PyClient take care of it
         .redirect(reqwest::redirect::Policy::none())
         .cookie_store(true);
@@ -563,8 +544,7 @@ fn build_http_client(
             if !verify_enabled {
                 http_client_builder = http_client_builder.danger_accept_invalid_certs(true);
             }
-        }
-        else if v.is_instance_of::<PyString>() {
+        } else if v.is_instance_of::<PyString>() {
             let path = v
                 .extract::<String>()
                 .map_err(|e| RqxError::new_err(format!("failed to parse CA cert path: {e}")))?;
@@ -577,13 +557,52 @@ fn build_http_client(
         }
     }
 
+    if let Some(c) = cert {
+        if c.is_instance_of::<PyString>() {
+            let path = c
+                .extract::<String>()
+                .map_err(|e| RqxError::new_err(format!("failed to parse client cert path: {e}")))?;
+            let bytes = std::fs::read(&path)
+                .map_err(|e| RqxError::new_err(format!("failed to read client cert: {e}")))?;
+            let identity = Identity::from_pem(&bytes)
+                .map_err(|e| RqxError::new_err(format!("failed to construct client cert: {e}")))?;
+            http_client_builder = http_client_builder.identity(identity);
+        } else if c.is_instance_of::<PyBytes>() {
+            let bytes: Vec<u8> = c
+                .extract()
+                .map_err(|e| RqxError::new_err(format!("failed to read cert bytes: {e}")))?;
+            let identity = Identity::from_pem(&bytes)
+                .map_err(|e| RqxError::new_err(format!("failed to parse client cert: {e}")))?;
+            http_client_builder = http_client_builder.identity(identity);
+        } else if c.is_instance_of::<PyTuple>() {
+            let tup: (String, String) = c
+                .extract()
+                .map_err(|e| RqxError::new_err(format!("failed to parse cert, key tuple: {e}")))?;
+            let cert_path: String = tup.0;
+            let key_path: String = tup.1;
+            let mut bytes = std::fs::read(&cert_path)
+                .map_err(|e| RqxError::new_err(format!("failed to read {cert_path}: {e}")))?;
+            let mut key_bytes = std::fs::read(&key_path)
+                .map_err(|e| RqxError::new_err(format!("failed to read {key_path}: {e}")))?;
+            bytes.append(&mut key_bytes);
+            let identity = Identity::from_pem(&bytes)
+                .map_err(|e| RqxError::new_err(format!("failed to parse client cert+key: {e}")))?;
+            http_client_builder = http_client_builder.identity(identity);
+        } else {
+            return Err(RqxError::new_err(
+                "cert must be str (path), tuple(str, str) of (cert, key) paths, or bytes (PEM)",
+            ));
+        }
+    }
+
     if let Some(proxies) = proxy {
         for (scheme, url) in proxies {
             let p = match scheme.as_str() {
                 "http" => reqwest::Proxy::http(&url),
                 "https" => reqwest::Proxy::https(&url),
                 _ => continue,
-            }.map_err(|e| RqxError::new_err(format!("invalid proxy: {e}")))?;
+            }
+            .map_err(|e| RqxError::new_err(format!("invalid proxy: {e}")))?;
             http_client_builder = http_client_builder.proxy(p);
         }
     }
@@ -593,5 +612,4 @@ fn build_http_client(
         .expect("Failed to build HTTP client");
 
     return Ok(http_client);
-
 }

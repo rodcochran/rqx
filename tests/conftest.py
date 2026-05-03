@@ -1,9 +1,13 @@
+import asyncio
+import ssl
+import subprocess
 import threading
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from aiohttp import web
 
 DEFAULT_ERRORS_BEFORE_SUCCESS = 3
 
@@ -52,3 +56,39 @@ def flaky_server():
     thread.start()
     yield f"http://localhost:{port}"
     server.shutdown()
+
+
+class MTLSHandler:
+    async def handle(self, request: web.Request):
+        return web.Response(status=200)
+
+
+@pytest.fixture(scope="session")
+def mtls_server():
+
+    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_context.load_cert_chain(certfile="cert.pem", keyfile="key.pem")
+
+    # whose-signed-clients-do-I-trust
+    ssl_context.load_verify_locations()
+
+    # actually demand a client cert
+    ssl_context.verify_mode = ssl.CERT_REQUIRED
+
+    # generate certs
+    subprocess.run(["bash", "generate_certs.sh"])
+
+    handler = MTLSHandler()
+    app = web.Application()
+    app.add_routes(
+        [
+            web.post("/", handler.handle),
+        ]
+    )
+    app_runner = web.AppRunner(app=app)
+    tcp_site = web.TCPSite(runner=app_runner, ssl_context=ssl_context, port=8888)
+    thread = threading.Thread(target=asyncio.run, kwargs={"main": tcp_site.start()})
+    thread.daemon = True
+    thread.start()
+    yield f"http://localhost:{tcp_site._port}"
+    asyncio.run(tcp_site.stop())
