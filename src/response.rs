@@ -134,7 +134,7 @@ impl PyResponse {
                 .ok_or_else(|| RqxError::new_err("runtime not initialized"))?
                 .block_on(async {
                     response.bytes().await.map_err(|e| {
-                        RqxError::new_err(format!("failed to read body: {e}"))
+                        RqxError::new_err(format!("failed to read body: {e:?}"))
                     })
                 })
         })?;
@@ -182,7 +182,7 @@ impl PyResponse {
             .collect();
 
         let body = response.bytes().await.map_err(|e| {
-            RqxError::new_err(format!("failed to read body: {e}"))
+            RqxError::new_err(format!("failed to read body: {e:?}"))
         })?;
         // Briefly acquire the GIL to allocate a Python bytes object directly
         // from the response body. No .await crosses this closure so there's

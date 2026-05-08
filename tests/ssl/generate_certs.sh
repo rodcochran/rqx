@@ -108,6 +108,10 @@ openssl req \
     -subj /C=US/ST=CA/L="San Francisco"/O="rqx Test Client"/ \
     -quiet
 
+# Due to limitation with Reqwests TLS, some of the keys were failing. Known issue.
+# Creating the traditional style of keys to prevent propagating that error.
+openssl rsa -in $CERTS_DIR/client-key.pem -out $CERTS_DIR/client-key.pem -traditional
+
 echo "Generated client key"
 
 # Sign CSR:

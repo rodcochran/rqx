@@ -1,13 +1,15 @@
-import asyncio
 import ssl
 import subprocess
 import threading
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from aiohttp import web
+
+# This gets the directory containing the script
+script_dir = Path(__file__).resolve().parent
 
 DEFAULT_ERRORS_BEFORE_SUCCESS = 3
 
@@ -58,37 +60,42 @@ def flaky_server():
     server.shutdown()
 
 
-class MTLSHandler:
-    async def handle(self, request: web.Request):
-        return web.Response(status=200)
+class MTLSHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def do_GET(self):
+        body = b'{"status": "ok"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        print("MTLS API returned 200")
 
 
 @pytest.fixture(scope="session")
 def mtls_server():
 
+    # generate certs
+    subprocess.run(["bash", f"{script_dir}/ssl/generate_certs.sh"])
+
     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ssl_context.load_cert_chain(certfile="cert.pem", keyfile="key.pem")
+    ssl_context.load_cert_chain(
+        certfile=f"{script_dir}/ssl/certs/server-cert.pem",
+        keyfile=f"{script_dir}/ssl/certs/server-key.pem",
+    )
 
     # whose-signed-clients-do-I-trust
-    ssl_context.load_verify_locations()
+    ssl_context.load_verify_locations(cafile=f"{script_dir}/ssl/certs/ca-cert.pem")
 
     # actually demand a client cert
     ssl_context.verify_mode = ssl.CERT_REQUIRED
 
-    # generate certs
-    subprocess.run(["bash", "generate_certs.sh"])
-
-    handler = MTLSHandler()
-    app = web.Application()
-    app.add_routes(
-        [
-            web.post("/", handler.handle),
-        ]
-    )
-    app_runner = web.AppRunner(app=app)
-    tcp_site = web.TCPSite(runner=app_runner, ssl_context=ssl_context, port=8888)
-    thread = threading.Thread(target=asyncio.run, kwargs={"main": tcp_site.start()})
+    server = HTTPServer(("localhost", 0), MTLSHandler)
+    server.socket = ssl_context.wrap_socket(server.socket, server_side=True)
+    port = server.server_address[1]  # get the assigned port
+    thread = threading.Thread(target=server.serve_forever)
     thread.daemon = True
     thread.start()
-    yield f"http://localhost:{tcp_site._port}"
-    asyncio.run(tcp_site.stop())
+    yield f"https://localhost:{port}"
+    server.shutdown()

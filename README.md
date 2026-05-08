@@ -43,10 +43,10 @@ with rqx.Client(transport=transport) as client:
 Benchmarked against httpx and aiohttp on a local nginx instance serving a 1KB JSON payload:
 
 | Concurrency | rqx (RPS) | httpx (RPS) | aiohttp (RPS) |
-| ----------- | ---------- | ----------- | ------------- |
-| 10          | 5,368      | 947         | 6,149         |
-| 100         | 6,105      | 126         | 7,821         |
-| 1,000       | 6,387      | 3           | 7,317         |
+| ----------- | --------- | ----------- | ------------- |
+| 10          | 5,368     | 947         | 6,149         |
+| 100         | 6,105     | 126         | 7,821         |
+| 1,000       | 6,387     | 3           | 7,317         |
 
 See [docs/report.md](docs/report.md) for full benchmark results including latency, memory, and JSON parsing analysis.
 
@@ -88,6 +88,10 @@ This project is early and there's plenty to improve:
 - Code cleanup and deduplication
 
 If you're interested in Rust, Python FFI, or HTTP internals, this is a good codebase to learn from. Open an issue or submit a PR.
+
+## Known issues
+
+rqx uses rustls under the hood, which is stricter than OpenSSL's verifier in some ways. Server certs must declare serverAuth EKU; self-signed certs without proper extensions may be rejected
 
 ## Acknowledgements
 
