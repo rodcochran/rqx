@@ -30,9 +30,6 @@ def test_mtls_with_bytes(mtls_server):
 
 
 def test_mtls_with_tuple(mtls_server):
-    with open(f"{script_dir}/ssl/certs/client-combined.pem", "rb") as pem_file:
-        pem_bytes = pem_file.read()
-
     transport = rqx.HTTPTransport(
         cert=(
             f"{script_dir}/ssl/certs/client-cert.pem",
