@@ -57,8 +57,8 @@ mkdir -p $CERTS_DIR
 openssl req \
     -x509 \
     -newkey rsa:2048 \
-    -keyout $CERTS_DIR/key.pem \
-    -out $CERTS_DIR/cert.pem \
+    -keyout $CERTS_DIR/ca-key.pem \
+    -out $CERTS_DIR/ca-cert.pem \
     -days 1 \
     -noenc \
     -subj /C=US/ST=CA/L="San Francisco"/O=rqx/ \
@@ -85,8 +85,8 @@ echo "Generated server key"
 openssl x509 \
     -req \
     -in $CERTS_DIR/server.csr \
-    -CA $CERTS_DIR/cert.pem \
-    -CAkey $CERTS_DIR/key.pem \
+    -CA $CERTS_DIR/ca-cert.pem \
+    -CAkey $CERTS_DIR/ca-key.pem \
     -CAcreateserial \
     -out $CERTS_DIR/server-cert.pem \
     -days 1 \
@@ -114,8 +114,8 @@ echo "Generated client key"
 openssl x509 \
     -req \
     -in $CERTS_DIR/client.csr \
-    -CA $CERTS_DIR/cert.pem \
-    -CAkey $CERTS_DIR/key.pem \
+    -CA $CERTS_DIR/ca-cert.pem \
+    -CAkey $CERTS_DIR/ca-key.pem \
     -CAcreateserial \
     -out $CERTS_DIR/client-cert.pem \
     -days 1
