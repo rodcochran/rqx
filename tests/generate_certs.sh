@@ -7,6 +7,7 @@
 #   PEM (Privacy-Enhanced Mail)
 #   TLS (Transport Layer Security)
 #   mTLS (Mutual Transport Layer Security)
+#   SSL (Secure Sockets Layer)
 # 
 
 # Notes:
@@ -30,11 +31,18 @@
 # Purpose of the script:
 #   - Idempotent generation of certificates to test verification. 
 
+SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+CERTS_DIR="$SCRIPT_DIR/certs"
 
 # Early exit for idempotency
-if [ -f tests/certs/ca-cert.pem]; then exit 0; fi
+if [ -f $CERTS_DIR/client-cert.pem ]; 
+    then 
+    echo "Certs already created - exiting"
+    exit 0; 
+fi
 
-
+echo "Generating Certificates"
+mkdir $CERTS_DIR
 
 # Generate self-signed cert via OpenSSL
 # 
@@ -49,34 +57,72 @@ if [ -f tests/certs/ca-cert.pem]; then exit 0; fi
 openssl req \
     -x509 \
     -newkey rsa:2048 \
-    -keyout key.pem \
-    -out cert.pem \
-    -days 365 \
+    -keyout $CERTS_DIR/key.pem \
+    -out $CERTS_DIR/cert.pem \
+    -days 1 \
     -noenc \
-    -subj 
+    -subj /C=US/ST=CA/L="San Francisco"/O=rqx/ \
+    -quiet
+
+echo "Generated self-signed cert"
 
 # Server cert: needs a CSR that the CA signs. Will be loaded by the test suite server.
 #
 # Generate server key
 openssl req \
     -new \
-    -newkey ... \
-    -keyout server-key.pem \
-    -out server.csr \
+    -newkey rsa:2048 \
+    -keyout $CERTS_DIR/server-key.pem \
+    -out $CERTS_DIR/server.csr \
     -nodes \
-    -subj ...
+    -noenc \
+    -subj /C=US/ST=CA/L="San Francisco"/O=rqx/ \
+    -quiet
+
+
+echo "Generated server key"
 
 # Sign CSR:
 openssl x509 \
     -req \
-    -in server.csr \
-    -CA <ca cert> \
-    -CAkey <ca key> \
+    -in $CERTS_DIR/server.csr \
+    -CA $CERTS_DIR/cert.pem \
+    -CAkey $CERTS_DIR/key.pem \
     -CAcreateserial \
-    -out server-cert.pem \
-    -days ...
+    -out $CERTS_DIR/server-cert.pem \
+    -days 1
+    
+
+echo "Signed CSR"
 
 # Client cert: Same as server cert, signed by same CA. 
+#
+# Generate server key
+openssl req \
+    -new \
+    -newkey rsa:2048 \
+    -keyout $CERTS_DIR/client-key.pem \
+    -out $CERTS_DIR/client.csr \
+    -nodes \
+    -noenc \
+    -subj /C=US/ST=CA/L="San Francisco"/O=rqx/ \
+    -quiet
+
+echo "Generated client key"
+
+# Sign CSR:
+openssl x509 \
+    -req \
+    -in $CERTS_DIR/client.csr \
+    -CA $CERTS_DIR/cert.pem \
+    -CAkey $CERTS_DIR/key.pem \
+    -CAcreateserial \
+    -out $CERTS_DIR/client-cert.pem \
+    -days 1
+
+echo "Signed CSR"
 
 # Create combined pem
-cat client-cert.pem client-key.pem > client-combined.pem
+cat $CERTS_DIR/client-cert.pem $CERTS_DIR/client-key.pem > $CERTS_DIR/client-combined.pem
+
+echo "Combined PEMs to $CERTS_DIR/client-combined.pem"

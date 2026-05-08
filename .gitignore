@@ -83,3 +83,5 @@ docs/bench_results/
 
 # certs stuf
 *.pem
+*.csr
+*.srl
