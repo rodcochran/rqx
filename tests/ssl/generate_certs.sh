@@ -34,15 +34,15 @@
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
 CERTS_DIR="$SCRIPT_DIR/certs"
 
-# Early exit for idempotency
-if [ -f $CERTS_DIR/client-cert.pem ]; 
-    then 
-    echo "Certs already created - exiting"
-    exit 0; 
-fi
+# # Early exit for idempotency
+# if [ -f $CERTS_DIR/client-cert.pem ]; 
+#     then 
+#     echo "Certs already created - exiting"
+#     exit 0; 
+# fi
 
 echo "Generating Certificates"
-mkdir $CERTS_DIR
+mkdir -p $CERTS_DIR
 
 # Generate self-signed cert via OpenSSL
 # 
@@ -74,9 +74,8 @@ openssl req \
     -newkey rsa:2048 \
     -keyout $CERTS_DIR/server-key.pem \
     -out $CERTS_DIR/server.csr \
-    -nodes \
     -noenc \
-    -subj /C=US/ST=CA/L="San Francisco"/O=rqx/ \
+    -subj /C=US/ST=CA/L="San Francisco"/O="rqx Test Server"/ \
     -quiet
 
 
@@ -90,22 +89,23 @@ openssl x509 \
     -CAkey $CERTS_DIR/key.pem \
     -CAcreateserial \
     -out $CERTS_DIR/server-cert.pem \
-    -days 1
+    -days 1 \
+    -extfile $SCRIPT_DIR/extfile.txt
+
     
 
-echo "Signed CSR"
+echo "Signed Server CSR"
 
 # Client cert: Same as server cert, signed by same CA. 
 #
-# Generate server key
+# Generate Client key
 openssl req \
     -new \
     -newkey rsa:2048 \
     -keyout $CERTS_DIR/client-key.pem \
     -out $CERTS_DIR/client.csr \
-    -nodes \
     -noenc \
-    -subj /C=US/ST=CA/L="San Francisco"/O=rqx/ \
+    -subj /C=US/ST=CA/L="San Francisco"/O="rqx Test Client"/ \
     -quiet
 
 echo "Generated client key"
@@ -120,7 +120,7 @@ openssl x509 \
     -out $CERTS_DIR/client-cert.pem \
     -days 1
 
-echo "Signed CSR"
+echo "Signed Client CSR"
 
 # Create combined pem
 cat $CERTS_DIR/client-cert.pem $CERTS_DIR/client-key.pem > $CERTS_DIR/client-combined.pem
