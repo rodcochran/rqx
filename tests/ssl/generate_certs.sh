@@ -59,7 +59,7 @@ openssl req \
     -newkey rsa:2048 \
     -keyout $CERTS_DIR/ca-key.pem \
     -out $CERTS_DIR/ca-cert.pem \
-    -days 1 \
+    -days 365 \
     -noenc \
     -subj /C=US/ST=CA/L="San Francisco"/O=rqx/ \
     -quiet
@@ -89,7 +89,7 @@ openssl x509 \
     -CAkey $CERTS_DIR/ca-key.pem \
     -CAcreateserial \
     -out $CERTS_DIR/server-cert.pem \
-    -days 1 \
+    -days 365 \
     -extfile $SCRIPT_DIR/extfile.txt
 
     
@@ -118,7 +118,7 @@ openssl x509 \
     -CAkey $CERTS_DIR/ca-key.pem \
     -CAcreateserial \
     -out $CERTS_DIR/client-cert.pem \
-    -days 1
+    -days 365
 
 echo "Signed Client CSR"
 
