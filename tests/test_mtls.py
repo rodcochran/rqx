@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import pytest
 import rqx
 
 # This gets the directory containing the script
@@ -17,7 +16,33 @@ def test_mtls_basic(mtls_server):
     assert resp.status_code == 200
 
 
-# def test_mtls_with_bytes(mtls_server): ...
+def test_mtls_with_bytes(mtls_server):
+    with open(f"{script_dir}/ssl/certs/client-combined.pem", "rb") as pem_file:
+        pem_bytes = pem_file.read()
+
+    transport = rqx.HTTPTransport(
+        cert=pem_bytes,
+        verify=f"{script_dir}/ssl/certs/ca-cert.pem",
+    )
+    client = rqx.Client(transport=transport)
+    resp = client.get(url=f"{mtls_server}/mtls")
+    assert resp.status_code == 200
+
+
+def test_mtls_with_tuple(mtls_server):
+    with open(f"{script_dir}/ssl/certs/client-combined.pem", "rb") as pem_file:
+        pem_bytes = pem_file.read()
+
+    transport = rqx.HTTPTransport(
+        cert=(
+            f"{script_dir}/ssl/certs/client-cert.pem",
+            f"{script_dir}/ssl/certs/client-key.pem",
+        ),
+        verify=f"{script_dir}/ssl/certs/ca-cert.pem",
+    )
+    client = rqx.Client(transport=transport)
+    resp = client.get(url=f"{mtls_server}/mtls")
+    assert resp.status_code == 200
 
 
 # def test_mtls_invalid_pem(mtls_server): ...
