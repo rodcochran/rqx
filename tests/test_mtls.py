@@ -48,6 +48,11 @@ def test_mtls_invalid_pem():
         rqx.HTTPTransport(cert=b"not actually pem at all")
 
 
+def test_mtls_invalid_cert_type():
+    with pytest.raises(rqx.RqxError, match="cert must be"):
+        rqx.HTTPTransport(cert=42)  # not a string, bytes, or tuple
+
+
 def test_mtls_rejects_server_cert_as_client_cert(mtls_server):
     transport = rqx.HTTPTransport(
         cert=(
@@ -104,6 +109,12 @@ async def test_mtls_with_tuple_async(mtls_server):
 async def test_mtls_invalid_pem_async():
     with pytest.raises(rqx.RqxError):
         rqx.AsyncHTTPTransport(cert=b"not actually pem at all")
+
+
+@pytest.mark.asyncio
+async def test_mtls_invalid_cert_type_async():
+    with pytest.raises(rqx.RqxError, match="cert must be"):
+        rqx.AsyncHTTPTransport(cert=42)  # not a string, bytes, or tuple
 
 
 @pytest.mark.asyncio
