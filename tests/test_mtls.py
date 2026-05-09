@@ -1,8 +1,9 @@
 from pathlib import Path
 
+import pytest
 import rqx
 
-# This gets the directory containing the script
+# This gets the directory containing the pems
 script_dir = Path(__file__).resolve().parent
 
 
@@ -42,16 +43,78 @@ def test_mtls_with_tuple(mtls_server):
     assert resp.status_code == 200
 
 
-# def test_mtls_invalid_pem(mtls_server): ...
+def test_mtls_invalid_pem():
+    with pytest.raises(rqx.RqxError):
+        rqx.HTTPTransport(cert=b"not actually pem at all")
 
 
-# @pytest.mark.asyncio
-# async def test_mtls_basic_async(mtls_server): ...
+def test_mtls_rejects_server_cert_as_client_cert(mtls_server):
+    transport = rqx.HTTPTransport(
+        cert=(
+            f"{script_dir}/ssl/certs/server-cert.pem",
+            f"{script_dir}/ssl/certs/server-key.pem",
+        ),
+        verify=f"{script_dir}/ssl/certs/ca-cert.pem",
+    )
+    client = rqx.Client(transport=transport)
+    with pytest.raises(rqx.RqxError):
+        client.get(url=f"{mtls_server}/mtls")
 
 
-# @pytest.mark.asyncio
-# async def test_mtls_with_bytes_async(mtls_server): ...
+@pytest.mark.asyncio
+async def test_mtls_basic_async(mtls_server):
+    transport = rqx.AsyncHTTPTransport(
+        cert=f"{script_dir}/ssl/certs/client-combined.pem",
+        verify=f"{script_dir}/ssl/certs/ca-cert.pem",
+    )
+    client = rqx.AsyncClient(transport=transport)
+    resp = await client.get(url=f"{mtls_server}/mtls")
+    assert resp.status_code == 200
 
 
-# @pytest.mark.asyncio
-# async def test_mtls_invalid_pem_async(mtls_server): ...
+@pytest.mark.asyncio
+async def test_mtls_with_bytes_async(mtls_server):
+    with open(f"{script_dir}/ssl/certs/client-combined.pem", "rb") as pem_file:
+        pem_bytes = pem_file.read()
+
+    transport = rqx.AsyncHTTPTransport(
+        cert=pem_bytes,
+        verify=f"{script_dir}/ssl/certs/ca-cert.pem",
+    )
+    client = rqx.AsyncClient(transport=transport)
+    resp = await client.get(url=f"{mtls_server}/mtls")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_mtls_with_tuple_async(mtls_server):
+    transport = rqx.AsyncHTTPTransport(
+        cert=(
+            f"{script_dir}/ssl/certs/client-cert.pem",
+            f"{script_dir}/ssl/certs/client-key.pem",
+        ),
+        verify=f"{script_dir}/ssl/certs/ca-cert.pem",
+    )
+    client = rqx.AsyncClient(transport=transport)
+    resp = await client.get(url=f"{mtls_server}/mtls")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_mtls_invalid_pem_async():
+    with pytest.raises(rqx.RqxError):
+        rqx.AsyncHTTPTransport(cert=b"not actually pem at all")
+
+
+@pytest.mark.asyncio
+async def test_mtls_rejects_server_cert_as_client_cert_async(mtls_server):
+    transport = rqx.AsyncHTTPTransport(
+        cert=(
+            f"{script_dir}/ssl/certs/server-cert.pem",
+            f"{script_dir}/ssl/certs/server-key.pem",
+        ),
+        verify=f"{script_dir}/ssl/certs/ca-cert.pem",
+    )
+    client = rqx.AsyncClient(transport=transport)
+    with pytest.raises(rqx.RqxError):
+        await client.get(url=f"{mtls_server}/mtls")
