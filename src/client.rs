@@ -15,6 +15,7 @@ use super::request::{
 };
 use super::response::PyResponse;
 use super::retry::DEFAULT_RAISE_ON_REDIRECT;
+use super::runtime::RUNTIME;
 use super::transport::{AsyncHTTPTransport, HTTPTransport};
 
 const DEFAULT_TIMEOUT: u64 = 15;
@@ -394,10 +395,8 @@ impl PyClient {
         };
 
         let mut resp = if _follow_redirects {
-            todo!("Implement redirect handling for stream responses.")
-            // self.send_handling_redirects(py, request)?
+            self.send_handling_redirects_stream(py, request)?
         } else {
-            // self.transport.handle_request(py, request)?
             PyStreamResponse::from_response(self.transport.send_raw(py, request)?)?
         };
 
@@ -487,10 +486,16 @@ impl PyClient {
         original_headers: &HeaderMap,
         resp: &PyResponse,
     ) -> PyResult<PyResponse> {
-        let new_url = determine_redirect_url(original_url, resp)
+        let location = resp
+            .headers
+            .borrow(py)
+            .get_first("location")
+            .map(String::from)
+            .ok_or_else(|| RqxError::new_err("3xx response missing Location header"))?;
+        let new_url = determine_redirect_url(original_url, &location)
             .map_err(|e| RqxError::new_err(format!("Error parsing url from redirect: {e}")))?;
 
-        let new_method = determine_redirect_method(original_method, resp);
+        let new_method = determine_redirect_method(original_method, resp.status_code);
         let current_request = build_redirect_request(
             self.transport.client(),
             new_method,
@@ -499,6 +504,86 @@ impl PyClient {
         );
         let current_response = self.transport.handle_request(py, current_request);
         return current_response;
+    }
+
+    fn send_handling_redirects_stream(
+        &self,
+        py: Python<'_>,
+        request: Request,
+    ) -> PyResult<PyStreamResponse> {
+        let original_method = request.method().clone();
+        let original_url = request.url().clone();
+        let original_headers = request.headers().clone();
+
+        let raise_on_redirect = self
+            .transport
+            .retries
+            .as_ref()
+            .map(|r| r.raise_on_redirect)
+            .unwrap_or(DEFAULT_RAISE_ON_REDIRECT);
+
+        let mut current_request = request;
+        let mut redirects_used: u32 = 0;
+        loop {
+            let response = self.transport.send_raw(py, current_request)?;
+            let status = response.status().as_u16();
+
+            if !(300..400).contains(&status) {
+                // Final response — wrap as stream, body unread.
+                return PyStreamResponse::from_response(response);
+            }
+
+            // It's a 3xx. Check budget BEFORE following.
+            if redirects_used + 1 >= self.max_redirects {
+                if raise_on_redirect {
+                    return Err(TooManyRedirects::new_err(format!(
+                        "Exceeded max redirects {}",
+                        self.max_redirects
+                    )));
+                }
+                // raise_on_redirect=false: return the last 3xx as a stream so
+                // the caller can inspect headers/body.
+                return PyStreamResponse::from_response(response);
+            }
+
+            // Extract Location and cookies BEFORE consuming response.
+            let location = response
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .map(String::from)
+                .ok_or_else(|| RqxError::new_err("3xx response missing Location header"))?;
+
+            let cookies_map: HashMap<String, String> = response
+                .cookies()
+                .map(|c| (c.name().to_string(), c.value().to_string()))
+                .collect();
+            if !cookies_map.is_empty() {
+                let mut cookies = self.cookies.lock().unwrap();
+                cookies.extend(cookies_map);
+            }
+
+            // Drain the 3xx body to release the connection back to the pool.
+            // (3xx bodies are typically empty or tiny.)
+            py.detach(|| {
+                let _ = RUNTIME
+                    .get()
+                    .expect("runtime not initialized")
+                    .block_on(async { response.bytes().await });
+            });
+
+            let new_url = determine_redirect_url(&original_url, &location)
+                .map_err(|e| RqxError::new_err(format!("Error parsing url from redirect: {e}")))?;
+            let new_method = determine_redirect_method(&original_method, status);
+            current_request = build_redirect_request(
+                self.transport.client(),
+                new_method,
+                new_url,
+                &original_headers,
+            );
+
+            redirects_used += 1;
+        }
     }
 
     fn update_cookies(&self, resp: &PyResponse) {
@@ -886,13 +971,18 @@ impl PyAsyncClient {
         };
 
         let transport = self.transport.clone();
-        // let max_redirects = self.max_redirects;
+        let max_redirects = self.max_redirects;
 
         let cookies = Arc::clone(&self.cookies);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut resp = if _follow_redirects {
-                // Self::send_handling_redirects(transport, request, max_redirects).await?
-                todo!("Implement async redirect handling for stream")
+                Self::send_handling_redirects_stream(
+                    transport.clone(),
+                    request,
+                    max_redirects,
+                    Arc::clone(&cookies),
+                )
+                .await?
             } else {
                 PyAsyncStreamResponse::from_response(
                     AsyncHTTPTransport::send_raw(
@@ -996,6 +1086,77 @@ impl PyAsyncClient {
         Ok(current_response)
     }
 
+    async fn send_handling_redirects_stream(
+        transport: AsyncHTTPTransport,
+        request: Request,
+        max_redirects: u32,
+        cookies: Arc<TokioMutex<HashMap<String, String>>>,
+    ) -> PyResult<PyAsyncStreamResponse> {
+        let original_method = request.method().clone();
+        let original_url = request.url().clone();
+        let original_headers = request.headers().clone();
+
+        let raise_on_redirect = transport
+            .retries
+            .as_ref()
+            .map(|r| r.raise_on_redirect)
+            .unwrap_or(DEFAULT_RAISE_ON_REDIRECT);
+
+        let mut current_request = request;
+        let mut redirects_used: u32 = 0;
+        loop {
+            let response = AsyncHTTPTransport::send_raw(
+                transport.client(),
+                current_request,
+                transport.semaphore(),
+            )
+            .await?;
+            let status = response.status().as_u16();
+
+            if !(300..400).contains(&status) {
+                return PyAsyncStreamResponse::from_response(response);
+            }
+
+            if redirects_used + 1 >= max_redirects {
+                if raise_on_redirect {
+                    return Err(TooManyRedirects::new_err(format!(
+                        "Exceeded max redirects {}",
+                        max_redirects
+                    )));
+                }
+                return PyAsyncStreamResponse::from_response(response);
+            }
+
+            let location = response
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .map(String::from)
+                .ok_or_else(|| RqxError::new_err("3xx response missing Location header"))?;
+
+            let cookies_map: HashMap<String, String> = response
+                .cookies()
+                .map(|c| (c.name().to_string(), c.value().to_string()))
+                .collect();
+            Self::accumulate_cookies(&cookies, &cookies_map).await;
+
+            // Drain to release the connection back to the pool.
+            let _ = response.bytes().await;
+
+            let new_url = determine_redirect_url(&original_url, &location)
+                .map_err(|e| RqxError::new_err(format!("Error parsing url from redirect: {e}")))?;
+            let new_method = determine_redirect_method(&original_method, status);
+            current_request = build_redirect_request(
+                transport.client(),
+                new_method,
+                new_url,
+                &original_headers,
+            );
+
+            redirects_used += 1;
+        }
+    }
+
     async fn handle_redirect(
         transport: &AsyncHTTPTransport,
         original_url: &Url,
@@ -1003,10 +1164,17 @@ impl PyAsyncClient {
         original_headers: &HeaderMap,
         resp: &PyResponse,
     ) -> PyResult<PyResponse> {
-        let new_url = determine_redirect_url(original_url, resp)
+        let location = Python::attach(|py| {
+            resp.headers
+                .borrow(py)
+                .get_first("location")
+                .map(String::from)
+        })
+        .ok_or_else(|| RqxError::new_err("3xx response missing Location header"))?;
+        let new_url = determine_redirect_url(original_url, &location)
             .map_err(|e| RqxError::new_err(format!("Error parsing url from redirect: {e}")))?;
 
-        let new_method = determine_redirect_method(original_method, resp);
+        let new_method = determine_redirect_method(original_method, resp.status_code);
         let current_request =
             build_redirect_request(transport.client(), new_method, new_url, original_headers);
         let current_response =
