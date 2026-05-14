@@ -80,8 +80,6 @@ class MTLSHandler(BaseHTTPRequestHandler):
 @pytest.fixture(scope="session")
 def mtls_server():
 
-    # subprocess.run(["bash", f"{script_dir}/ssl/generate_certs.sh"])
-
     # generate certs
     with filelock.FileLock(str(LOCK_PATH)):
         if not (CERTS_DIR / "client-cert.pem").exists():

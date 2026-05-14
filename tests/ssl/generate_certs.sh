@@ -34,13 +34,6 @@
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
 CERTS_DIR="$SCRIPT_DIR/certs"
 
-# # Early exit for idempotency
-# if [ -f $CERTS_DIR/client-cert.pem ]; 
-#     then 
-#     echo "Certs already created - exiting"
-#     exit 0; 
-# fi
-
 echo "Generating Certificates"
 mkdir -p $CERTS_DIR
 
