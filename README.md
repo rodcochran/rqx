@@ -64,7 +64,7 @@ Pre-0.1.0. Usable but the API may shift in small ways before the first tagged re
 
 ## Contributing
 
-This started as a learning project and stayed one. Contributions are welcome — especially around the httpx-parity surface (URL/QueryParams classes, MockTransport, event hooks, full streaming surface). See open issues for the working set, particularly anything labeled `good first issue`. A proper `CONTRIBUTING.md` is on its way.
+This started as a learning project and stayed one. Contributions are welcome — especially around the httpx-parity surface (URL/QueryParams classes, MockTransport, event hooks, full streaming surface). See open issues for the working set, particularly anything labeled `good first issue`, and [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions, and how to run the benchmarks.
 
 ## Acknowledgements
 
