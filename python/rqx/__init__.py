@@ -11,6 +11,7 @@ from ._rqx import (
     ProxyError,
     PyAsyncClient,
     PyClient,
+    PyHeaders,
     PyRetry,
     ReadError,
     ReadTimeout,
@@ -25,6 +26,7 @@ from ._rqx import (
 # optional: nicer names (drop Py prefix)
 Client = PyClient
 AsyncClient = PyAsyncClient
+Headers = PyHeaders
 Retry = PyRetry
 
 __all__ = [
@@ -35,6 +37,7 @@ __all__ = [
     "ConnectTimeout",
     "HTTPStatusError",
     "HTTPTransport",
+    "Headers",
     "MaxRetriesExceeded",
     "NetworkError",
     "PoolTimeout",

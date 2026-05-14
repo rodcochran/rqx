@@ -94,7 +94,7 @@ def test_headers():
     resp = client.get(f"{HTTPBIN_HOST}/get")
     headers = resp.headers
     assert headers is not None
-    assert isinstance(headers, dict)
+    assert isinstance(headers, rqx.Headers)
     assert headers["content-type"] == "application/json"
     print("")
     print(f"Headers:\n{headers}")

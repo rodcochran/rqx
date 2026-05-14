@@ -5,9 +5,9 @@ use http::{Method, HeaderMap};
 use reqwest::{Client, Request};
 use pyo3::exceptions::{PyValueError};
 use pyo3::prelude::{
-    PyAny, 
-    PyResult, 
-    // Python
+    PyAny,
+    PyResult,
+    Python,
 };
 use pyo3::Bound;
 
@@ -144,9 +144,8 @@ pub fn determine_redirect_url(
     current_url: &Url,
     response: &PyResponse
 ) -> PyResult<Url> {
-    let location = response
-        .headers
-        .get("location")
-        .unwrap();
+    let location = Python::attach(|py| {
+        response.headers.borrow(py).get_first("location").map(String::from)
+    }).unwrap();
     Ok(current_url.join(location.as_str()).unwrap())
 }

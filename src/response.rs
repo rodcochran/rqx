@@ -9,6 +9,7 @@ use pyo3::types::PyBytes;
 use reqwest::Response;
 
 use super::exceptions::{RqxError, HTTPStatusError};
+use super::headers::PyHeaders;
 use super::py_json::value_to_py;
 use super::runtime::RUNTIME;
 
@@ -18,7 +19,7 @@ pub struct PyResponse {
     pub status_code: u16,
 
     #[pyo3(get)]
-    pub headers: HashMap<String, String>,
+    pub headers: Py<PyHeaders>,
 
     #[pyo3(get)]
     pub content: Py<PyBytes>,
@@ -53,7 +54,8 @@ impl PyResponse {
     #[getter]
     fn text(&self, py: Python<'_>) -> String {
         let bytes = self.content.as_bytes(py);
-        let encoding = detect_encoding_from_headers(&self.headers)
+        let headers = self.headers.borrow(py);
+        let encoding = detect_encoding_from_headers(&headers)
             .unwrap_or(encoding_rs::UTF_8);
         let (decoded, _, _) = encoding.decode(bytes);
         decoded.into_owned()
@@ -95,10 +97,8 @@ impl PyResponse {
 /// quoting, whitespace, multiple parameters, etc. without reinventing a
 /// MIME parser. Returns `None` if the header is missing, unparseable, has
 /// no charset parameter, or names an encoding `encoding_rs` doesn't know.
-fn detect_encoding_from_headers(
-    headers: &HashMap<String, String>,
-) -> Option<&'static Encoding> {
-    let content_type = headers.get("content-type")?;
+fn detect_encoding_from_headers(headers: &PyHeaders) -> Option<&'static Encoding> {
+    let content_type = headers.get_first("content-type")?;
     let mime: Mime = Mime::from_str(content_type).ok()?;
     let charset = mime.get_param(mime::CHARSET)?;
     Encoding::for_label(charset.as_str().as_bytes())
@@ -108,7 +108,9 @@ impl PyResponse {
     pub fn from_response(py: Python<'_>, response: Response) -> PyResult<PyResponse> {
         let status_code = response.status().as_u16();
 
-        let headers = response
+        // Collect into Vec to preserve insertion order and duplicate keys
+        // (e.g. Set-Cookie). PyHeaders does case-insensitive lookup on top.
+        let header_pairs: Vec<(String, String)> = response
             .headers()
             .iter()
             .map(|(k, v)| {
@@ -117,7 +119,8 @@ impl PyResponse {
                     v.to_str().unwrap_or("<non-utf8>").to_string(),
                 )
             })
-            .collect::<HashMap<_, _>>();
+            .collect();
+        let headers = Py::new(py, PyHeaders::from_pairs(header_pairs))?;
 
         let url = response.url().as_str().to_owned();
         let http_version  = format!("{:?}", response.version());
@@ -161,7 +164,7 @@ impl PyResponse {
     pub async fn from_response_async(response: Response) -> PyResult<PyResponse> {
         let status_code = response.status().as_u16();
 
-        let headers = response
+        let header_pairs: Vec<(String, String)> = response
             .headers()
             .iter()
             .map(|(k, v)| {
@@ -170,7 +173,7 @@ impl PyResponse {
                     v.to_str().unwrap_or("<non-utf8>").to_string(),
                 )
             })
-            .collect::<HashMap<_, _>>();
+            .collect();
 
         let url = response.url().as_str().to_owned();
         let http_version  = format!("{:?}", response.version());
@@ -214,7 +217,11 @@ impl PyResponse {
         // single-allocation property of (3). If profiling ever shows the
         // double GIL acquire showing up as tail latency at high concurrency,
         // switch to (2).
-        let content = Python::attach(|py| PyBytes::new(py, &body).unbind());
+        let (content, headers) = Python::attach(|py| -> PyResult<(Py<PyBytes>, Py<PyHeaders>)> {
+            let content = PyBytes::new(py, &body).unbind();
+            let headers = Py::new(py, PyHeaders::from_pairs(header_pairs))?;
+            Ok((content, headers))
+        })?;
 
         Ok(
             PyResponse  {

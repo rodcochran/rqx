@@ -181,7 +181,11 @@ impl HTTPTransport {
                 let retry_after: f32 = if respect_retry {
                     current_response
                         .as_ref()
-                        .and_then(|r| r.headers.get("retry-after"))
+                        .and_then(|r| {
+                            Python::attach(|py| {
+                                r.headers.borrow(py).get_first("retry-after").map(String::from)
+                            })
+                        })
                         .and_then(|v| v.parse::<f32>().ok())
                         .unwrap_or(0.0)
                 } else {
@@ -456,7 +460,11 @@ impl AsyncHTTPTransport {
                 let retry_after: f32 = if respect_retry {
                     current_response
                         .as_ref()
-                        .and_then(|r| r.headers.get("retry-after"))
+                        .and_then(|r| {
+                            Python::attach(|py| {
+                                r.headers.borrow(py).get_first("retry-after").map(String::from)
+                            })
+                        })
                         .and_then(|v| v.parse::<f32>().ok())
                         .unwrap_or(0.0)
                 } else {
