@@ -449,7 +449,7 @@ impl PyClient {
         let original_method = request.method().clone();
         let original_url = request.url().clone();
         let original_headers = request.headers().clone();
-        let mut current_response = self.transport.handle_request(py, request).unwrap();
+        let mut current_response = self.transport.handle_request(py, request)?;
         // Capture any cookies from the first response before we follow the
         // redirect chain. Each intermediate hop can set cookies we'd
         // otherwise lose, since the non-redirect return path also calls

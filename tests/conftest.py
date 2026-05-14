@@ -33,6 +33,10 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
 
         request_id = params["request_id"][0]
 
+        if path == "/reset":
+            self._reset_connection(request_id)
+            return
+
         self.counters[request_id] += 1
 
         if self.counters[request_id] < DEFAULT_ERRORS_BEFORE_SUCCESS:
@@ -50,6 +54,29 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b'{"status": "ok"}')
             print("FLAKY API returned 200")
+
+    def do_POST(self):
+
+        parsed = urlparse(self.path)
+        path = parsed.path  # e.g. "/flaky/3"
+        params = parse_qs(parsed.query)  # e.g. {"request_id": ["abc"]}
+
+        request_id = params["request_id"][0]
+
+        if path == "/reset":
+            self._reset_connection(request_id)
+            return
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > 0:
+            self.rfile.read(content_length)
+
+        self.send_response(404)
+        self.end_headers()
+
+    def _reset_connection(self, request_id):
+        self.counters[request_id] += 1
+        self.connection.close()
 
 
 @pytest.fixture(scope="session")

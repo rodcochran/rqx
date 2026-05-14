@@ -4,6 +4,7 @@ import time
 
 import pytest
 import rqx
+from conftest import FlakyServerHandler
 from rich import print
 
 # HTTPBIN_HOST = "https://httpbin.org"
@@ -813,3 +814,32 @@ def test_stream():
         chunks = list(resp.iter_bytes(1024))
         assert len(chunks) > 0
         print(chunks)
+
+
+# ================================================================
+# Regression tests
+# ================================================================
+
+
+def test_unreachable_raises_with_follow_redirects_enabled():
+    client = rqx.Client(follow_redirects=True)
+    with pytest.raises(rqx.RqxError):
+        client.get("http://<unreachable>")
+
+
+def test_post_not_retried_on_connection_reset(flaky_server):
+    transport = rqx.HTTPTransport(retries=rqx.Retry(total=3))
+    client = rqx.Client(transport=transport)
+    with pytest.raises(rqx.RqxError):
+        client.post(f"{flaky_server}/reset?request_id=post_test")
+    # assert the server saw exactly 1 attempt
+    assert FlakyServerHandler.counters["post_test"] == 1
+
+
+def test_get_retried_on_connection_reset(flaky_server):
+    transport = rqx.HTTPTransport(retries=rqx.Retry(total=3))
+    client = rqx.Client(transport=transport)
+    with pytest.raises(rqx.RqxError):  # eventually exhausts retries
+        client.get(f"{flaky_server}/reset?request_id=get_test")
+    # assert it actually retried
+    assert FlakyServerHandler.counters["get_test"] == 4  # 1 + 3 retries

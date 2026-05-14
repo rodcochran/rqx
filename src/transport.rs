@@ -188,7 +188,7 @@ impl HTTPTransport {
                     0.0
                 };
 
-                let calculated_backoff = r.backoff_factor * 2_f32.powi(attempt);
+                let calculated_backoff = r.backoff_factor * 2_f32.powi(attempt - 1);
                 let backoff_time = f32::min(f32::max(calculated_backoff, retry_after), backoff_max);
                 // Run tokio sleep in Rust's runtime
                 py.detach(|| {
@@ -218,6 +218,10 @@ impl HTTPTransport {
                     current_response = Some(resp);
                 }
                 Err(e) => {
+                    if !is_retryable_method {
+                        return Err(e);
+                    }
+
                     let attempt_elapsed = attempt_start.elapsed().as_millis() as f64;
                     current_response = None;
                     // record in retry_history
@@ -242,7 +246,7 @@ impl HTTPTransport {
             Some(mut cr) => {
                 if r.status_forcelist.contains(&cr.status_code) {
                     return Err(MaxRetriesExceeded::new_err(format!(
-                        "max retries exeeded: {}",
+                        "max retries exceeded: {}",
                         r.total
                     )));
                 }
@@ -252,7 +256,7 @@ impl HTTPTransport {
             }
             None => {
                 return Err(MaxRetriesExceeded::new_err(format!(
-                    "max retries exeeded: {}",
+                    "max retries exceeded: {}",
                     r.total
                 )));
             }
@@ -459,7 +463,7 @@ impl AsyncHTTPTransport {
                     0.0
                 };
 
-                let calculated_backoff = r.backoff_factor * 2_f32.powi(attempt);
+                let calculated_backoff = r.backoff_factor * 2_f32.powi(attempt - 1);
                 let backoff_time = f32::min(f32::max(calculated_backoff, retry_after), backoff_max);
 
                 // Run tokio sleep in Rust's runtime
@@ -484,6 +488,9 @@ impl AsyncHTTPTransport {
                     current_response = Some(resp);
                 }
                 Err(e) => {
+                    if !is_retryable_method {
+                        return Err(e);
+                    }
                     let attempt_elapsed = attempt_start.elapsed().as_millis() as f64;
                     current_response = None;
                     // record in retry_history
@@ -508,7 +515,7 @@ impl AsyncHTTPTransport {
             Some(mut cr) => {
                 if r.status_forcelist.contains(&cr.status_code) {
                     return Err(MaxRetriesExceeded::new_err(format!(
-                        "max retries exeeded: {}",
+                        "max retries exceeded: {}",
                         r.total
                     )));
                 }
@@ -518,7 +525,7 @@ impl AsyncHTTPTransport {
             }
             None => {
                 return Err(MaxRetriesExceeded::new_err(format!(
-                    "max retries exeeded: {}",
+                    "max retries exceeded: {}",
                     r.total
                 )));
             }
