@@ -43,7 +43,7 @@ jobs:
         with:
           enable-cache: true
       - uses: dtolnay/rust-toolchain@stable
-      - run: uv sync --all-extras --frozen
+      - run: uv sync --extra dev --frozen
       - run: uv run maturin develop
       - run: uv run pytest tests/ -n 8
 
