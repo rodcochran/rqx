@@ -22,7 +22,7 @@ pub struct PyResponse {
 
     #[pyo3(get)]
     pub content: Py<PyBytes>,
-    
+
     #[pyo3(get)]
     pub url: String,
 
@@ -118,12 +118,12 @@ impl PyResponse {
                 )
             })
             .collect::<HashMap<_, _>>();
-        
+
         let url = response.url().as_str().to_owned();
         let http_version  = format!("{:?}", response.version());
         let cookies: HashMap<String, String> = response.cookies()
             .map(|c| (
-                c.name().to_string(), 
+                c.name().to_string(),
                 c.value().to_string())
             )
             .collect();
@@ -134,7 +134,7 @@ impl PyResponse {
                 .ok_or_else(|| RqxError::new_err("runtime not initialized"))?
                 .block_on(async {
                     response.bytes().await.map_err(|e| {
-                        RqxError::new_err(format!("failed to read body: {e:?}"))
+                        RqxError::new_err(format!("failed to read body: {e}"))
                     })
                 })
         })?;
@@ -171,18 +171,18 @@ impl PyResponse {
                 )
             })
             .collect::<HashMap<_, _>>();
-        
+
         let url = response.url().as_str().to_owned();
         let http_version  = format!("{:?}", response.version());
         let cookies: HashMap<String, String> = response.cookies()
             .map(|c| (
-                c.name().to_string(), 
+                c.name().to_string(),
                 c.value().to_string())
             )
             .collect();
 
         let body = response.bytes().await.map_err(|e| {
-            RqxError::new_err(format!("failed to read body: {e:?}"))
+            RqxError::new_err(format!("failed to read body: {e}"))
         })?;
         // Briefly acquire the GIL to allocate a Python bytes object directly
         // from the response body. No .await crosses this closure so there's

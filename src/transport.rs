@@ -141,7 +141,7 @@ impl HTTPTransport {
                         if e.is_timeout() {
                             TimeoutException::new_err(format!("request timed out: {e}"))
                         } else {
-                            RqxError::new_err(format!("request failed: {e:?}"))
+                            RqxError::new_err(format!("request failed: {e}"))
                         }
                     })
                 })
@@ -410,7 +410,7 @@ impl AsyncHTTPTransport {
             if e.is_timeout() {
                 TimeoutException::new_err(format!("request timed out: {e}"))
             } else {
-                RqxError::new_err(format!("request failed: {e:?}"))
+                RqxError::new_err(format!("request failed: {e}"))
             }
         })?;
         return Ok(response);
