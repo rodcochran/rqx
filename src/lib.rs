@@ -19,6 +19,7 @@ mod runtime;
 mod timeout;
 mod transport;
 mod stream;
+mod url;
 pub mod exceptions;
 
 use client::{PyClient, PyAsyncClient};
