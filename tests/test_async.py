@@ -559,12 +559,35 @@ async def test_basic_http2_explicit_opt_out():
 
 
 @pytest.mark.asyncio
-async def test_basic_http2_implicit_opt_out():
+async def test_basic_http2_default_negotiates_h2():
+    # No http1/http2 kwargs → ALPN. Against h2-capable server → h2.
     transport = rqx.AsyncHTTPTransport()
     client = rqx.AsyncClient(transport=transport)
     url = "https://nghttp2.org/httpbin/get"
     resp = await client.get(url=url)
-    assert resp.http_version != "HTTP/2.0"
+    assert resp.http_version == "HTTP/2.0"
+
+
+@pytest.mark.asyncio
+async def test_http_version_pinned_to_h1_async():
+    transport = rqx.AsyncHTTPTransport(http1=True, http2=False)
+    client = rqx.AsyncClient(transport=transport)
+    resp = await client.get(url="https://nghttp2.org/httpbin/get")
+    assert resp.http_version == "HTTP/1.1"
+
+
+@pytest.mark.asyncio
+async def test_http_version_pinned_to_h2_prior_knowledge_async():
+    transport = rqx.AsyncHTTPTransport(http1=False, http2=True)
+    client = rqx.AsyncClient(transport=transport)
+    resp = await client.get(url="https://nghttp2.org/httpbin/get")
+    assert resp.http_version == "HTTP/2.0"
+
+
+@pytest.mark.asyncio
+async def test_http_version_both_disabled_raises_async():
+    with pytest.raises(rqx.RqxError):
+        rqx.AsyncHTTPTransport(http1=False, http2=False)
 
 
 def test_proxy_config():

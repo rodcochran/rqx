@@ -32,6 +32,7 @@ impl HTTPTransport {
         max_connections=None,
         max_keepalive_connections=None,
         keepalive_expiry=None,
+        http1=None,
         http2=None,
         verify=None,
         cert=None,
@@ -42,6 +43,7 @@ impl HTTPTransport {
         max_connections: Option<u32>,
         max_keepalive_connections: Option<u32>,
         keepalive_expiry: Option<f64>,
+        http1: Option<bool>,
         http2: Option<bool>,
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
@@ -52,6 +54,7 @@ impl HTTPTransport {
         let http_client = build_http_client(
             max_keepalive_connections,
             keepalive_expiry,
+            http1,
             http2,
             verify,
             cert,
@@ -92,7 +95,7 @@ impl HTTPTransport {
             return Ok(HTTPTransport::default());
         }
         Ok(Self {
-            http_client: build_http_client(None, None, None, verify, cert, None)?,
+            http_client: build_http_client(None, None, None, None, verify, cert, None)?,
             max_connection_semaphore: None,
             retries: None,
         })
@@ -300,6 +303,7 @@ impl AsyncHTTPTransport {
         max_connections=None,
         max_keepalive_connections=None,
         keepalive_expiry=None,
+        http1=None,
         http2=None,
         verify=None,
         cert=None,
@@ -310,6 +314,7 @@ impl AsyncHTTPTransport {
         max_connections: Option<u32>,
         max_keepalive_connections: Option<u32>,
         keepalive_expiry: Option<f64>,
+        http1: Option<bool>,
         http2: Option<bool>,
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
@@ -328,6 +333,7 @@ impl AsyncHTTPTransport {
         let http_client = build_http_client(
             max_keepalive_connections,
             keepalive_expiry,
+            http1,
             http2,
             verify,
             cert,
@@ -369,7 +375,7 @@ impl AsyncHTTPTransport {
         }
 
         Ok(Self {
-            http_client: build_http_client(None, None, None, verify, cert, None)?,
+            http_client: build_http_client(None, None, None, None, verify, cert, None)?,
             max_connection_semaphore: None,
             retries: None,
         })
@@ -562,6 +568,7 @@ Helper for constructing the HTTP Client
 fn build_http_client(
     max_keepalive_connections: Option<u32>,
     keepalive_expiry: Option<f64>,
+    http1: Option<bool>,
     http2: Option<bool>,
     verify: Option<&Bound<'_, PyAny>>,
     cert: Option<&Bound<'_, PyAny>>,
@@ -580,10 +587,30 @@ fn build_http_client(
         http_client_builder = http_client_builder.pool_idle_timeout(Duration::from_secs_f64(ke));
     }
 
-    if http2.unwrap_or(false) {
-        http_client_builder = http_client_builder.http2_prior_knowledge();
-    } else {
-        http_client_builder = http_client_builder.http1_only();
+    // HTTP version selection:
+    //   - default (both None / both True): ALPN negotiates over TLS (h2 preferred,
+    //     h1.1 fallback). For plain HTTP, reqwest uses h1.1.
+    //   - http1=True, http2=False: HTTP/1.1 only — never upgrade.
+    //   - http1=False, http2=True: HTTP/2 prior knowledge — no fallback. Will
+    //     fail against h1-only servers; use when you know the server speaks h2.
+    //   - both False: error — at least one protocol must be allowed.
+    let allow_h1 = http1.unwrap_or(true);
+    let allow_h2 = http2.unwrap_or(true);
+    match (allow_h1, allow_h2) {
+        (false, false) => {
+            return Err(RqxError::new_err(
+                "at least one of http1, http2 must be true",
+            ));
+        }
+        (true, false) => {
+            http_client_builder = http_client_builder.http1_only();
+        }
+        (false, true) => {
+            http_client_builder = http_client_builder.http2_prior_knowledge();
+        }
+        (true, true) => {
+            // No-op — reqwest's default does ALPN negotiation over TLS.
+        }
     }
 
     if let Some(v) = verify {

@@ -769,12 +769,36 @@ def test_basic_http2_explicit_opt_out():
     assert resp.http_version != "HTTP/2.0"
 
 
-def test_basic_http2_implicit_opt_out():
+def test_basic_http2_default_negotiates_h2():
+    # No http1/http2 kwargs → ALPN negotiation. Against an HTTP/2-capable
+    # server, this should negotiate to HTTP/2 automatically.
     transport = rqx.HTTPTransport()
     client = rqx.Client(transport=transport)
     url = "https://nghttp2.org/httpbin/get"
     resp = client.get(url=url)
-    assert resp.http_version != "HTTP/2.0"
+    assert resp.http_version == "HTTP/2.0"
+
+
+def test_http_version_pinned_to_h1():
+    # http1=True, http2=False forces HTTP/1.1 even against an h2-capable server.
+    transport = rqx.HTTPTransport(http1=True, http2=False)
+    client = rqx.Client(transport=transport)
+    resp = client.get(url="https://nghttp2.org/httpbin/get")
+    assert resp.http_version == "HTTP/1.1"
+
+
+def test_http_version_pinned_to_h2_prior_knowledge():
+    # http1=False, http2=True forces HTTP/2 prior knowledge (no fallback).
+    transport = rqx.HTTPTransport(http1=False, http2=True)
+    client = rqx.Client(transport=transport)
+    resp = client.get(url="https://nghttp2.org/httpbin/get")
+    assert resp.http_version == "HTTP/2.0"
+
+
+def test_http_version_both_disabled_raises():
+    # http1=False, http2=False is invalid — nothing supported.
+    with pytest.raises(rqx.RqxError):
+        rqx.HTTPTransport(http1=False, http2=False)
 
 
 def test_proxy_config():
