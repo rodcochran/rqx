@@ -92,15 +92,12 @@ impl PyClient {
             url,
             content=None,
             data=None,
-            // files,
             json=None,
             params=None,
             headers=None,
-            // cookies,
             auth=None,
             follow_redirects=None,
             timeout=None
-            // extensions
         )
     )]
     fn request(
@@ -110,15 +107,12 @@ impl PyClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        // files: &Bound<'_, PyDict>,
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
-        // cookies: &Bound<'_, PyDict>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
-        // extensions: &Bound<'_, PyDict>,
     ) -> PyResult<PyResponse> {
         let start_time = std::time::Instant::now();
 
@@ -354,15 +348,12 @@ impl PyClient {
             url,
             content=None,
             data=None,
-            // files,
             json=None,
             params=None,
             headers=None,
-            // cookies,
             auth=None,
             follow_redirects=None,
             timeout=None
-            // extensions
         )
     )]
     fn stream(
@@ -372,15 +363,12 @@ impl PyClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        // files: &Bound<'_, PyDict>,
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
-        // cookies: &Bound<'_, PyDict>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
-        // extensions: &Bound<'_, PyDict>,
     ) -> PyResult<PyStreamResponse> {
         let start_time = std::time::Instant::now();
 
@@ -572,15 +560,12 @@ impl PyAsyncClient {
             url,
             content=None,
             data=None,
-            // files,
             json=None,
             params=None,
             headers=None,
-            // cookies,
             auth=None,
             follow_redirects=None,
             timeout=None
-            // extensions
         )
     )]
     fn request<'a>(
@@ -590,15 +575,12 @@ impl PyAsyncClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        // files: &Bound<'_, PyDict>,
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
-        // cookies: &Bound<'_, PyDict>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
-        // extensions: &Bound<'_, PyDict>,
         // ) -> PyResult<PyResponse> {
     ) -> PyResult<Bound<'a, PyAny>> {
         let start_time = std::time::Instant::now();
@@ -845,15 +827,12 @@ impl PyAsyncClient {
             url,
             content=None,
             data=None,
-            // files,
             json=None,
             params=None,
             headers=None,
-            // cookies,
             auth=None,
             follow_redirects=None,
             timeout=None
-            // extensions
         )
     )]
     fn stream<'a>(
@@ -863,15 +842,12 @@ impl PyAsyncClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        // files: &Bound<'_, PyDict>,
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
-        // cookies: &Bound<'_, PyDict>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
-        // extensions: &Bound<'_, PyDict>,
         // ) -> PyResult<PyResponse> {
     ) -> PyResult<Bound<'a, PyAny>> {
         let start_time = std::time::Instant::now();

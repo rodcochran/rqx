@@ -1,13 +1,27 @@
+import gzip
+import json
 import ssl
 import subprocess
 import threading
+import zlib
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import brotli
 import filelock
 import pytest
+import zstandard
+
+# HTTP Content-Encoding header values per RFC. Brotli is the odd one out:
+# the algorithm is "brotli" but the on-the-wire header value is "br".
+COMPRESSION_HEADER_VALUE = {
+    "gzip": "gzip",
+    "deflate": "deflate",
+    "brotli": "br",
+    "zstd": "zstd",
+}
 
 # This gets the directory containing the script
 script_dir = Path(__file__).resolve().parent
@@ -30,6 +44,12 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path  # e.g. "/flaky/3"
         params = parse_qs(parsed.query)  # e.g. {"request_id": ["abc"]}
+
+        # Compressed endpoints don't need a request_id.
+        if path.startswith("/compressed/"):
+            algorithm = path.removeprefix("/compressed/")
+            self._send_compressed(algorithm)
+            return
 
         request_id = params["request_id"][0]
 
@@ -77,6 +97,29 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
     def _reset_connection(self, request_id):
         self.counters[request_id] += 1
         self.connection.close()
+
+    def _send_compressed(self, algorithm):
+        payload = json.dumps({"compressed": True, "algorithm": algorithm}).encode()
+
+        if algorithm == "gzip":
+            body = gzip.compress(payload)
+        elif algorithm == "deflate":
+            body = zlib.compress(payload)
+        elif algorithm == "brotli":
+            body = brotli.compress(payload)
+        elif algorithm == "zstd":
+            body = zstandard.ZstdCompressor().compress(payload)
+        else:
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Encoding", COMPRESSION_HEADER_VALUE[algorithm])
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 @pytest.fixture(scope="session")
