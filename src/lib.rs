@@ -10,6 +10,7 @@ use pyo3::exceptions::{PyRuntimeError};
 use tokio::runtime::Builder as RtBuilder;
 
 mod client;
+mod headers;
 mod py_json;
 mod request;
 mod response;
@@ -20,6 +21,7 @@ mod stream;
 pub mod exceptions;
 
 use client::{PyClient, PyAsyncClient};
+use headers::PyHeaders;
 use runtime::RUNTIME;
 use exceptions::*;
 use retry::PyRetry;
@@ -51,6 +53,7 @@ fn _rqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRetry>()?;
     m.add_class::<HTTPTransport>()?;
     m.add_class::<AsyncHTTPTransport>()?;
+    m.add_class::<PyHeaders>()?;
     m.add("RqxError", m.py().get_type::<RqxError>())?;
     m.add("RequestError", m.py().get_type::<RequestError>())?;
     m.add("MaxRetriesExceeded", m.py().get_type::<MaxRetriesExceeded>())?;

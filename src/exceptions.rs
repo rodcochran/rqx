@@ -1,3 +1,4 @@
+use pyo3::PyErr;
 use pyo3::create_exception;
 
 /*
@@ -50,4 +51,39 @@ create_exception!(rqx, ReadError, NetworkError);
 create_exception!(rqx, WriteError, NetworkError);
 
 
+/// Map a reqwest error to the most specific rqx exception type.
+///
+/// reqwest exposes a few classification predicates (`is_timeout`, `is_connect`,
+/// `is_body`, etc.) but doesn't fully disambiguate, e.g. between
+/// `ConnectTimeout` and `ReadTimeout`. We use the predicates that exist and
+/// fall back to the broader category for the rest. Leaf types all inherit
+/// from `RqxError`, so callers that catch `RqxError` continue to work.
+pub fn map_reqwest_error(e: reqwest::Error) -> PyErr {
+    let msg = format!("{e}");
 
+    if e.is_timeout() {
+        // Timeout — disambiguate connect-phase vs read-phase. Write timeouts
+        // are rare enough that we don't try to detect them; they'll surface
+        // as ReadTimeout, which is acceptable for v0.
+        if e.is_connect() {
+            return ConnectTimeout::new_err(msg);
+        }
+        return ReadTimeout::new_err(msg);
+    }
+
+    if e.is_connect() {
+        return ConnectError::new_err(msg);
+    }
+
+    if e.is_body() || e.is_decode() {
+        return ReadError::new_err(msg);
+    }
+
+    if e.is_redirect() {
+        return TooManyRedirects::new_err(msg);
+    }
+
+    // Fallback: keep callers' "request failed" prefix for grep-friendliness
+    // with the pre-mapping error messages.
+    RqxError::new_err(format!("request failed: {e}"))
+}

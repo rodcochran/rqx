@@ -1,13 +1,28 @@
+import gzip
+import json
 import ssl
 import subprocess
 import threading
+import time
+import zlib
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import brotli
 import filelock
 import pytest
+import zstandard
+
+# HTTP Content-Encoding header values per RFC. Brotli is the odd one out:
+# the algorithm is "brotli" but the on-the-wire header value is "br".
+COMPRESSION_HEADER_VALUE = {
+    "gzip": "gzip",
+    "deflate": "deflate",
+    "brotli": "br",
+    "zstd": "zstd",
+}
 
 # This gets the directory containing the script
 script_dir = Path(__file__).resolve().parent
@@ -31,7 +46,31 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         path = parsed.path  # e.g. "/flaky/3"
         params = parse_qs(parsed.query)  # e.g. {"request_id": ["abc"]}
 
+        # Compressed endpoints don't need a request_id.
+        if path.startswith("/compressed/"):
+            algorithm = path.removeprefix("/compressed/")
+            self._send_compressed(algorithm)
+            return
+
+        # /sleep/<seconds> — server waits then returns 200. Used to test ReadTimeout.
+        if path.startswith("/sleep/"):
+            seconds = float(path.removeprefix("/sleep/"))
+            self._sleep_then_respond(seconds)
+            return
+
+        # /redirect-loop — Location header points back to itself. Used to test TooManyRedirects.
+        if path == "/redirect-loop":
+            self.send_response(302)
+            self.send_header("Location", "/redirect-loop")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
         request_id = params["request_id"][0]
+
+        if path == "/reset":
+            self._reset_connection(request_id)
+            return
 
         self.counters[request_id] += 1
 
@@ -50,6 +89,61 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b'{"status": "ok"}')
             print("FLAKY API returned 200")
+
+    def do_POST(self):
+
+        parsed = urlparse(self.path)
+        path = parsed.path  # e.g. "/flaky/3"
+        params = parse_qs(parsed.query)  # e.g. {"request_id": ["abc"]}
+
+        request_id = params["request_id"][0]
+
+        if path == "/reset":
+            self._reset_connection(request_id)
+            return
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > 0:
+            self.rfile.read(content_length)
+
+        self.send_response(404)
+        self.end_headers()
+
+    def _reset_connection(self, request_id):
+        self.counters[request_id] += 1
+        self.connection.close()
+
+    def _sleep_then_respond(self, seconds: float):
+        time.sleep(seconds)
+        body = b'{"status": "ok"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_compressed(self, algorithm):
+        payload = json.dumps({"compressed": True, "algorithm": algorithm}).encode()
+
+        if algorithm == "gzip":
+            body = gzip.compress(payload)
+        elif algorithm == "deflate":
+            body = zlib.compress(payload)
+        elif algorithm == "brotli":
+            body = brotli.compress(payload)
+        elif algorithm == "zstd":
+            body = zstandard.ZstdCompressor().compress(payload)
+        else:
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Encoding", COMPRESSION_HEADER_VALUE[algorithm])
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 @pytest.fixture(scope="session")

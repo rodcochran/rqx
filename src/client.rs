@@ -14,6 +14,7 @@ use super::request::{
     build_client_request, build_redirect_request, determine_redirect_method, determine_redirect_url,
 };
 use super::response::PyResponse;
+use super::retry::DEFAULT_RAISE_ON_REDIRECT;
 use super::transport::{AsyncHTTPTransport, HTTPTransport};
 
 const DEFAULT_TIMEOUT: u64 = 15;
@@ -92,15 +93,12 @@ impl PyClient {
             url,
             content=None,
             data=None,
-            // files,
             json=None,
             params=None,
             headers=None,
-            // cookies,
             auth=None,
             follow_redirects=None,
             timeout=None
-            // extensions
         )
     )]
     fn request(
@@ -110,15 +108,12 @@ impl PyClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        // files: &Bound<'_, PyDict>,
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
-        // cookies: &Bound<'_, PyDict>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
-        // extensions: &Bound<'_, PyDict>,
     ) -> PyResult<PyResponse> {
         let start_time = std::time::Instant::now();
 
@@ -354,15 +349,12 @@ impl PyClient {
             url,
             content=None,
             data=None,
-            // files,
             json=None,
             params=None,
             headers=None,
-            // cookies,
             auth=None,
             follow_redirects=None,
             timeout=None
-            // extensions
         )
     )]
     fn stream(
@@ -372,15 +364,12 @@ impl PyClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        // files: &Bound<'_, PyDict>,
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
-        // cookies: &Bound<'_, PyDict>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
-        // extensions: &Bound<'_, PyDict>,
     ) -> PyResult<PyStreamResponse> {
         let start_time = std::time::Instant::now();
 
@@ -449,7 +438,7 @@ impl PyClient {
         let original_method = request.method().clone();
         let original_url = request.url().clone();
         let original_headers = request.headers().clone();
-        let mut current_response = self.transport.handle_request(py, request).unwrap();
+        let mut current_response = self.transport.handle_request(py, request)?;
         // Capture any cookies from the first response before we follow the
         // redirect chain. Each intermediate hop can set cookies we'd
         // otherwise lose, since the non-redirect return path also calls
@@ -471,10 +460,21 @@ impl PyClient {
         }
 
         if (300..400).contains(&current_response.status_code) {
-            return Err(TooManyRedirects::new_err(format!(
-                "Exceeded max redirects {}",
-                &self.max_redirects
-            )));
+            // raise_on_redirect (from retry config) gates this. Default true.
+            // When false, return the last 3xx response so the caller can
+            // inspect headers/location and decide what to do.
+            let raise = self
+                .transport
+                .retries
+                .as_ref()
+                .map(|r| r.raise_on_redirect)
+                .unwrap_or(DEFAULT_RAISE_ON_REDIRECT);
+            if raise {
+                return Err(TooManyRedirects::new_err(format!(
+                    "Exceeded max redirects {}",
+                    &self.max_redirects
+                )));
+            }
         }
         Ok(current_response)
     }
@@ -572,15 +572,12 @@ impl PyAsyncClient {
             url,
             content=None,
             data=None,
-            // files,
             json=None,
             params=None,
             headers=None,
-            // cookies,
             auth=None,
             follow_redirects=None,
             timeout=None
-            // extensions
         )
     )]
     fn request<'a>(
@@ -590,15 +587,12 @@ impl PyAsyncClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        // files: &Bound<'_, PyDict>,
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
-        // cookies: &Bound<'_, PyDict>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
-        // extensions: &Bound<'_, PyDict>,
         // ) -> PyResult<PyResponse> {
     ) -> PyResult<Bound<'a, PyAny>> {
         let start_time = std::time::Instant::now();
@@ -845,15 +839,12 @@ impl PyAsyncClient {
             url,
             content=None,
             data=None,
-            // files,
             json=None,
             params=None,
             headers=None,
-            // cookies,
             auth=None,
             follow_redirects=None,
             timeout=None
-            // extensions
         )
     )]
     fn stream<'a>(
@@ -863,15 +854,12 @@ impl PyAsyncClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        // files: &Bound<'_, PyDict>,
         json: Option<&Bound<'_, PyAny>>,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
-        // cookies: &Bound<'_, PyDict>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
-        // extensions: &Bound<'_, PyDict>,
         // ) -> PyResult<PyResponse> {
     ) -> PyResult<Bound<'a, PyAny>> {
         let start_time = std::time::Instant::now();
@@ -993,10 +981,17 @@ impl PyAsyncClient {
         }
 
         if (300..400).contains(&current_response.status_code) {
-            return Err(TooManyRedirects::new_err(format!(
-                "Exceeded max redirects {}",
-                max_redirects
-            )));
+            let raise = transport
+                .retries
+                .as_ref()
+                .map(|r| r.raise_on_redirect)
+                .unwrap_or(DEFAULT_RAISE_ON_REDIRECT);
+            if raise {
+                return Err(TooManyRedirects::new_err(format!(
+                    "Exceeded max redirects {}",
+                    max_redirects
+                )));
+            }
         }
         Ok(current_response)
     }

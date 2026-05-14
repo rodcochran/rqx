@@ -21,7 +21,7 @@ pub struct HTTPTransport {
     // every request. Some(sem) enforces the user-provided cap.
     max_connection_semaphore: Option<Arc<Semaphore>>,
     #[pyo3(get)]
-    retries: Option<PyRetry>,
+    pub(crate) retries: Option<PyRetry>,
 }
 
 #[pymethods]
@@ -32,6 +32,7 @@ impl HTTPTransport {
         max_connections=None,
         max_keepalive_connections=None,
         keepalive_expiry=None,
+        http1=None,
         http2=None,
         verify=None,
         cert=None,
@@ -42,6 +43,7 @@ impl HTTPTransport {
         max_connections: Option<u32>,
         max_keepalive_connections: Option<u32>,
         keepalive_expiry: Option<f64>,
+        http1: Option<bool>,
         http2: Option<bool>,
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
@@ -52,6 +54,7 @@ impl HTTPTransport {
         let http_client = build_http_client(
             max_keepalive_connections,
             keepalive_expiry,
+            http1,
             http2,
             verify,
             cert,
@@ -92,7 +95,7 @@ impl HTTPTransport {
             return Ok(HTTPTransport::default());
         }
         Ok(Self {
-            http_client: build_http_client(None, None, None, verify, cert, None)?,
+            http_client: build_http_client(None, None, None, None, verify, cert, None)?,
             max_connection_semaphore: None,
             retries: None,
         })
@@ -137,13 +140,7 @@ impl HTTPTransport {
                         ),
                         None => None,
                     };
-                    self.http_client.execute(request).await.map_err(|e| {
-                        if e.is_timeout() {
-                            TimeoutException::new_err(format!("request timed out: {e}"))
-                        } else {
-                            RqxError::new_err(format!("request failed: {e}"))
-                        }
-                    })
+                    self.http_client.execute(request).await.map_err(map_reqwest_error)
                 })
         })?;
         return Ok(response);
@@ -181,14 +178,26 @@ impl HTTPTransport {
                 let retry_after: f32 = if respect_retry {
                     current_response
                         .as_ref()
-                        .and_then(|r| r.headers.get("retry-after"))
+                        .and_then(|r| {
+                            Python::attach(|py| {
+                                r.headers.borrow(py).get_first("retry-after").map(String::from)
+                            })
+                        })
                         .and_then(|v| v.parse::<f32>().ok())
                         .unwrap_or(0.0)
                 } else {
                     0.0
                 };
 
-                let calculated_backoff = r.backoff_factor * 2_f32.powi(attempt);
+                let mut calculated_backoff = r.backoff_factor * 2_f32.powi(attempt - 1);
+                // Apply jitter to spread out retries from many concurrent clients.
+                // Multiplier: (1 + uniform(-jitter, +jitter)) — so jitter=0.5 means
+                // backoff varies ±50% from the deterministic value.
+                if r.backoff_jitter > 0.0 {
+                    let jitter = rand::random::<f32>() * 2.0 - 1.0; // [-1, 1)
+                    calculated_backoff =
+                        (calculated_backoff * (1.0 + jitter * r.backoff_jitter)).max(0.0);
+                }
                 let backoff_time = f32::min(f32::max(calculated_backoff, retry_after), backoff_max);
                 // Run tokio sleep in Rust's runtime
                 py.detach(|| {
@@ -218,6 +227,10 @@ impl HTTPTransport {
                     current_response = Some(resp);
                 }
                 Err(e) => {
+                    if !is_retryable_method {
+                        return Err(e);
+                    }
+
                     let attempt_elapsed = attempt_start.elapsed().as_millis() as f64;
                     current_response = None;
                     // record in retry_history
@@ -240,9 +253,13 @@ impl HTTPTransport {
 
         match current_response {
             Some(mut cr) => {
-                if r.status_forcelist.contains(&cr.status_code) {
+                // When status_forcelist matched and retries were exhausted:
+                // raise_on_status=true (default) → raise MaxRetriesExceeded
+                // raise_on_status=false → return the failing response so the
+                //   caller can inspect status_code / headers / body.
+                if r.status_forcelist.contains(&cr.status_code) && r.raise_on_status {
                     return Err(MaxRetriesExceeded::new_err(format!(
-                        "max retries exeeded: {}",
+                        "max retries exceeded: {}",
                         r.total
                     )));
                 }
@@ -252,7 +269,7 @@ impl HTTPTransport {
             }
             None => {
                 return Err(MaxRetriesExceeded::new_err(format!(
-                    "max retries exeeded: {}",
+                    "max retries exceeded: {}",
                     r.total
                 )));
             }
@@ -281,7 +298,7 @@ pub struct AsyncHTTPTransport {
     // every request. Some(sem) enforces the user-provided cap.
     max_connection_semaphore: Option<Arc<Semaphore>>,
     #[pyo3(get)]
-    retries: Option<PyRetry>,
+    pub(crate) retries: Option<PyRetry>,
 }
 
 #[pymethods]
@@ -292,6 +309,7 @@ impl AsyncHTTPTransport {
         max_connections=None,
         max_keepalive_connections=None,
         keepalive_expiry=None,
+        http1=None,
         http2=None,
         verify=None,
         cert=None,
@@ -302,6 +320,7 @@ impl AsyncHTTPTransport {
         max_connections: Option<u32>,
         max_keepalive_connections: Option<u32>,
         keepalive_expiry: Option<f64>,
+        http1: Option<bool>,
         http2: Option<bool>,
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
@@ -320,6 +339,7 @@ impl AsyncHTTPTransport {
         let http_client = build_http_client(
             max_keepalive_connections,
             keepalive_expiry,
+            http1,
             http2,
             verify,
             cert,
@@ -361,7 +381,7 @@ impl AsyncHTTPTransport {
         }
 
         Ok(Self {
-            http_client: build_http_client(None, None, None, verify, cert, None)?,
+            http_client: build_http_client(None, None, None, None, verify, cert, None)?,
             max_connection_semaphore: None,
             retries: None,
         })
@@ -406,13 +426,7 @@ impl AsyncHTTPTransport {
             ),
             None => None,
         };
-        let response = client.execute(request).await.map_err(|e| {
-            if e.is_timeout() {
-                TimeoutException::new_err(format!("request timed out: {e}"))
-            } else {
-                RqxError::new_err(format!("request failed: {e}"))
-            }
-        })?;
+        let response = client.execute(request).await.map_err(map_reqwest_error)?;
         return Ok(response);
     }
 
@@ -452,14 +466,26 @@ impl AsyncHTTPTransport {
                 let retry_after: f32 = if respect_retry {
                     current_response
                         .as_ref()
-                        .and_then(|r| r.headers.get("retry-after"))
+                        .and_then(|r| {
+                            Python::attach(|py| {
+                                r.headers.borrow(py).get_first("retry-after").map(String::from)
+                            })
+                        })
                         .and_then(|v| v.parse::<f32>().ok())
                         .unwrap_or(0.0)
                 } else {
                     0.0
                 };
 
-                let calculated_backoff = r.backoff_factor * 2_f32.powi(attempt);
+                let mut calculated_backoff = r.backoff_factor * 2_f32.powi(attempt - 1);
+                // Apply jitter to spread out retries from many concurrent clients.
+                // Multiplier: (1 + uniform(-jitter, +jitter)) — so jitter=0.5 means
+                // backoff varies ±50% from the deterministic value.
+                if r.backoff_jitter > 0.0 {
+                    let jitter = rand::random::<f32>() * 2.0 - 1.0; // [-1, 1)
+                    calculated_backoff =
+                        (calculated_backoff * (1.0 + jitter * r.backoff_jitter)).max(0.0);
+                }
                 let backoff_time = f32::min(f32::max(calculated_backoff, retry_after), backoff_max);
 
                 // Run tokio sleep in Rust's runtime
@@ -484,6 +510,9 @@ impl AsyncHTTPTransport {
                     current_response = Some(resp);
                 }
                 Err(e) => {
+                    if !is_retryable_method {
+                        return Err(e);
+                    }
                     let attempt_elapsed = attempt_start.elapsed().as_millis() as f64;
                     current_response = None;
                     // record in retry_history
@@ -506,9 +535,13 @@ impl AsyncHTTPTransport {
 
         match current_response {
             Some(mut cr) => {
-                if r.status_forcelist.contains(&cr.status_code) {
+                // When status_forcelist matched and retries were exhausted:
+                // raise_on_status=true (default) → raise MaxRetriesExceeded
+                // raise_on_status=false → return the failing response so the
+                //   caller can inspect status_code / headers / body.
+                if r.status_forcelist.contains(&cr.status_code) && r.raise_on_status {
                     return Err(MaxRetriesExceeded::new_err(format!(
-                        "max retries exeeded: {}",
+                        "max retries exceeded: {}",
                         r.total
                     )));
                 }
@@ -518,7 +551,7 @@ impl AsyncHTTPTransport {
             }
             None => {
                 return Err(MaxRetriesExceeded::new_err(format!(
-                    "max retries exeeded: {}",
+                    "max retries exceeded: {}",
                     r.total
                 )));
             }
@@ -547,6 +580,7 @@ Helper for constructing the HTTP Client
 fn build_http_client(
     max_keepalive_connections: Option<u32>,
     keepalive_expiry: Option<f64>,
+    http1: Option<bool>,
     http2: Option<bool>,
     verify: Option<&Bound<'_, PyAny>>,
     cert: Option<&Bound<'_, PyAny>>,
@@ -565,10 +599,30 @@ fn build_http_client(
         http_client_builder = http_client_builder.pool_idle_timeout(Duration::from_secs_f64(ke));
     }
 
-    if http2.unwrap_or(false) {
-        http_client_builder = http_client_builder.http2_prior_knowledge();
-    } else {
-        http_client_builder = http_client_builder.http1_only();
+    // HTTP version selection:
+    //   - default (both None / both True): ALPN negotiates over TLS (h2 preferred,
+    //     h1.1 fallback). For plain HTTP, reqwest uses h1.1.
+    //   - http1=True, http2=False: HTTP/1.1 only — never upgrade.
+    //   - http1=False, http2=True: HTTP/2 prior knowledge — no fallback. Will
+    //     fail against h1-only servers; use when you know the server speaks h2.
+    //   - both False: error — at least one protocol must be allowed.
+    let allow_h1 = http1.unwrap_or(true);
+    let allow_h2 = http2.unwrap_or(true);
+    match (allow_h1, allow_h2) {
+        (false, false) => {
+            return Err(RqxError::new_err(
+                "at least one of http1, http2 must be true",
+            ));
+        }
+        (true, false) => {
+            http_client_builder = http_client_builder.http1_only();
+        }
+        (false, true) => {
+            http_client_builder = http_client_builder.http2_prior_knowledge();
+        }
+        (true, true) => {
+            // No-op — reqwest's default does ALPN negotiation over TLS.
+        }
     }
 
     if let Some(v) = verify {
