@@ -84,6 +84,25 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        # /not-modified — emits a 304 with NO Location header. Used to test
+        # that resp.is_redirect is False on a 3xx that can't be followed.
+        if path == "/not-modified":
+            self.send_response(304)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        # /latin1 — returns the bytes for "café" in ISO-8859-1 (0xE9 for é),
+        # advertised via Content-Type charset. Used to test resp.encoding.
+        if path == "/latin1":
+            body = "café".encode("iso-8859-1")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=iso-8859-1")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         request_id = params["request_id"][0]
 
         if path == "/reset":
