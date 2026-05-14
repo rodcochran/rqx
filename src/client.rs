@@ -47,9 +47,9 @@ impl PyClient {
         let client_level_max_redirects = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
 
         if transport.is_some() & (verify.is_some() | cert.is_some()) {
-            return Err(TooManyRedirects::new_err(format!(
-                "Cannot specify both transport= and cert=/verify=; pass options through one or the other ",
-            )));
+            return Err(TooManyRedirects::new_err(
+                "Cannot specify both transport= and cert=/verify=; pass options through one or the other ".to_string(),
+            ));
         }
 
         let _transport = match transport {
@@ -548,9 +548,9 @@ impl PyAsyncClient {
         let client_level_max_redirects = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
 
         if transport.is_some() & (verify.is_some() | cert.is_some()) {
-            return Err(TooManyRedirects::new_err(format!(
-                "Cannot specify both transport= and cert=/verify=; pass options through one or the other ",
-            )));
+            return Err(TooManyRedirects::new_err(
+                "Cannot specify both transport= and cert=/verify=; pass options through one or the other ".to_string(),
+            ));
         }
 
         let _transport = match transport {
