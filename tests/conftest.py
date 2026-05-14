@@ -6,10 +6,14 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import filelock
 import pytest
 
 # This gets the directory containing the script
 script_dir = Path(__file__).resolve().parent
+
+CERTS_DIR = script_dir / "ssl" / "certs"
+LOCK_PATH = script_dir / "ssl" / ".cert-gen.lock"
 
 DEFAULT_ERRORS_BEFORE_SUCCESS = 3
 
@@ -76,8 +80,15 @@ class MTLSHandler(BaseHTTPRequestHandler):
 @pytest.fixture(scope="session")
 def mtls_server():
 
+    # subprocess.run(["bash", f"{script_dir}/ssl/generate_certs.sh"])
+
     # generate certs
-    subprocess.run(["bash", f"{script_dir}/ssl/generate_certs.sh"])
+    with filelock.FileLock(str(LOCK_PATH)):
+        if not (CERTS_DIR / "client-cert.pem").exists():
+            subprocess.run(
+                ["bash", f"{script_dir}/ssl/generate_certs.sh"],
+                check=True,
+            )
 
     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ssl_context.load_cert_chain(

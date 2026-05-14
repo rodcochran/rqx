@@ -85,3 +85,4 @@ docs/bench_results/
 *.pem
 *.csr
 *.srl
+*.cert-gen.lock

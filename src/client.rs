@@ -1,29 +1,24 @@
+use http::{HeaderMap, Method};
+use pyo3::Bound;
+use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python, pyclass, pymethods};
+use reqwest::Request;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tokio::sync::{Mutex as TokioMutex};
-use http::{Method, HeaderMap};
+use tokio::sync::Mutex as TokioMutex;
 use url::Url;
-use reqwest::{Request};
-use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python,  pyclass, pymethods};
-use pyo3::Bound;
 
-use crate::stream::{PyStreamResponse,PyAsyncStreamResponse};
+use crate::stream::{PyAsyncStreamResponse, PyStreamResponse};
 
 use super::exceptions::*;
-use super::response::PyResponse;
 use super::request::{
-    build_client_request, 
-    determine_redirect_url, 
-    determine_redirect_method, 
-    build_redirect_request
+    build_client_request, build_redirect_request, determine_redirect_method, determine_redirect_url,
 };
-use super::transport::{HTTPTransport, AsyncHTTPTransport};
-
+use super::response::PyResponse;
+use super::transport::{AsyncHTTPTransport, HTTPTransport};
 
 const DEFAULT_TIMEOUT: u64 = 15;
 const DEFAULT_FOLLOW_REDIRECTS: bool = false;
 const DEFAULT_MAX_REDIRECTS: u32 = 20;
-
 
 #[pyclass]
 pub struct PyClient {
@@ -37,8 +32,10 @@ pub struct PyClient {
 #[pymethods]
 impl PyClient {
     #[new]
-    #[pyo3(signature = (timeout=None, follow_redirects=None, max_redirects=None, transport=None))]
+    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, transport=None, ))]
     fn __new__(
+        verify: Option<&Bound<'_, PyAny>>,
+        cert: Option<&Bound<'_, PyAny>>,
         timeout: Option<u64>,
         follow_redirects: Option<bool>,
         max_redirects: Option<u32>,
@@ -49,9 +46,15 @@ impl PyClient {
         let client_level_follow_redirects = follow_redirects.unwrap_or(DEFAULT_FOLLOW_REDIRECTS);
         let client_level_max_redirects = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
 
+        if transport.is_some() & (verify.is_some() | cert.is_some()) {
+            return Err(TooManyRedirects::new_err(format!(
+                "Cannot specify both transport= and cert=/verify=; pass options through one or the other ",
+            )));
+        }
+
         let _transport = match transport {
             Some(t) => t.clone(),
-            None => HTTPTransport::default(),
+            None => HTTPTransport::new(verify, cert)?,
         };
 
         Ok(Self {
@@ -59,7 +62,7 @@ impl PyClient {
             timeout_secs: timeout_secs,
             follow_redirects: client_level_follow_redirects,
             max_redirects: client_level_max_redirects,
-            cookies: Mutex::new(HashMap::<String, String>::new())
+            cookies: Mutex::new(HashMap::<String, String>::new()),
         })
     }
 
@@ -85,26 +88,26 @@ impl PyClient {
      */
     #[pyo3(
         signature = (
-            method, 
-            url, 
-            content=None, 
-            data=None, 
-            // files, 
-            json=None, 
-            params=None, 
-            headers=None, 
-            // cookies, 
-            auth=None, 
-            follow_redirects=None, 
+            method,
+            url,
+            content=None,
+            data=None,
+            // files,
+            json=None,
+            params=None,
+            headers=None,
+            // cookies,
+            auth=None,
+            follow_redirects=None,
             timeout=None
             // extensions
         )
     )]
     fn request(
-        &self, 
+        &self,
         py: Python<'_>,
-        method: &str, 
-        url: &str, 
+        method: &str,
+        url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         // files: &Bound<'_, PyDict>,
@@ -117,7 +120,6 @@ impl PyClient {
         timeout: Option<u64>,
         // extensions: &Bound<'_, PyDict>,
     ) -> PyResult<PyResponse> {
-
         let start_time = std::time::Instant::now();
 
         let request = build_client_request(
@@ -132,14 +134,12 @@ impl PyClient {
             headers,
             auth,
             // setting default timeout from top level
-            Some(timeout.unwrap_or(self.timeout_secs))
+            Some(timeout.unwrap_or(self.timeout_secs)),
         )?;
 
         let _follow_redirects = match follow_redirects {
-            Some(fr) => {fr}
-            None => {
-                self.follow_redirects
-            }
+            Some(fr) => fr,
+            None => self.follow_redirects,
         };
 
         let mut resp = if _follow_redirects {
@@ -152,16 +152,15 @@ impl PyClient {
         self.update_cookies(&resp);
 
         let end_time = std::time::Instant::now();
-        let total =  end_time - start_time;
+        let total = end_time - start_time;
         resp.elapsed = total.as_secs_f64();
         return Ok(resp);
     }
 
-
     #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
     fn get(
-        &self, 
-        py: Python<'_>, 
+        &self,
+        py: Python<'_>,
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
@@ -169,13 +168,25 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "GET", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+        self.request(
+            py,
+            "GET",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
     fn options(
-        &self, 
-        py: Python<'_>, 
+        &self,
+        py: Python<'_>,
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
@@ -183,13 +194,25 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "OPTIONS", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+        self.request(
+            py,
+            "OPTIONS",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
     fn head(
-        &self, 
-        py: Python<'_>, 
+        &self,
+        py: Python<'_>,
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
@@ -197,14 +220,25 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "HEAD", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+        self.request(
+            py,
+            "HEAD",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
     }
-
 
     #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
     fn post(
-        &self, 
-        py: Python<'_>, 
+        &self,
+        py: Python<'_>,
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
@@ -215,13 +249,25 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "POST", url, content, data, json, params, headers, auth, follow_redirects, timeout)
+        self.request(
+            py,
+            "POST",
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
     fn put(
-        &self, 
-        py: Python<'_>, 
+        &self,
+        py: Python<'_>,
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
@@ -232,13 +278,25 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "PUT", url, content, data, json, params, headers, auth, follow_redirects, timeout)
+        self.request(
+            py,
+            "PUT",
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
     fn patch(
-        &self, 
-        py: Python<'_>, 
+        &self,
+        py: Python<'_>,
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
@@ -249,13 +307,25 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "PATCH", url, content, data, json, params, headers, auth, follow_redirects, timeout)
+        self.request(
+            py,
+            "PATCH",
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
     fn delete(
-        &self, 
-        py: Python<'_>, 
+        &self,
+        py: Python<'_>,
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
@@ -263,31 +333,43 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
     ) -> PyResult<PyResponse> {
-        self.request(py, "DELETE", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+        self.request(
+            py,
+            "DELETE",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(
         signature = (
-            method, 
-            url, 
-            content=None, 
-            data=None, 
-            // files, 
-            json=None, 
-            params=None, 
-            headers=None, 
-            // cookies, 
-            auth=None, 
-            follow_redirects=None, 
+            method,
+            url,
+            content=None,
+            data=None,
+            // files,
+            json=None,
+            params=None,
+            headers=None,
+            // cookies,
+            auth=None,
+            follow_redirects=None,
             timeout=None
             // extensions
         )
     )]
     fn stream(
-        &self, 
+        &self,
         py: Python<'_>,
-        method: &str, 
-        url: &str, 
+        method: &str,
+        url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         // files: &Bound<'_, PyDict>,
@@ -300,7 +382,6 @@ impl PyClient {
         timeout: Option<u64>,
         // extensions: &Bound<'_, PyDict>,
     ) -> PyResult<PyStreamResponse> {
-
         let start_time = std::time::Instant::now();
 
         let request = build_client_request(
@@ -315,14 +396,12 @@ impl PyClient {
             headers,
             auth,
             // setting default timeout from top level
-            Some(timeout.unwrap_or(self.timeout_secs))
+            Some(timeout.unwrap_or(self.timeout_secs)),
         )?;
 
         let _follow_redirects = match follow_redirects {
-            Some(fr) => {fr}
-            None => {
-                self.follow_redirects
-            }
+            Some(fr) => fr,
+            None => self.follow_redirects,
         };
 
         let mut resp = if _follow_redirects {
@@ -330,16 +409,14 @@ impl PyClient {
             // self.send_handling_redirects(py, request)?
         } else {
             // self.transport.handle_request(py, request)?
-            PyStreamResponse::from_response(
-                self.transport.send_raw(py, request)?
-            )?
+            PyStreamResponse::from_response(self.transport.send_raw(py, request)?)?
         };
 
         // collecting cookies here - though we should also accumulate them on redirects...
         self.update_cookies_from_stream(&resp);
 
         let end_time = std::time::Instant::now();
-        let total =  end_time - start_time;
+        let total = end_time - start_time;
         resp.elapsed = total.as_secs_f64();
         return Ok(resp);
     }
@@ -363,13 +440,12 @@ impl PyClient {
 }
 
 ///    Internal functions for PyClient.
-/// 
-///    This impl of PyClient is for defining functions that are not to be wrapped in #pymethods, 
+///
+///    This impl of PyClient is for defining functions that are not to be wrapped in #pymethods,
 ///    and therefore not exposed to Python.
 ///
 impl PyClient {
     fn send_handling_redirects(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
-
         let original_method = request.method().clone();
         let original_url = request.url().clone();
         let original_headers = request.headers().clone();
@@ -395,37 +471,33 @@ impl PyClient {
         }
 
         if (300..400).contains(&current_response.status_code) {
-            return Err(TooManyRedirects::new_err(
-                format!("Exceeded max redirects {}", &self.max_redirects)));
+            return Err(TooManyRedirects::new_err(format!(
+                "Exceeded max redirects {}",
+                &self.max_redirects
+            )));
         }
         Ok(current_response)
     }
 
     fn handle_redirect(
         &self,
-        py: Python<'_>, 
-        original_url: &Url, 
+        py: Python<'_>,
+        original_url: &Url,
         original_method: &Method,
         original_headers: &HeaderMap,
         resp: &PyResponse,
     ) -> PyResult<PyResponse> {
         let new_url = determine_redirect_url(original_url, resp)
-            .map_err(|e| {
-                RqxError::new_err(format!("Error parsing url from redirect: {e}"))
-            }
-        )?;
-        
+            .map_err(|e| RqxError::new_err(format!("Error parsing url from redirect: {e}")))?;
+
         let new_method = determine_redirect_method(original_method, resp);
         let current_request = build_redirect_request(
             self.transport.client(),
             new_method,
             new_url,
-            original_headers
+            original_headers,
         );
-        let current_response = self.transport.handle_request(
-            py, 
-            current_request
-        );
+        let current_response = self.transport.handle_request(py, current_request);
         return current_response;
     }
 
@@ -447,9 +519,7 @@ impl PyClient {
         let mut cookies = self.cookies.lock().unwrap();
         cookies.extend(resp.cookies.iter().map(|(k, v)| (k.clone(), v.clone())));
     }
-
 }
-
 
 #[pyclass]
 pub struct PyAsyncClient {
@@ -464,8 +534,10 @@ pub struct PyAsyncClient {
 #[pymethods]
 impl PyAsyncClient {
     #[new]
-    #[pyo3(signature = (timeout=None, follow_redirects=None, max_redirects=None, transport=None))]
+    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, transport=None))]
     fn __new__(
+        verify: Option<&Bound<'_, PyAny>>,
+        cert: Option<&Bound<'_, PyAny>>,
         timeout: Option<u64>,
         follow_redirects: Option<bool>,
         max_redirects: Option<u32>,
@@ -475,41 +547,47 @@ impl PyAsyncClient {
         let client_level_follow_redirects = follow_redirects.unwrap_or(DEFAULT_FOLLOW_REDIRECTS);
         let client_level_max_redirects = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
 
+        if transport.is_some() & (verify.is_some() | cert.is_some()) {
+            return Err(TooManyRedirects::new_err(format!(
+                "Cannot specify both transport= and cert=/verify=; pass options through one or the other ",
+            )));
+        }
+
         let _transport = match transport {
             Some(t) => t.clone(),
-            None => AsyncHTTPTransport::default(),
+            None => AsyncHTTPTransport::new(verify, cert)?,
         };
         Ok(Self {
             transport: _transport,
             timeout_secs: timeout_secs,
             follow_redirects: client_level_follow_redirects,
             max_redirects: client_level_max_redirects,
-            cookies: Arc::new(TokioMutex::new(HashMap::<String, String>::new()))
+            cookies: Arc::new(TokioMutex::new(HashMap::<String, String>::new())),
         })
     }
 
     #[pyo3(
         signature = (
-            method, 
-            url, 
-            content=None, 
-            data=None, 
-            // files, 
-            json=None, 
-            params=None, 
-            headers=None, 
-            // cookies, 
-            auth=None, 
-            follow_redirects=None, 
+            method,
+            url,
+            content=None,
+            data=None,
+            // files,
+            json=None,
+            params=None,
+            headers=None,
+            // cookies,
+            auth=None,
+            follow_redirects=None,
             timeout=None
             // extensions
         )
     )]
     fn request<'a>(
-        &self, 
+        &self,
         py: Python<'a>,
-        method: &str, 
-        url: &str, 
+        method: &str,
+        url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         // files: &Bound<'_, PyDict>,
@@ -521,9 +599,8 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
         // extensions: &Bound<'_, PyDict>,
-    // ) -> PyResult<PyResponse> {
-    ) -> PyResult<Bound<'a,PyAny>>{
-
+        // ) -> PyResult<PyResponse> {
+    ) -> PyResult<Bound<'a, PyAny>> {
         let start_time = std::time::Instant::now();
 
         let request = build_client_request(
@@ -543,10 +620,8 @@ impl PyAsyncClient {
         )?;
 
         let _follow_redirects = match follow_redirects {
-            Some(fr) => {fr}
-            None => {
-                self.follow_redirects
-            }
+            Some(fr) => fr,
+            None => self.follow_redirects,
         };
 
         let transport = self.transport.clone();
@@ -560,67 +635,101 @@ impl PyAsyncClient {
                     request,
                     max_redirects,
                     Arc::clone(&cookies),
-                ).await?
+                )
+                .await?
             } else {
                 AsyncHTTPTransport::handle_request(transport, request).await?
             };
             Self::accumulate_cookies(&cookies, &resp.cookies).await;
             let end_time = std::time::Instant::now();
-            let total =  end_time - start_time;
+            let total = end_time - start_time;
             resp.elapsed = total.as_secs_f64();
             return Ok(resp);
         })
-
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
     fn get<'a>(
-        &self, 
-        py: Python<'a>, 
+        &self,
+        py: Python<'a>,
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
-    ) -> PyResult<Bound<'a,PyAny>>{
-        self.request(py, "GET", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+    ) -> PyResult<Bound<'a, PyAny>> {
+        self.request(
+            py,
+            "GET",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
     }
-
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
     fn options<'a>(
-        &self, 
-        py: Python<'a>, 
+        &self,
+        py: Python<'a>,
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
-    ) -> PyResult<Bound<'a,PyAny>>{
-        self.request(py, "OPTIONS", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+    ) -> PyResult<Bound<'a, PyAny>> {
+        self.request(
+            py,
+            "OPTIONS",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
     fn head<'a>(
-        &self, 
-        py: Python<'a>, 
+        &self,
+        py: Python<'a>,
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
-    ) -> PyResult<Bound<'a,PyAny>>{
-        self.request(py, "HEAD", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+    ) -> PyResult<Bound<'a, PyAny>> {
+        self.request(
+            py,
+            "HEAD",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
     }
-
 
     #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
     fn post<'a>(
-        &self, 
-        py: Python<'a>, 
+        &self,
+        py: Python<'a>,
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
@@ -630,14 +739,26 @@ impl PyAsyncClient {
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
-    ) -> PyResult<Bound<'a,PyAny>>{
-        self.request(py, "POST", url, content, data, json, params, headers, auth, follow_redirects, timeout)
+    ) -> PyResult<Bound<'a, PyAny>> {
+        self.request(
+            py,
+            "POST",
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
     fn put<'a>(
-        &self, 
-        py: Python<'a>, 
+        &self,
+        py: Python<'a>,
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
@@ -647,14 +768,26 @@ impl PyAsyncClient {
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
-    ) -> PyResult<Bound<'a,PyAny>>{
-        self.request(py, "PUT", url, content, data, json, params, headers, auth, follow_redirects, timeout)
+    ) -> PyResult<Bound<'a, PyAny>> {
+        self.request(
+            py,
+            "PUT",
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
     fn patch<'a>(
-        &self, 
-        py: Python<'a>, 
+        &self,
+        py: Python<'a>,
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
@@ -664,46 +797,70 @@ impl PyAsyncClient {
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
-    ) -> PyResult<Bound<'a,PyAny>>{
-        self.request(py, "PATCH", url, content, data, json, params, headers, auth, follow_redirects, timeout)
+    ) -> PyResult<Bound<'a, PyAny>> {
+        self.request(
+            py,
+            "PATCH",
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
     fn delete<'a>(
-        &self, 
-        py: Python<'a>, 
+        &self,
+        py: Python<'a>,
         url: &str,
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
-    ) -> PyResult<Bound<'a,PyAny>>{
-        self.request(py, "DELETE", url, None, None, None, params, headers, auth, follow_redirects, timeout)
+    ) -> PyResult<Bound<'a, PyAny>> {
+        self.request(
+            py,
+            "DELETE",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(
         signature = (
-            method, 
-            url, 
-            content=None, 
-            data=None, 
-            // files, 
-            json=None, 
-            params=None, 
-            headers=None, 
-            // cookies, 
-            auth=None, 
-            follow_redirects=None, 
+            method,
+            url,
+            content=None,
+            data=None,
+            // files,
+            json=None,
+            params=None,
+            headers=None,
+            // cookies,
+            auth=None,
+            follow_redirects=None,
             timeout=None
             // extensions
         )
     )]
     fn stream<'a>(
-        &self, 
+        &self,
         py: Python<'a>,
-        method: &str, 
-        url: &str, 
+        method: &str,
+        url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         // files: &Bound<'_, PyDict>,
@@ -715,9 +872,8 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
         timeout: Option<u64>,
         // extensions: &Bound<'_, PyDict>,
-    // ) -> PyResult<PyResponse> {
-    ) -> PyResult<Bound<'a,PyAny>>{
-
+        // ) -> PyResult<PyResponse> {
+    ) -> PyResult<Bound<'a, PyAny>> {
         let start_time = std::time::Instant::now();
 
         let request = build_client_request(
@@ -737,10 +893,8 @@ impl PyAsyncClient {
         )?;
 
         let _follow_redirects = match follow_redirects {
-            Some(fr) => {fr}
-            None => {
-                self.follow_redirects
-            }
+            Some(fr) => fr,
+            None => self.follow_redirects,
         };
 
         let transport = self.transport.clone();
@@ -753,25 +907,26 @@ impl PyAsyncClient {
                 todo!("Implement async redirect handling for stream")
             } else {
                 PyAsyncStreamResponse::from_response(
-                    AsyncHTTPTransport::send_raw(transport.client(), request, transport.semaphore()).await?
+                    AsyncHTTPTransport::send_raw(
+                        transport.client(),
+                        request,
+                        transport.semaphore(),
+                    )
+                    .await?,
                 )?
             };
             Self::accumulate_cookies(&cookies, &resp.cookies).await;
             let end_time = std::time::Instant::now();
-            let total =  end_time - start_time;
+            let total = end_time - start_time;
             resp.elapsed = total.as_secs_f64();
             return Ok(resp);
         })
-
     }
-
 
     fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            Ok(slf)
-        })
+        pyo3_async_runtimes::tokio::future_into_py(py, async move { Ok(slf) })
     }
-    
+
     fn __aexit__<'py>(
         &self,
         py: Python<'py>,
@@ -779,9 +934,7 @@ impl PyAsyncClient {
         _exc_value: Option<&Bound<'_, PyAny>>,
         _traceback: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            Ok(false)
-        })
+        pyo3_async_runtimes::tokio::future_into_py(py, async move { Ok(false) })
     }
     #[getter]
     fn cookies(&self) -> HashMap<String, String> {
@@ -790,7 +943,6 @@ impl PyAsyncClient {
 }
 
 impl PyAsyncClient {
-
     /// Merge response cookies into the client's Python-visible jar.
     ///
     /// Skips the mutex entirely when the response carries no cookies (the
@@ -803,9 +955,10 @@ impl PyAsyncClient {
         if resp_cookies.is_empty() {
             return;
         }
-        cookies.lock().await.extend(
-            resp_cookies.iter().map(|(k, v)| (k.clone(), v.clone()))
-        );
+        cookies
+            .lock()
+            .await
+            .extend(resp_cookies.iter().map(|(k, v)| (k.clone(), v.clone())));
     }
 
     async fn send_handling_redirects(
@@ -814,13 +967,11 @@ impl PyAsyncClient {
         max_redirects: u32,
         cookies: Arc<TokioMutex<HashMap<String, String>>>,
     ) -> PyResult<PyResponse> {
-
         let original_method = request.method().clone();
         let original_url = request.url().clone();
         let original_headers = request.headers().clone();
-        let mut current_response = AsyncHTTPTransport::
-            handle_request(transport.clone(), request)
-                .await?;
+        let mut current_response =
+            AsyncHTTPTransport::handle_request(transport.clone(), request).await?;
         // Capture any cookies set by the first response before we follow the
         // redirect chain. Without this, Set-Cookie headers from intermediate
         // hops are dropped from the Python-visible client.cookies view.
@@ -836,42 +987,35 @@ impl PyAsyncClient {
                 &original_method,
                 &original_headers,
                 &current_response,
-            ).await?;
+            )
+            .await?;
             Self::accumulate_cookies(&cookies, &current_response.cookies).await;
         }
 
         if (300..400).contains(&current_response.status_code) {
-            return Err(TooManyRedirects::new_err(
-                format!("Exceeded max redirects {}", max_redirects)));
+            return Err(TooManyRedirects::new_err(format!(
+                "Exceeded max redirects {}",
+                max_redirects
+            )));
         }
         Ok(current_response)
     }
 
     async fn handle_redirect(
         transport: &AsyncHTTPTransport,
-        original_url: &Url, 
+        original_url: &Url,
         original_method: &Method,
         original_headers: &HeaderMap,
         resp: &PyResponse,
     ) -> PyResult<PyResponse> {
         let new_url = determine_redirect_url(original_url, resp)
-            .map_err(|e| {
-                RqxError::new_err(format!("Error parsing url from redirect: {e}"))
-            }
-        )?;
-        
+            .map_err(|e| RqxError::new_err(format!("Error parsing url from redirect: {e}")))?;
+
         let new_method = determine_redirect_method(original_method, resp);
-        let current_request = build_redirect_request(
-            transport.client(),
-            new_method,
-            new_url,
-            original_headers
-        );
-        let current_response = AsyncHTTPTransport::handle_request(
-            transport.clone(),
-            current_request
-        ).await;
+        let current_request =
+            build_redirect_request(transport.client(), new_method, new_url, original_headers);
+        let current_response =
+            AsyncHTTPTransport::handle_request(transport.clone(), current_request).await;
         return current_response;
     }
-
 }

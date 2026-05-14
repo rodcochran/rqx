@@ -84,6 +84,22 @@ impl Default for HTTPTransport {
 }
 
 impl HTTPTransport {
+    pub fn new(
+        verify: Option<&Bound<'_, PyAny>>,
+        cert: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        if verify.is_none() & cert.is_none() {
+            return Ok(HTTPTransport::default());
+        }
+        Ok(Self {
+            http_client: build_http_client(None, None, None, verify, cert, None)?,
+            max_connection_semaphore: None,
+            retries: None,
+        })
+    }
+}
+
+impl HTTPTransport {
     pub fn handle_request(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
         if self.retries.is_some() {
             // Handle retries etc.
@@ -332,6 +348,23 @@ impl Default for AsyncHTTPTransport {
             max_connection_semaphore: None,
             retries: None,
         }
+    }
+}
+
+impl AsyncHTTPTransport {
+    pub fn new(
+        verify: Option<&Bound<'_, PyAny>>,
+        cert: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        if verify.is_none() & cert.is_none() {
+            return Ok(AsyncHTTPTransport::default());
+        }
+
+        Ok(Self {
+            http_client: build_http_client(None, None, None, verify, cert, None)?,
+            max_connection_semaphore: None,
+            retries: None,
+        })
     }
 }
 
