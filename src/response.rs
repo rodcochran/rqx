@@ -22,7 +22,7 @@ pub struct PyResponse {
 
     #[pyo3(get)]
     pub content: Py<PyBytes>,
-    
+
     #[pyo3(get)]
     pub url: String,
 
@@ -118,12 +118,12 @@ impl PyResponse {
                 )
             })
             .collect::<HashMap<_, _>>();
-        
+
         let url = response.url().as_str().to_owned();
         let http_version  = format!("{:?}", response.version());
         let cookies: HashMap<String, String> = response.cookies()
             .map(|c| (
-                c.name().to_string(), 
+                c.name().to_string(),
                 c.value().to_string())
             )
             .collect();
@@ -171,12 +171,12 @@ impl PyResponse {
                 )
             })
             .collect::<HashMap<_, _>>();
-        
+
         let url = response.url().as_str().to_owned();
         let http_version  = format!("{:?}", response.version());
         let cookies: HashMap<String, String> = response.cookies()
             .map(|c| (
-                c.name().to_string(), 
+                c.name().to_string(),
                 c.value().to_string())
             )
             .collect();
