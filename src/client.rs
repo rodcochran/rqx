@@ -18,6 +18,7 @@ use super::retry::DEFAULT_RAISE_ON_REDIRECT;
 use super::runtime::RUNTIME;
 use super::timeout::PyTimeout;
 use super::transport::{AsyncHTTPTransport, HTTPTransport};
+use super::url::{parse_base_url, resolve_url};
 
 const DEFAULT_TIMEOUT: f64 = 15.0;
 const DEFAULT_FOLLOW_REDIRECTS: bool = false;
@@ -29,25 +30,28 @@ pub struct PyClient {
     timeout_secs: f64,
     follow_redirects: bool,
     max_redirects: u32,
+    base_url: Option<Url>,
     cookies: Mutex<HashMap<String, String>>,
 }
 
 #[pymethods]
 impl PyClient {
     #[new]
-    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, transport=None, ))]
+    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, base_url=None, transport=None, ))]
     fn __new__(
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
         timeout: Option<&Bound<'_, PyAny>>,
         follow_redirects: Option<bool>,
         max_redirects: Option<u32>,
+        base_url: Option<&str>,
         // retries: Option<PyRef<'_, PyRetry>>,
         transport: Option<PyRef<'_, HTTPTransport>>,
     ) -> PyResult<Self> {
         let timeout_secs = PyTimeout::resolve_request_timeout(timeout, DEFAULT_TIMEOUT)?;
         let client_level_follow_redirects = follow_redirects.unwrap_or(DEFAULT_FOLLOW_REDIRECTS);
         let client_level_max_redirects = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
+        let parsed_base_url = base_url.map(parse_base_url).transpose()?;
 
         if transport.is_some() && (verify.is_some() || cert.is_some() || timeout.is_some()) {
             return Err(RqxError::new_err(
@@ -65,8 +69,14 @@ impl PyClient {
             timeout_secs: timeout_secs,
             follow_redirects: client_level_follow_redirects,
             max_redirects: client_level_max_redirects,
+            base_url: parsed_base_url,
             cookies: Mutex::new(HashMap::<String, String>::new()),
         })
+    }
+
+    #[getter]
+    fn base_url(&self) -> Option<String> {
+        self.base_url.as_ref().map(|u| u.to_string())
     }
 
     /*
@@ -119,11 +129,12 @@ impl PyClient {
     ) -> PyResult<PyResponse> {
         let start_time = std::time::Instant::now();
 
+        let resolved_url = resolve_url(self.base_url.as_ref(), url)?;
         let request = build_client_request(
             self.transport.client(),
             // py,
             method,
-            url,
+            &resolved_url,
             content,
             data,
             json,
@@ -375,11 +386,12 @@ impl PyClient {
     ) -> PyResult<PyStreamResponse> {
         let start_time = std::time::Instant::now();
 
+        let resolved_url = resolve_url(self.base_url.as_ref(), url)?;
         let request = build_client_request(
             self.transport.client(),
             // py,
             method,
-            url,
+            &resolved_url,
             content,
             data,
             json,
@@ -614,24 +626,27 @@ pub struct PyAsyncClient {
     timeout_secs: f64,
     follow_redirects: bool,
     max_redirects: u32,
+    base_url: Option<Url>,
     cookies: Arc<TokioMutex<HashMap<String, String>>>,
 }
 
 #[pymethods]
 impl PyAsyncClient {
     #[new]
-    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, transport=None))]
+    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, base_url=None, transport=None))]
     fn __new__(
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
         timeout: Option<&Bound<'_, PyAny>>,
         follow_redirects: Option<bool>,
         max_redirects: Option<u32>,
+        base_url: Option<&str>,
         transport: Option<PyRef<'_, AsyncHTTPTransport>>,
     ) -> PyResult<Self> {
         let timeout_secs = PyTimeout::resolve_request_timeout(timeout, DEFAULT_TIMEOUT)?;
         let client_level_follow_redirects = follow_redirects.unwrap_or(DEFAULT_FOLLOW_REDIRECTS);
         let client_level_max_redirects = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
+        let parsed_base_url = base_url.map(parse_base_url).transpose()?;
 
         if transport.is_some() && (verify.is_some() || cert.is_some() || timeout.is_some()) {
             return Err(RqxError::new_err(
@@ -648,8 +663,14 @@ impl PyAsyncClient {
             timeout_secs: timeout_secs,
             follow_redirects: client_level_follow_redirects,
             max_redirects: client_level_max_redirects,
+            base_url: parsed_base_url,
             cookies: Arc::new(TokioMutex::new(HashMap::<String, String>::new())),
         })
+    }
+
+    #[getter]
+    fn base_url(&self) -> Option<String> {
+        self.base_url.as_ref().map(|u| u.to_string())
     }
 
     #[pyo3(
@@ -683,11 +704,12 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'a, PyAny>> {
         let start_time = std::time::Instant::now();
 
+        let resolved_url = resolve_url(self.base_url.as_ref(), url)?;
         let request = build_client_request(
             self.transport.client(),
             // py,
             method,
-            url,
+            &resolved_url,
             content,
             data,
             json,
@@ -950,11 +972,12 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'a, PyAny>> {
         let start_time = std::time::Instant::now();
 
+        let resolved_url = resolve_url(self.base_url.as_ref(), url)?;
         let request = build_client_request(
             self.transport.client(),
             // py,
             method,
-            url,
+            &resolved_url,
             content,
             data,
             json,
