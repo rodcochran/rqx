@@ -12,6 +12,7 @@ use super::exceptions::*;
 use super::response::PyResponse;
 use super::retry::PyRetry;
 use super::runtime::RUNTIME;
+use super::timeout::PyTimeout;
 
 #[pyclass(skip_from_py_object)]
 #[derive(Clone)]
@@ -37,6 +38,7 @@ impl HTTPTransport {
         verify=None,
         cert=None,
         proxy=None,
+        timeout=None,
     ))]
     fn __new__(
         retries: Option<PyRef<'_, PyRetry>>,
@@ -48,6 +50,7 @@ impl HTTPTransport {
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
         proxy: Option<HashMap<String, String>>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         let _retries = retries.map(|r| r.clone());
 
@@ -59,6 +62,7 @@ impl HTTPTransport {
             verify,
             cert,
             proxy,
+            timeout,
         )?;
 
         let max_connection_semaphore =
@@ -90,12 +94,13 @@ impl HTTPTransport {
     pub fn new(
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        if verify.is_none() & cert.is_none() {
+        if verify.is_none() && cert.is_none() && timeout.is_none() {
             return Ok(HTTPTransport::default());
         }
         Ok(Self {
-            http_client: build_http_client(None, None, None, None, verify, cert, None)?,
+            http_client: build_http_client(None, None, None, None, verify, cert, None, timeout)?,
             max_connection_semaphore: None,
             retries: None,
         })
@@ -314,6 +319,7 @@ impl AsyncHTTPTransport {
         verify=None,
         cert=None,
         proxy=None,
+        timeout=None,
     ))]
     fn __new__(
         retries: Option<PyRef<'_, PyRetry>>,
@@ -325,15 +331,8 @@ impl AsyncHTTPTransport {
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
         proxy: Option<HashMap<String, String>>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        // need to make it so that transport only creates default
-        // when someone passes a blank (not null) Retry object.
-        // Default behavior is no retry.
-        // let _retries = match retries {
-        //     Some(r) => Some(r.clone()),
-        //     // None => PyRetry::with_defaults(),
-        //     None => None
-        // };
         let _retries = retries.map(|r| r.clone());
 
         let http_client = build_http_client(
@@ -344,6 +343,7 @@ impl AsyncHTTPTransport {
             verify,
             cert,
             proxy,
+            timeout,
         )?;
 
         let max_connection_semaphore =
@@ -375,13 +375,14 @@ impl AsyncHTTPTransport {
     pub fn new(
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        if verify.is_none() & cert.is_none() {
+        if verify.is_none() && cert.is_none() && timeout.is_none() {
             return Ok(AsyncHTTPTransport::default());
         }
 
         Ok(Self {
-            http_client: build_http_client(None, None, None, None, verify, cert, None)?,
+            http_client: build_http_client(None, None, None, None, verify, cert, None, timeout)?,
             max_connection_semaphore: None,
             retries: None,
         })
@@ -585,6 +586,7 @@ fn build_http_client(
     verify: Option<&Bound<'_, PyAny>>,
     cert: Option<&Bound<'_, PyAny>>,
     proxy: Option<HashMap<String, String>>,
+    timeout: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<Client> {
     let mut http_client_builder = Client::builder()
         // Explicitly add no redirects at the transport level, as we let the PyClient take care of it
@@ -597,6 +599,28 @@ fn build_http_client(
 
     if let Some(ke) = keepalive_expiry {
         http_client_builder = http_client_builder.pool_idle_timeout(Duration::from_secs_f64(ke));
+    }
+
+    // Phase timeouts. See PyTimeout for semantics. write= is currently a no-op
+    // because reqwest doesn't expose a per-phase write timeout. pool= maps to
+    // pool_idle_timeout, which is close to but not exactly httpx's
+    // pool-acquisition timeout.
+    if let Some(t) = timeout {
+        let parsed = PyTimeout::extract_any(t)?;
+        if let Some(c) = parsed.connect {
+            http_client_builder =
+                http_client_builder.connect_timeout(Duration::from_secs_f64(c));
+        }
+        if let Some(r) = parsed.read {
+            http_client_builder = http_client_builder.read_timeout(Duration::from_secs_f64(r));
+        }
+        if let Some(p) = parsed.pool {
+            // Only set if keepalive_expiry didn't already.
+            if keepalive_expiry.is_none() {
+                http_client_builder =
+                    http_client_builder.pool_idle_timeout(Duration::from_secs_f64(p));
+            }
+        }
     }
 
     // HTTP version selection:
