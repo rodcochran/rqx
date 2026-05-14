@@ -255,6 +255,9 @@ class AsyncHTTPTransport:
 class PyClient:
     cookies: dict[str, str]
 
+    @property
+    def base_url(self) -> str | None: ...
+
     def __init__(
         self,
         verify: VerifyTypes | None = None,
@@ -262,6 +265,7 @@ class PyClient:
         timeout: TimeoutTypes | None = None,
         follow_redirects: bool | None = None,
         max_redirects: int | None = None,
+        base_url: str | None = None,
         transport: HTTPTransport | None = None,
     ) -> None: ...
 
@@ -388,6 +392,9 @@ class PyClient:
 class PyAsyncClient:
     cookies: dict[str, str]
 
+    @property
+    def base_url(self) -> str | None: ...
+
     def __init__(
         self,
         verify: VerifyTypes | None = None,
@@ -395,6 +402,7 @@ class PyAsyncClient:
         timeout: TimeoutTypes | None = None,
         follow_redirects: bool | None = None,
         max_redirects: int | None = None,
+        base_url: str | None = None,
         transport: AsyncHTTPTransport | None = None,
     ) -> None: ...
 
