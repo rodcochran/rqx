@@ -24,9 +24,11 @@ pub mod exceptions;
 
 use client::{PyClient, PyAsyncClient};
 use headers::PyHeaders;
+use response::PyResponse;
 use runtime::RUNTIME;
 use exceptions::*;
 use retry::PyRetry;
+use stream::{PyAsyncStreamResponse, PyStreamResponse};
 use timeout::PyTimeout;
 use transport::{HTTPTransport, AsyncHTTPTransport};
 
@@ -58,6 +60,9 @@ fn _rqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<AsyncHTTPTransport>()?;
     m.add_class::<PyHeaders>()?;
     m.add_class::<PyTimeout>()?;
+    m.add_class::<PyResponse>()?;
+    m.add_class::<PyStreamResponse>()?;
+    m.add_class::<PyAsyncStreamResponse>()?;
     m.add("RqxError", m.py().get_type::<RqxError>())?;
     m.add("RequestError", m.py().get_type::<RequestError>())?;
     m.add("MaxRetriesExceeded", m.py().get_type::<MaxRetriesExceeded>())?;

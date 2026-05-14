@@ -25,6 +25,19 @@ from ._rqx import (
     WriteTimeout,
 )
 
+# module-level convenience functions — mirrors httpx.{get,post,...,stream}
+from ._api import (
+    delete,
+    get,
+    head,
+    options,
+    patch,
+    post,
+    put,
+    request,
+    stream,
+)
+
 # optional: nicer names (drop Py prefix)
 Client = PyClient
 AsyncClient = PyAsyncClient
@@ -55,4 +68,13 @@ __all__ = [
     "TransportError",
     "WriteError",
     "WriteTimeout",
+    "delete",
+    "get",
+    "head",
+    "options",
+    "patch",
+    "post",
+    "put",
+    "request",
+    "stream",
 ]
