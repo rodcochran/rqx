@@ -7,13 +7,11 @@ use pyo3::exceptions::{PyValueError};
 use pyo3::prelude::{
     PyAny,
     PyResult,
-    Python,
 };
 use pyo3::Bound;
 
 use super::exceptions::*;
 use super::py_json::{py_to_value};
-use super::response::PyResponse;
 
 
 pub fn build_client_request(
@@ -129,11 +127,9 @@ pub fn build_redirect_request(
 ///     into `build_redirect_request`.
 pub fn determine_redirect_method(
     original_method: &Method,
-    response: &PyResponse
+    status_code: u16,
 ) -> Method {
-    if (response.status_code == 302 || response.status_code == 303)
-        && original_method != Method::HEAD
-    {
+    if (status_code == 302 || status_code == 303) && original_method != Method::HEAD {
         Method::GET
     } else {
         original_method.to_owned()
@@ -142,10 +138,7 @@ pub fn determine_redirect_method(
 
 pub fn determine_redirect_url(
     current_url: &Url,
-    response: &PyResponse
+    location: &str,
 ) -> PyResult<Url> {
-    let location = Python::attach(|py| {
-        response.headers.borrow(py).get_first("location").map(String::from)
-    }).unwrap();
-    Ok(current_url.join(location.as_str()).unwrap())
+    Ok(current_url.join(location).unwrap())
 }

@@ -66,6 +66,24 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
+        # /redirect-once — 302 to /streamable. Used to test follow_redirects on stream.
+        if path == "/redirect-once":
+            self.send_response(302)
+            self.send_header("Location", "/streamable")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        # /streamable — final destination after /redirect-once. Returns a known body.
+        if path == "/streamable":
+            body = b'{"streamed": true}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         request_id = params["request_id"][0]
 
         if path == "/reset":
