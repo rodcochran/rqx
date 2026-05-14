@@ -8,7 +8,7 @@ use pyo3::prelude::{Py, PyAny, PyResult, Python, pyclass, pymethods};
 use pyo3::types::PyBytes;
 use reqwest::Response;
 
-use super::exceptions::{RqxError, HTTPStatusError};
+use super::exceptions::{RqxError, HTTPStatusError, map_reqwest_error};
 use super::headers::PyHeaders;
 use super::py_json::value_to_py;
 use super::runtime::RUNTIME;
@@ -136,9 +136,7 @@ impl PyResponse {
                 .get()
                 .ok_or_else(|| RqxError::new_err("runtime not initialized"))?
                 .block_on(async {
-                    response.bytes().await.map_err(|e| {
-                        RqxError::new_err(format!("failed to read body: {e}"))
-                    })
+                    response.bytes().await.map_err(map_reqwest_error)
                 })
         })?;
         // Build PyBytes once under the GIL. No Vec<u8> intermediate; callers get
@@ -184,9 +182,7 @@ impl PyResponse {
             )
             .collect();
 
-        let body = response.bytes().await.map_err(|e| {
-            RqxError::new_err(format!("failed to read body: {e}"))
-        })?;
+        let body = response.bytes().await.map_err(map_reqwest_error)?;
         // Briefly acquire the GIL to allocate a Python bytes object directly
         // from the response body. No .await crosses this closure so there's
         // no deadlock risk with the GIL acquire that pyo3-async-runtimes

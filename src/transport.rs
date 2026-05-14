@@ -140,13 +140,7 @@ impl HTTPTransport {
                         ),
                         None => None,
                     };
-                    self.http_client.execute(request).await.map_err(|e| {
-                        if e.is_timeout() {
-                            TimeoutException::new_err(format!("request timed out: {e}"))
-                        } else {
-                            RqxError::new_err(format!("request failed: {e}"))
-                        }
-                    })
+                    self.http_client.execute(request).await.map_err(map_reqwest_error)
                 })
         })?;
         return Ok(response);
@@ -420,13 +414,7 @@ impl AsyncHTTPTransport {
             ),
             None => None,
         };
-        let response = client.execute(request).await.map_err(|e| {
-            if e.is_timeout() {
-                TimeoutException::new_err(format!("request timed out: {e}"))
-            } else {
-                RqxError::new_err(format!("request failed: {e}"))
-            }
-        })?;
+        let response = client.execute(request).await.map_err(map_reqwest_error)?;
         return Ok(response);
     }
 

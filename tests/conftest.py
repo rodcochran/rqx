@@ -3,6 +3,7 @@ import json
 import ssl
 import subprocess
 import threading
+import time
 import zlib
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -51,6 +52,20 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self._send_compressed(algorithm)
             return
 
+        # /sleep/<seconds> — server waits then returns 200. Used to test ReadTimeout.
+        if path.startswith("/sleep/"):
+            seconds = float(path.removeprefix("/sleep/"))
+            self._sleep_then_respond(seconds)
+            return
+
+        # /redirect-loop — Location header points back to itself. Used to test TooManyRedirects.
+        if path == "/redirect-loop":
+            self.send_response(302)
+            self.send_header("Location", "/redirect-loop")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
         request_id = params["request_id"][0]
 
         if path == "/reset":
@@ -97,6 +112,15 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
     def _reset_connection(self, request_id):
         self.counters[request_id] += 1
         self.connection.close()
+
+    def _sleep_then_respond(self, seconds: float):
+        time.sleep(seconds)
+        body = b'{"status": "ok"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _send_compressed(self, algorithm):
         payload = json.dumps({"compressed": True, "algorithm": algorithm}).encode()
