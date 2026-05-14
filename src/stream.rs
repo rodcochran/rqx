@@ -168,6 +168,45 @@ impl PyStreamResponse {
         self.response = None; // drops the response, closes connection
     }
 
+    /// `True` for 1xx responses.
+    #[getter]
+    fn is_informational(&self) -> bool {
+        (100..200).contains(&self.status_code)
+    }
+
+    /// `True` for 2xx responses.
+    #[getter]
+    fn is_success(&self) -> bool {
+        (200..300).contains(&self.status_code)
+    }
+
+    /// `True` for 3xx responses that carry a `Location` header.
+    ///
+    /// Mirrors httpx: a 3xx without Location (e.g. 304 Not Modified) isn't
+    /// classified as a redirect because nothing can follow it.
+    #[getter]
+    fn is_redirect(&self) -> bool {
+        (300..400).contains(&self.status_code)
+            && self.headers.keys().any(|k| k.eq_ignore_ascii_case("location"))
+    }
+
+    /// `True` for 4xx responses.
+    #[getter]
+    fn is_client_error(&self) -> bool {
+        (400..500).contains(&self.status_code)
+    }
+
+    /// `True` for 5xx responses.
+    #[getter]
+    fn is_server_error(&self) -> bool {
+        (500..600).contains(&self.status_code)
+    }
+
+    /// `True` for any 4xx or 5xx response.
+    #[getter]
+    fn is_error(&self) -> bool {
+        (400..600).contains(&self.status_code)
+    }
 }
 
 impl PyStreamResponse {
@@ -277,6 +316,46 @@ impl PyAsyncStreamResponse {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             Ok(false)
         })
+    }
+
+    /// `True` for 1xx responses.
+    #[getter]
+    fn is_informational(&self) -> bool {
+        (100..200).contains(&self.status_code)
+    }
+
+    /// `True` for 2xx responses.
+    #[getter]
+    fn is_success(&self) -> bool {
+        (200..300).contains(&self.status_code)
+    }
+
+    /// `True` for 3xx responses that carry a `Location` header.
+    ///
+    /// Mirrors httpx: a 3xx without Location (e.g. 304 Not Modified) isn't
+    /// classified as a redirect because nothing can follow it.
+    #[getter]
+    fn is_redirect(&self) -> bool {
+        (300..400).contains(&self.status_code)
+            && self.headers.keys().any(|k| k.eq_ignore_ascii_case("location"))
+    }
+
+    /// `True` for 4xx responses.
+    #[getter]
+    fn is_client_error(&self) -> bool {
+        (400..500).contains(&self.status_code)
+    }
+
+    /// `True` for 5xx responses.
+    #[getter]
+    fn is_server_error(&self) -> bool {
+        (500..600).contains(&self.status_code)
+    }
+
+    /// `True` for any 4xx or 5xx response.
+    #[getter]
+    fn is_error(&self) -> bool {
+        (400..600).contains(&self.status_code)
     }
 }
 

@@ -41,24 +41,53 @@ pub struct PyResponse {
 
     #[pyo3(get)]
     pub(crate) cookies: HashMap<String, String>,
+
+    /// User-set encoding override. `None` means "auto-detect from headers,
+    /// fall back to UTF-8". Exposed to Python via the `encoding` getter/setter.
+    pub(crate) encoding_override: Option<String>,
 }
 
 #[pymethods]
 impl PyResponse {
     /// Decoded response body as a string.
     ///
-    /// Charset is taken from the Content-Type header (via the `mime` crate).
-    /// When there's no charset parameter, or the header is absent, we default
-    /// to UTF-8. Invalid byte sequences are replaced with U+FFFD rather than
-    /// raising — so callers never get a panic from calling `.text`.
+    /// Resolution order for the charset:
+    ///   1. `self.encoding` if the user set it explicitly
+    ///   2. The `charset=` parameter on the Content-Type header
+    ///   3. UTF-8 fallback
+    ///
+    /// Invalid byte sequences are replaced with U+FFFD rather than raising —
+    /// so callers never get a panic from calling `.text`.
     #[getter]
     fn text(&self, py: Python<'_>) -> String {
         let bytes = self.content.as_bytes(py);
-        let headers = self.headers.borrow(py);
-        let encoding = detect_encoding_from_headers(&headers)
-            .unwrap_or(encoding_rs::UTF_8);
+        let encoding = self.resolved_encoding(py);
         let (decoded, _, _) = encoding.decode(bytes);
         decoded.into_owned()
+    }
+
+    /// Resolved character encoding name for the response body.
+    ///
+    /// Returns the user override if one was set, otherwise the charset from
+    /// the Content-Type header, otherwise `"utf-8"`. Names are lowercased to
+    /// match httpx's convention.
+    #[getter]
+    fn encoding(&self, py: Python<'_>) -> String {
+        if let Some(e) = &self.encoding_override {
+            return e.clone();
+        }
+        let headers = self.headers.borrow(py);
+        detect_encoding_from_headers(&headers)
+            .map(|enc| enc.name().to_lowercase())
+            .unwrap_or_else(|| "utf-8".to_string())
+    }
+
+    /// Override the encoding used by `.text`. Set to any encoding label
+    /// `encoding_rs` understands ("utf-8", "iso-8859-1", "windows-1252", ...).
+    /// Invalid labels silently fall back to UTF-8 when decoding.
+    #[setter]
+    fn set_encoding(&mut self, value: String) {
+        self.encoding_override = Some(value);
     }
 
     /// Parse the response body as JSON.
@@ -88,6 +117,58 @@ impl PyResponse {
                 Err(RqxError::new_err(format!("invalid Status Code: {e}")))
             }
         }
+    }
+
+    /// `True` for 1xx responses.
+    #[getter]
+    fn is_informational(&self) -> bool {
+        (100..200).contains(&self.status_code)
+    }
+
+    /// `True` for 2xx responses.
+    #[getter]
+    fn is_success(&self) -> bool {
+        (200..300).contains(&self.status_code)
+    }
+
+    /// `True` for 3xx responses that carry a `Location` header.
+    ///
+    /// Mirrors httpx semantics: a 3xx without a Location header (e.g. 304
+    /// Not Modified) is not a redirect that can be followed, so it's not
+    /// classified as one here either.
+    #[getter]
+    fn is_redirect(&self, py: Python<'_>) -> bool {
+        (300..400).contains(&self.status_code)
+            && self.headers.borrow(py).get_first("location").is_some()
+    }
+
+    /// `True` for 4xx responses.
+    #[getter]
+    fn is_client_error(&self) -> bool {
+        (400..500).contains(&self.status_code)
+    }
+
+    /// `True` for 5xx responses.
+    #[getter]
+    fn is_server_error(&self) -> bool {
+        (500..600).contains(&self.status_code)
+    }
+
+    /// `True` for any 4xx or 5xx response.
+    #[getter]
+    fn is_error(&self) -> bool {
+        (400..600).contains(&self.status_code)
+    }
+}
+
+impl PyResponse {
+    /// Resolve the encoding to use for `.text` decoding, with full fallback chain.
+    fn resolved_encoding(&self, py: Python<'_>) -> &'static Encoding {
+        if let Some(label) = &self.encoding_override {
+            return Encoding::for_label(label.as_bytes()).unwrap_or(encoding_rs::UTF_8);
+        }
+        let headers = self.headers.borrow(py);
+        detect_encoding_from_headers(&headers).unwrap_or(encoding_rs::UTF_8)
     }
 }
 
@@ -154,6 +235,7 @@ impl PyResponse {
                 retry_history: Vec::new(),
                 http_version: http_version,
                 cookies: cookies,
+                encoding_override: None,
             }
         )
 
@@ -230,6 +312,7 @@ impl PyResponse {
                 retry_history: Vec::new(),
                 http_version: http_version,
                 cookies: cookies,
+                encoding_override: None,
             }
         )
 
