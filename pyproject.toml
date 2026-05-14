@@ -22,9 +22,13 @@ dev = [
     "pytest-asyncio",
     "pytest-xdist",
     "rich",
-    "numpy",
     "ty",
+    "ruff",
     "filelock",
+    "maturin>=1.12,<2.0",
+]
+benchmarks = [
+    "numpy",
 ]
 
 [tool.ty.rules]
