@@ -2,18 +2,18 @@
 
 A Rust-backed Python HTTP client with an httpx-compatible API.
 
-rqx replaces httpx's pure-Python internals with a Rust core built on reqwest and tokio, delivering significantly better throughput, latency, and memory usage under concurrent load — while keeping the API familiar.
+rqx replaces httpx's pure-Python internals with a Rust core built on [`reqwest`](https://github.com/seanmonstar/reqwest) and [`tokio`](https://github.com/tokio-rs/tokio). The goal: keep the API your code already targets, but eliminate the structural performance ceilings of pure-Python HTTP under concurrent load.
 
-## Highlights
+## Origin
 
-- **Sync and async clients** with the same API as httpx
-- **All HTTP methods**: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
-- **Retry system** with exponential backoff, Retry-After header support, and total timeout budgets — executing entirely in Rust
-- **Connection pooling** with configurable limits
-- **HTTP/2 support**
-- **Streaming responses** via `iter_bytes()`
-- **Cookie persistence** across requests
-- **Custom exception hierarchy** matching httpx semantics
+rqx is a personal learning project for PyO3 and maturin. The structure of the work was a forcing function: I wrote a normal product spec, then asked Claude to rewrite it in the form of an academic course-project spec (CS 262A — Advanced Topics in Computer Systems). The academic framing pushed the design toward sharper engineering decisions — measurable acceptance criteria, explicit architectural trade-offs, and concrete performance targets — than a casual spec would have produced.
+
+Two documents capture this:
+
+- **[docs/reqx_project_spec.md](docs/reqx_project_spec.md)** — the original project specification: problem statement, design constraints, acceptance criteria.
+- **[docs/report.md](docs/report.md)** — the write-up: design decisions, benchmark methodology and full measurement results, lessons learned.
+
+If you only have time for one, read the report. The benchmark numbers, the architectural trade-offs (sync vs async paths, retry placement, JSON parsing strategy, runtime singleton), and the things that didn't work all live there.
 
 ## Quick look
 
@@ -30,6 +30,9 @@ async with rqx.AsyncClient() as client:
     resp = await client.get("https://httpbin.org/get")
     print(resp.json())
 
+# Module-level convenience (one-off requests)
+resp = rqx.get("https://httpbin.org/get")
+
 # With retries
 transport = rqx.HTTPTransport(
     retries=rqx.Retry(total=3, backoff_factor=0.5, status_forcelist={503}),
@@ -38,70 +41,39 @@ with rqx.Client(transport=transport) as client:
     resp = client.get("https://example.com/api")
 ```
 
-## Performance
-
-Benchmarked against httpx and aiohttp on a local nginx instance serving a 1KB JSON payload:
-
-| Concurrency | rqx (RPS) | httpx (RPS) | aiohttp (RPS) |
-| ----------- | --------- | ----------- | ------------- |
-| 10          | 5,368     | 947         | 6,149         |
-| 100         | 6,105     | 126         | 7,821         |
-| 1,000       | 6,387     | 3           | 7,317         |
-
-See [docs/report.md](docs/report.md) for full benchmark results including latency, memory, and JSON parsing analysis.
+The API targets feature parity with [httpx](https://github.com/encode/httpx) — clients, transports, retries, streaming, mTLS, base URLs, granular timeouts, and the full exception hierarchy. See `python/rqx/_types.pyi` for the current surface.
 
 ## Installation
 
-rqx is not yet published on PyPI. To build from source:
-
 ```bash
-# Prerequisites: Rust toolchain, Python 3.9+, uv
-pip install uv
-
-# Build and install in development mode
-git clone https://github.com/rodcochran/rqx.git
-cd rqx
-uv venv
-source .venv/bin/activate
-uv pip install maturin
-maturin develop
-uv pip install -e ".[dev]"
+pip install rqx
 ```
 
-## Project goals
+To build from source (Rust toolchain + Python 3.9+ required):
 
-This project set out to answer a question: can you take httpx's excellent API and back it with Rust to eliminate the structural performance bottlenecks of pure-Python HTTP?
+```bash
+git clone https://github.com/rodcochran/rqx.git
+cd rqx
+just setup        # uv venv + maturin develop + dev deps
+just test         # full test suite
+```
 
-The answer is yes. Under high concurrency, rqx delivers ~2,000x the throughput of httpx while using ~93x less Python memory. It stays competitive with aiohttp (which uses C extensions) across all workloads.
+## Status
 
-rqx was built as a learning project for pyo3 and maturin. The code is functional but rough — contributions are welcome.
+Pre-0.1.0. Usable but the API may shift in small ways before the first tagged release. Performance results in the project report. Open issues track the v0.x roadmap — anything labeled `httpx-feature-parity` is a known surface gap.
 
 ## Contributing
 
-This project is early and there's plenty to improve:
-
-- MockTransport for network-free testing
-- Granular timeout configuration (connect, read, write)
-- Streaming + redirect support
-- Documentation and type stubs
-- CI/CD and PyPI publishing
-- Code cleanup and deduplication
-
-If you're interested in Rust, Python FFI, or HTTP internals, this is a good codebase to learn from. Open an issue or submit a PR.
-
-## Known issues
-
-rqx uses rustls under the hood, which is stricter than OpenSSL's verifier in some ways. Server certs must declare serverAuth EKU; self-signed certs without proper extensions may be rejected
+This started as a learning project and stayed one. Contributions are welcome — especially around the httpx-parity surface (URL/QueryParams classes, MockTransport, event hooks, full streaming surface). See open issues for the working set, particularly anything labeled `good first issue`. A proper `CONTRIBUTING.md` is on its way.
 
 ## Acknowledgements
 
 rqx builds on the work of several excellent projects:
 
-- [httpx](https://github.com/encode/httpx) — the API design this project aims to match
-- [pyo3](https://github.com/PyO3/pyo3) — Rust/Python FFI framework
-- [maturin](https://github.com/PyO3/maturin) — build system for Rust Python extensions
-- [reqwest](https://github.com/seanmonstar/reqwest) — the Rust HTTP client powering rqx
-- [tokio](https://github.com/tokio-rs/tokio) — async runtime
+- **[httpx](https://github.com/encode/httpx)** — the API design this project mirrors
+- **[reqwest](https://github.com/seanmonstar/reqwest)** — the Rust HTTP client powering rqx
+- **[PyO3](https://github.com/PyO3/pyo3)** and **[maturin](https://github.com/PyO3/maturin)** — Rust/Python FFI and build tooling
+- **[tokio](https://github.com/tokio-rs/tokio)** — async runtime
 
 ## License
 
