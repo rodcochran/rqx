@@ -14,6 +14,7 @@ use super::request::{
     build_client_request, build_redirect_request, determine_redirect_method, determine_redirect_url,
 };
 use super::response::PyResponse;
+use super::retry::DEFAULT_RAISE_ON_REDIRECT;
 use super::transport::{AsyncHTTPTransport, HTTPTransport};
 
 const DEFAULT_TIMEOUT: u64 = 15;
@@ -459,10 +460,21 @@ impl PyClient {
         }
 
         if (300..400).contains(&current_response.status_code) {
-            return Err(TooManyRedirects::new_err(format!(
-                "Exceeded max redirects {}",
-                &self.max_redirects
-            )));
+            // raise_on_redirect (from retry config) gates this. Default true.
+            // When false, return the last 3xx response so the caller can
+            // inspect headers/location and decide what to do.
+            let raise = self
+                .transport
+                .retries
+                .as_ref()
+                .map(|r| r.raise_on_redirect)
+                .unwrap_or(DEFAULT_RAISE_ON_REDIRECT);
+            if raise {
+                return Err(TooManyRedirects::new_err(format!(
+                    "Exceeded max redirects {}",
+                    &self.max_redirects
+                )));
+            }
         }
         Ok(current_response)
     }
@@ -969,10 +981,17 @@ impl PyAsyncClient {
         }
 
         if (300..400).contains(&current_response.status_code) {
-            return Err(TooManyRedirects::new_err(format!(
-                "Exceeded max redirects {}",
-                max_redirects
-            )));
+            let raise = transport
+                .retries
+                .as_ref()
+                .map(|r| r.raise_on_redirect)
+                .unwrap_or(DEFAULT_RAISE_ON_REDIRECT);
+            if raise {
+                return Err(TooManyRedirects::new_err(format!(
+                    "Exceeded max redirects {}",
+                    max_redirects
+                )));
+            }
         }
         Ok(current_response)
     }

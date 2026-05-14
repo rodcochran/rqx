@@ -21,7 +21,7 @@ pub struct HTTPTransport {
     // every request. Some(sem) enforces the user-provided cap.
     max_connection_semaphore: Option<Arc<Semaphore>>,
     #[pyo3(get)]
-    retries: Option<PyRetry>,
+    pub(crate) retries: Option<PyRetry>,
 }
 
 #[pymethods]
@@ -189,7 +189,15 @@ impl HTTPTransport {
                     0.0
                 };
 
-                let calculated_backoff = r.backoff_factor * 2_f32.powi(attempt - 1);
+                let mut calculated_backoff = r.backoff_factor * 2_f32.powi(attempt - 1);
+                // Apply jitter to spread out retries from many concurrent clients.
+                // Multiplier: (1 + uniform(-jitter, +jitter)) — so jitter=0.5 means
+                // backoff varies ±50% from the deterministic value.
+                if r.backoff_jitter > 0.0 {
+                    let jitter = rand::random::<f32>() * 2.0 - 1.0; // [-1, 1)
+                    calculated_backoff =
+                        (calculated_backoff * (1.0 + jitter * r.backoff_jitter)).max(0.0);
+                }
                 let backoff_time = f32::min(f32::max(calculated_backoff, retry_after), backoff_max);
                 // Run tokio sleep in Rust's runtime
                 py.detach(|| {
@@ -245,7 +253,11 @@ impl HTTPTransport {
 
         match current_response {
             Some(mut cr) => {
-                if r.status_forcelist.contains(&cr.status_code) {
+                // When status_forcelist matched and retries were exhausted:
+                // raise_on_status=true (default) → raise MaxRetriesExceeded
+                // raise_on_status=false → return the failing response so the
+                //   caller can inspect status_code / headers / body.
+                if r.status_forcelist.contains(&cr.status_code) && r.raise_on_status {
                     return Err(MaxRetriesExceeded::new_err(format!(
                         "max retries exceeded: {}",
                         r.total
@@ -286,7 +298,7 @@ pub struct AsyncHTTPTransport {
     // every request. Some(sem) enforces the user-provided cap.
     max_connection_semaphore: Option<Arc<Semaphore>>,
     #[pyo3(get)]
-    retries: Option<PyRetry>,
+    pub(crate) retries: Option<PyRetry>,
 }
 
 #[pymethods]
@@ -465,7 +477,15 @@ impl AsyncHTTPTransport {
                     0.0
                 };
 
-                let calculated_backoff = r.backoff_factor * 2_f32.powi(attempt - 1);
+                let mut calculated_backoff = r.backoff_factor * 2_f32.powi(attempt - 1);
+                // Apply jitter to spread out retries from many concurrent clients.
+                // Multiplier: (1 + uniform(-jitter, +jitter)) — so jitter=0.5 means
+                // backoff varies ±50% from the deterministic value.
+                if r.backoff_jitter > 0.0 {
+                    let jitter = rand::random::<f32>() * 2.0 - 1.0; // [-1, 1)
+                    calculated_backoff =
+                        (calculated_backoff * (1.0 + jitter * r.backoff_jitter)).max(0.0);
+                }
                 let backoff_time = f32::min(f32::max(calculated_backoff, retry_after), backoff_max);
 
                 // Run tokio sleep in Rust's runtime
@@ -515,7 +535,11 @@ impl AsyncHTTPTransport {
 
         match current_response {
             Some(mut cr) => {
-                if r.status_forcelist.contains(&cr.status_code) {
+                // When status_forcelist matched and retries were exhausted:
+                // raise_on_status=true (default) → raise MaxRetriesExceeded
+                // raise_on_status=false → return the failing response so the
+                //   caller can inspect status_code / headers / body.
+                if r.status_forcelist.contains(&cr.status_code) && r.raise_on_status {
                     return Err(MaxRetriesExceeded::new_err(format!(
                         "max retries exceeded: {}",
                         r.total
