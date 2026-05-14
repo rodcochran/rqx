@@ -27,7 +27,7 @@ pub fn build_client_request(
     headers: Option<HashMap<String, String>>,
     // cookies: &Bound<'_, PyDict>,
     auth: Option<(String, String)>,
-    timeout: Option<u64>,
+    timeout: Option<f64>,
 ) -> PyResult<Request> {
     let mut builder = http_client
         .request(Method::from_bytes(method.as_bytes()).unwrap(), url);
@@ -78,8 +78,7 @@ pub fn build_client_request(
     }
 
     if let Some(t) = timeout {
-        builder = builder
-            .timeout(Duration::from_secs(t))
+        builder = builder.timeout(Duration::from_secs_f64(t))
     };
 
     let request = builder

@@ -16,6 +16,7 @@ mod request;
 mod response;
 mod retry;
 mod runtime;
+mod timeout;
 mod transport;
 mod stream;
 pub mod exceptions;
@@ -25,6 +26,7 @@ use headers::PyHeaders;
 use runtime::RUNTIME;
 use exceptions::*;
 use retry::PyRetry;
+use timeout::PyTimeout;
 use transport::{HTTPTransport, AsyncHTTPTransport};
 
 
@@ -54,6 +56,7 @@ fn _rqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<HTTPTransport>()?;
     m.add_class::<AsyncHTTPTransport>()?;
     m.add_class::<PyHeaders>()?;
+    m.add_class::<PyTimeout>()?;
     m.add("RqxError", m.py().get_type::<RqxError>())?;
     m.add("RequestError", m.py().get_type::<RequestError>())?;
     m.add("MaxRetriesExceeded", m.py().get_type::<MaxRetriesExceeded>())?;

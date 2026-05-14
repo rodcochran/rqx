@@ -16,16 +16,17 @@ use super::request::{
 use super::response::PyResponse;
 use super::retry::DEFAULT_RAISE_ON_REDIRECT;
 use super::runtime::RUNTIME;
+use super::timeout::PyTimeout;
 use super::transport::{AsyncHTTPTransport, HTTPTransport};
 
-const DEFAULT_TIMEOUT: u64 = 15;
+const DEFAULT_TIMEOUT: f64 = 15.0;
 const DEFAULT_FOLLOW_REDIRECTS: bool = false;
 const DEFAULT_MAX_REDIRECTS: u32 = 20;
 
 #[pyclass]
 pub struct PyClient {
     transport: HTTPTransport,
-    timeout_secs: u64,
+    timeout_secs: f64,
     follow_redirects: bool,
     max_redirects: u32,
     cookies: Mutex<HashMap<String, String>>,
@@ -38,25 +39,25 @@ impl PyClient {
     fn __new__(
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
         follow_redirects: Option<bool>,
         max_redirects: Option<u32>,
         // retries: Option<PyRef<'_, PyRetry>>,
         transport: Option<PyRef<'_, HTTPTransport>>,
     ) -> PyResult<Self> {
-        let timeout_secs = timeout.unwrap_or(DEFAULT_TIMEOUT);
+        let timeout_secs = PyTimeout::resolve_request_timeout(timeout, DEFAULT_TIMEOUT)?;
         let client_level_follow_redirects = follow_redirects.unwrap_or(DEFAULT_FOLLOW_REDIRECTS);
         let client_level_max_redirects = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
 
-        if transport.is_some() & (verify.is_some() | cert.is_some()) {
-            return Err(TooManyRedirects::new_err(
-                "Cannot specify both transport= and cert=/verify=; pass options through one or the other ".to_string(),
+        if transport.is_some() && (verify.is_some() || cert.is_some() || timeout.is_some()) {
+            return Err(RqxError::new_err(
+                "Cannot specify both transport= and cert=/verify=/timeout=; pass options through one or the other".to_string(),
             ));
         }
 
         let _transport = match transport {
             Some(t) => t.clone(),
-            None => HTTPTransport::new(verify, cert)?,
+            None => HTTPTransport::new(verify, cert, timeout)?,
         };
 
         Ok(Self {
@@ -114,7 +115,7 @@ impl PyClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
         let start_time = std::time::Instant::now();
 
@@ -130,7 +131,7 @@ impl PyClient {
             headers,
             auth,
             // setting default timeout from top level
-            Some(timeout.unwrap_or(self.timeout_secs)),
+            Some(PyTimeout::resolve_request_timeout(timeout, self.timeout_secs)?),
         )?;
 
         let _follow_redirects = match follow_redirects {
@@ -162,7 +163,7 @@ impl PyClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
         self.request(
             py,
@@ -188,7 +189,7 @@ impl PyClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
         self.request(
             py,
@@ -214,7 +215,7 @@ impl PyClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
         self.request(
             py,
@@ -243,7 +244,7 @@ impl PyClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
         self.request(
             py,
@@ -272,7 +273,7 @@ impl PyClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
         self.request(
             py,
@@ -301,7 +302,7 @@ impl PyClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
         self.request(
             py,
@@ -327,7 +328,7 @@ impl PyClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
         self.request(
             py,
@@ -370,7 +371,7 @@ impl PyClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyStreamResponse> {
         let start_time = std::time::Instant::now();
 
@@ -386,7 +387,7 @@ impl PyClient {
             headers,
             auth,
             // setting default timeout from top level
-            Some(timeout.unwrap_or(self.timeout_secs)),
+            Some(PyTimeout::resolve_request_timeout(timeout, self.timeout_secs)?),
         )?;
 
         let _follow_redirects = match follow_redirects {
@@ -610,7 +611,7 @@ impl PyClient {
 pub struct PyAsyncClient {
     // http_client: Client,
     transport: AsyncHTTPTransport,
-    timeout_secs: u64,
+    timeout_secs: f64,
     follow_redirects: bool,
     max_redirects: u32,
     cookies: Arc<TokioMutex<HashMap<String, String>>>,
@@ -623,24 +624,24 @@ impl PyAsyncClient {
     fn __new__(
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
         follow_redirects: Option<bool>,
         max_redirects: Option<u32>,
         transport: Option<PyRef<'_, AsyncHTTPTransport>>,
     ) -> PyResult<Self> {
-        let timeout_secs = timeout.unwrap_or(DEFAULT_TIMEOUT);
+        let timeout_secs = PyTimeout::resolve_request_timeout(timeout, DEFAULT_TIMEOUT)?;
         let client_level_follow_redirects = follow_redirects.unwrap_or(DEFAULT_FOLLOW_REDIRECTS);
         let client_level_max_redirects = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
 
-        if transport.is_some() & (verify.is_some() | cert.is_some()) {
-            return Err(TooManyRedirects::new_err(
-                "Cannot specify both transport= and cert=/verify=; pass options through one or the other ".to_string(),
+        if transport.is_some() && (verify.is_some() || cert.is_some() || timeout.is_some()) {
+            return Err(RqxError::new_err(
+                "Cannot specify both transport= and cert=/verify=/timeout=; pass options through one or the other".to_string(),
             ));
         }
 
         let _transport = match transport {
             Some(t) => t.clone(),
-            None => AsyncHTTPTransport::new(verify, cert)?,
+            None => AsyncHTTPTransport::new(verify, cert, timeout)?,
         };
         Ok(Self {
             transport: _transport,
@@ -677,7 +678,7 @@ impl PyAsyncClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
         // ) -> PyResult<PyResponse> {
     ) -> PyResult<Bound<'a, PyAny>> {
         let start_time = std::time::Instant::now();
@@ -695,7 +696,7 @@ impl PyAsyncClient {
             auth,
             // Fall back to the client-level default when no per-request timeout
             // was provided, matching the sync client's behavior.
-            Some(timeout.unwrap_or(self.timeout_secs)),
+            Some(PyTimeout::resolve_request_timeout(timeout, self.timeout_secs)?),
         )?;
 
         let _follow_redirects = match follow_redirects {
@@ -736,7 +737,7 @@ impl PyAsyncClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
@@ -762,7 +763,7 @@ impl PyAsyncClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
@@ -788,7 +789,7 @@ impl PyAsyncClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
@@ -817,7 +818,7 @@ impl PyAsyncClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
@@ -846,7 +847,7 @@ impl PyAsyncClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
@@ -875,7 +876,7 @@ impl PyAsyncClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
@@ -901,7 +902,7 @@ impl PyAsyncClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
@@ -944,7 +945,7 @@ impl PyAsyncClient {
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
         follow_redirects: Option<bool>,
-        timeout: Option<u64>,
+        timeout: Option<&Bound<'_, PyAny>>,
         // ) -> PyResult<PyResponse> {
     ) -> PyResult<Bound<'a, PyAny>> {
         let start_time = std::time::Instant::now();
@@ -962,7 +963,7 @@ impl PyAsyncClient {
             auth,
             // Fall back to the client-level default when no per-request timeout
             // was provided, matching the sync client's behavior.
-            Some(timeout.unwrap_or(self.timeout_secs)),
+            Some(PyTimeout::resolve_request_timeout(timeout, self.timeout_secs)?),
         )?;
 
         let _follow_redirects = match follow_redirects {
