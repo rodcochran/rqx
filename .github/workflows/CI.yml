@@ -39,11 +39,13 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
       - uses: dtolnay/rust-toolchain@stable
-      - run: pip install maturin
-      - run: maturin develop
-      - run: pip install pytest pytest-asyncio pytest-xdist rich
-      - run: pytest tests/ -n 8
+      - run: uv sync --all-extras --frozen
+      - run: uv run maturin develop
+      - run: uv run pytest tests/ -n 8
 
   linux:
     runs-on: ${{ matrix.platform.runner }}
