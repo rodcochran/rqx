@@ -1,5 +1,6 @@
 import asyncio
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import aiohttp
 import httpr
@@ -44,11 +45,9 @@ def _aiohttp_session():
 
 
 def _httpr_client():
-    try:
-        return httpr.AsyncClient(max_connections=MAX_CONNECTIONS)
-    except TypeError:
-        print("[warning] httpr.AsyncClient(max_connections=...) not supported; using default")
-        return httpr.AsyncClient()
+    # httpr doesn't expose a pool-size knob on AsyncClient. Documented
+    # limitation; comparison with the other three is best-effort.
+    return httpr.AsyncClient()
 
 
 async def bench_rqx():
@@ -136,6 +135,13 @@ def print_percentiles(name, latencies):
 
 
 async def main():
+    # httpr's AsyncClient runs sync code on asyncio's default ThreadPoolExecutor
+    # (min(32, cpu+4) workers). Bump to MAX_CONNECTIONS so httpr can run
+    # CONCURRENCY=100 workers in parallel instead of capping at ~6 threads.
+    # Native-async clients (rqx, httpx, aiohttp) aren't affected by this.
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=MAX_CONNECTIONS))
+
     for name, fn in [
         ("rqx", bench_rqx),
         ("httpr", bench_httpr),

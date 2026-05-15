@@ -1,5 +1,6 @@
 import asyncio
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import aiohttp
 import httpr
@@ -49,16 +50,10 @@ def _aiohttp_session():
 
 
 def _httpr_client():
-    # NOTE: assuming httpr.AsyncClient accepts a max_connections kwarg. If
-    # the constructor signature differs, edit this factory — every other
-    # client honors MAX_CONNECTIONS through its own native config knob.
-    try:
-        return httpr.AsyncClient(max_connections=MAX_CONNECTIONS)
-    except TypeError:
-        # Fall back to default-config httpr so the bench still runs.
-        # Flag it loudly so we know the comparison isn't pool-matched.
-        print("[warning] httpr.AsyncClient(max_connections=...) not supported; using default")
-        return httpr.AsyncClient()
+    # httpr doesn't expose a connection-pool ceiling on the client constructor —
+    # it inherits whatever reqwest's defaults are. Documented limitation;
+    # comparison with the other three is best-effort at high concurrency.
+    return httpr.AsyncClient()
 
 
 async def bench_rqx(concurrency, duration):
@@ -144,6 +139,15 @@ async def run_benchmark(name, bench_fn, concurrency, warmup, measure):
 
 
 async def main():
+    # httpr.AsyncClient is not native async — it dispatches sync Rust calls to
+    # asyncio's default ThreadPoolExecutor. The default executor is sized
+    # min(32, cpu+4), which would cap httpr at ~6 concurrent in-flight requests
+    # on a 2-vCPU box. Bump it to MAX_CONNECTIONS so httpr can actually
+    # exercise concurrency comparable to the native-async clients. rqx, httpx,
+    # and aiohttp don't use this executor — only httpr is affected.
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=MAX_CONNECTIONS))
+
     results = {}
     for concurrency in CONCURRENCY_LEVELS:
         for name, fn in [
