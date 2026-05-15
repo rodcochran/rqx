@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 import time
 
@@ -9,6 +10,16 @@ from rich import print
 
 # HTTPBIN_HOST = "https://httpbin.org"
 HTTPBIN_HOST = "http://localhost"
+
+# Some HTTP/2 tests below hit nghttp2.org/httpbin/ because the local
+# kennethreitz/httpbin Docker image only speaks HTTP/1.1. That external
+# dependency is flaky in CI; skip those tests when CI=true. They still run
+# locally so we keep coverage during development. Hermetic replacement
+# tracked in #78.
+SKIP_EXTERNAL = pytest.mark.skipif(
+    bool(os.environ.get("CI")),
+    reason="depends on external nghttp2.org; tracked in #78",
+)
 
 
 # ================================================================
@@ -753,6 +764,7 @@ def test_max_connections_with_freed_gil():
     )
 
 
+@SKIP_EXTERNAL
 def test_basic_http2():
     transport = rqx.HTTPTransport(http2=True)
     client = rqx.Client(transport=transport)
@@ -761,6 +773,7 @@ def test_basic_http2():
     assert resp.http_version == "HTTP/2.0"
 
 
+@SKIP_EXTERNAL
 def test_basic_http2_explicit_opt_out():
     transport = rqx.HTTPTransport(http2=False)
     client = rqx.Client(transport=transport)
@@ -769,6 +782,7 @@ def test_basic_http2_explicit_opt_out():
     assert resp.http_version != "HTTP/2.0"
 
 
+@SKIP_EXTERNAL
 def test_basic_http2_default_negotiates_h2():
     # No http1/http2 kwargs → ALPN negotiation. Against an HTTP/2-capable
     # server, this should negotiate to HTTP/2 automatically.
@@ -779,6 +793,7 @@ def test_basic_http2_default_negotiates_h2():
     assert resp.http_version == "HTTP/2.0"
 
 
+@SKIP_EXTERNAL
 def test_http_version_pinned_to_h1():
     # http1=True, http2=False forces HTTP/1.1 even against an h2-capable server.
     transport = rqx.HTTPTransport(http1=True, http2=False)
@@ -787,6 +802,7 @@ def test_http_version_pinned_to_h1():
     assert resp.http_version == "HTTP/1.1"
 
 
+@SKIP_EXTERNAL
 def test_http_version_pinned_to_h2_prior_knowledge():
     # http1=False, http2=True forces HTTP/2 prior knowledge (no fallback).
     transport = rqx.HTTPTransport(http1=False, http2=True)
@@ -806,6 +822,7 @@ def test_proxy_config():
     assert transport is not None
 
 
+@SKIP_EXTERNAL
 def test_verify_is_false_returns_200_on_unsigned_url():
     transport = rqx.HTTPTransport(verify=False)
     client = rqx.Client(transport=transport)
