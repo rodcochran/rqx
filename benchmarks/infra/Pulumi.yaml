@@ -1,0 +1,3 @@
+name: rqx-bench-infra
+runtime: nodejs
+description: Bench infrastructure for rqx — paired c7i.large EC2 instances (client + server) in a single AZ for intra-region HTTP benchmarks. Tear down with `pulumi destroy` after results are captured.
