@@ -210,7 +210,7 @@ jobs:
             exit 1
           fi
           echo "Tag and Cargo.toml agree on $TAG"
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v3
         with:
