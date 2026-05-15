@@ -58,6 +58,18 @@ just setup        # uv venv + maturin develop + dev deps
 just test         # full test suite
 ```
 
+## Benchmarks
+
+Measured on a paired AWS c7i.large client/server (2 vCPU each, dedicated CPU) in `us-east-1`, hitting nginx over an intra-VPC private IP. Each cell is the median of 5 runs; each (client, concurrency, run) executes in its own Python subprocess to keep clients from contaminating each other's measurements. Full methodology and raw data: [docs/launch_report.md](docs/launch_report.md).
+
+![Throughput at concurrency=100](docs/launch_throughput.png)
+
+![Memory at concurrency=100](docs/launch_memory.png)
+
+![Median latency at concurrency=100](docs/launch_latency.png)
+
+httpx is the modern successor to requests, aiohttp is the de-facto async HTTP library, and httpr is another Rust-backed alternative.
+
 ## Status
 
 Pre-0.1.0. Usable but the API may shift in small ways before the first tagged release. Performance results in the project report. Open issues track the v0.x roadmap — anything labeled `httpx-feature-parity` is a known surface gap.
