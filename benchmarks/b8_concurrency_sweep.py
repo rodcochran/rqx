@@ -39,8 +39,8 @@ import rqx
 TARGET_URL = "http://localhost:8080/json"
 CONCURRENCY_LEVELS = [1, 10, 50, 100]
 WARMUP_SECONDS = 2
-MEASURE_SECONDS = 10
-DEFAULT_RUNS = 3
+MEASURE_SECONDS = 15
+DEFAULT_RUNS = 2
 
 # Connection-pool ceiling for every client. Above the highest concurrency
 # tested so the pool isn't a confounder.

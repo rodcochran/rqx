@@ -8,8 +8,8 @@ import httpx
 import rqx
 
 TARGET_URL = "http://localhost:8080/json"
-WARMUP_SECONDS = 5
-MEASURE_SECONDS = 30
+WARMUP_SECONDS = 3
+MEASURE_SECONDS = 15
 CONCURRENCY_LEVELS = [
     10,
     50,
