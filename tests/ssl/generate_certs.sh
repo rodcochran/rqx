@@ -55,7 +55,7 @@ openssl req \
     -days 365 \
     -noenc \
     -subj /C=US/ST=CA/L="San Francisco"/O=rqx/ \
-    -quiet
+    -batch
 
 echo "Generated self-signed cert"
 
@@ -69,7 +69,7 @@ openssl req \
     -out $CERTS_DIR/server.csr \
     -noenc \
     -subj /C=US/ST=CA/L="San Francisco"/O="rqx Test Server"/ \
-    -quiet
+    -batch
 
 
 echo "Generated server key"
@@ -99,7 +99,7 @@ openssl req \
     -out $CERTS_DIR/client.csr \
     -noenc \
     -subj /C=US/ST=CA/L="San Francisco"/O="rqx Test Client"/ \
-    -quiet
+    -batch
 
 # Due to limitation with Reqwests TLS, some of the keys were failing. Known issue.
 # Creating the traditional style of keys to prevent propagating that error.
