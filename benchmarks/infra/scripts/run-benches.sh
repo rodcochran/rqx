@@ -47,7 +47,13 @@ run_one() {
 
 # Run benches sequentially — running them in parallel would have one bench's
 # load skew the other's measurements.
-run_one b1_throughput
+#
+# b1 has its own driver (run_b1.sh) that runs each client in its own Python
+# process — avoiding executor pollution and per-process tokio contention.
+echo "[bench] b1 ($RUNS_PER_BENCH runs per client/concurrency)"
+bash benchmarks/run_b1.sh --runs "$RUNS_PER_BENCH" --out "$RESULTS_DIR/b1_results.jsonl" \
+    2>&1 | tee "$RESULTS_DIR/b1.log"
+
 run_one b2_latency
 run_one b8_concurrency_sweep
 

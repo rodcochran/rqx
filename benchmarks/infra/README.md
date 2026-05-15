@@ -40,7 +40,7 @@ That single command does:
 2. Waits for SSH to come up on both VMs (cloud-init takes a minute or two).
 3. Runs `server-setup.sh` on the server: clones rqx, starts nginx + delay-server via docker compose, verifies nginx is responding on `:8080`.
 4. Runs `client-setup.sh` on the client: installs Rust + uv, clones rqx, builds the extension in release mode (the long pole — ~10-15 min on a cold cargo cache), installs httpx + aiohttp, and `sed`-patches the target benches to point at the server's private IP.
-5. Runs `run-benches.sh`: executes `b1_throughput`, `b2_latency`, `b8_concurrency_sweep` five times each (configurable via `--runs-per-bench`), capturing each run's output to `~/results/<run-id>/`. Uploads the directory to `s3://rqx-bench-results-<accountId>/<run-id>/`.
+5. Runs `run-benches.sh`: drives b1 via `run_b1.sh` (per-client subprocesses, JSONL output) and runs `b2_latency` + `b8_concurrency_sweep` five times each (configurable via `--runs-per-bench`), capturing all output to `~/results/<run-id>/`. Uploads the directory to `s3://rqx-bench-results-<accountId>/<run-id>/`.
 6. Mirrors `s3://...` to `./results/<run-id>/` on your laptop.
 7. Prompts: destroy infra now, or leave it running for follow-up work?
 
