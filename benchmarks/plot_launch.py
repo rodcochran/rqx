@@ -49,18 +49,21 @@ def medians_at(runs, c, key):
     return out
 
 
-def render_bar_chart(values, units, title, out_path, value_fmt=None):
+def render_bar_chart(values, units, title, out_path, value_fmt=None,
+                     label_overrides=None, footnote=None):
     # Sort descending — longest bar on top, shortest on bottom. Consistent
     # across throughput (largest = best) and memory/latency (largest = worst);
     # the visual story is "this bar stands out."
     clients = sorted(values, key=lambda c: -values[c])
     nums = [values[c] for c in clients]
+    label_overrides = label_overrides or {}
+    display_labels = [label_overrides.get(c, c) for c in clients]
 
     fig, ax = plt.subplots(figsize=(11, 4.5), dpi=150)
     fig.patch.set_facecolor(BG)
     ax.set_facecolor(BG)
 
-    bars = ax.barh(clients, nums, color=BAR, height=0.35)
+    bars = ax.barh(display_labels, nums, color=BAR, height=0.35)
     ax.invert_yaxis()
 
     pad = max(nums) * 0.02
@@ -96,6 +99,11 @@ def render_bar_chart(values, units, title, out_path, value_fmt=None):
         0.5, 0.04, title,
         color=SUBTLE, style="italic", ha="center", fontsize=12,
     )
+    if footnote:
+        fig.text(
+            0.5, 0.005, footnote,
+            color=SUBTLE, style="italic", ha="center", fontsize=10,
+        )
 
     plt.subplots_adjust(left=0.18, right=0.95, top=0.95, bottom=0.18)
     plt.savefig(out_path, facecolor=fig.get_facecolor(), bbox_inches="tight")
@@ -128,6 +136,8 @@ def main():
         units="RPS",
         title="HTTP requests per second at concurrency=100 — median of 5 runs, AWS c7i.large client.",
         out_path=out_dir / "launch_throughput.png",
+        label_overrides={"httpx": "httpx*"},
+        footnote="* httpx number is anomalously low on this hardware; cause undiagnosed. See launch_report.md.",
     )
     render_bar_chart(
         medians_at(runs, 100, "peak_rss_mb"),
