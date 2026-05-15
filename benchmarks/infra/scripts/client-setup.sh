@@ -60,7 +60,10 @@ maturin develop --release
 # localhost. nginx is on :8080 on the server (matches docker-compose.yaml).
 echo "[client-setup] patching bench scripts to target $SERVER_IP:8080..."
 cd "$HOME/rqx/benchmarks"
-for f in b1_throughput.py b2_latency.py b8_concurrency_sweep.py; do
+for f in \
+    b1_rqx.py b1_httpr.py b1_httpx.py b1_aiohttp.py \
+    b2_latency.py \
+    b8_concurrency_sweep.py; do
     sed -i "s|http://localhost:8080|http://${SERVER_IP}:8080|g" "$f"
     if ! grep -q "http://${SERVER_IP}:8080" "$f"; then
         echo "[client-setup] FATAL: sed didn't patch $f"

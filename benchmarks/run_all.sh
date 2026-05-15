@@ -93,8 +93,8 @@ run_bench "b7_network_latency" \
 run_bench "b8_concurrency_sweep" \
     python benchmarks/b8_concurrency_sweep.py --runs 3 --json "$OUT_DIR/b8.json"
 
-run_bench "b1_throughput" \
-    python benchmarks/b1_throughput.py
+run_bench "b1" \
+    bash benchmarks/run_b1.sh --runs 5 --out "$OUT_DIR/b1_results.jsonl"
 
 echo ""
 echo "================================================================"
