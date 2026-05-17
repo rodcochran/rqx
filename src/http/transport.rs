@@ -37,16 +37,16 @@ impl Transport {
     pub async fn handle_request(&self, request: Request) -> PyResult<PyResponse> {
         if self.retries.is_some() {
             // Handle retries etc.
-            Self::send_with_retries(self, request).await
+            self.send_with_retries(request).await
         } else {
             // don't do any retries
-            Self::send(self, request).await
+            self.send(request).await
         }
     }
 
     // single-attempt — returns the deserialized Python response
     async fn send(&self, request: Request) -> PyResult<PyResponse> {
-        let response = Self::send_raw(self, request).await?;
+        let response = self.send_raw(request).await?;
         PyResponse::from_response_async(response).await
     }
 
@@ -136,7 +136,7 @@ impl Transport {
                 .ok_or_else(|| RqxError::new_err("Streaming request bodies cannot be retried"))?;
 
             let attempt_start = std::time::Instant::now();
-            match Self::send(self, request_copy).await {
+            match self.send(request_copy).await {
                 Ok(resp) => {
                     if !is_retryable_method {
                         return Ok(resp);
