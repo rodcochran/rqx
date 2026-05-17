@@ -142,7 +142,10 @@ impl PyClient {
             headers,
             auth,
             // setting default timeout from top level
-            Some(PyTimeout::resolve_request_timeout(timeout, self.timeout_secs)?),
+            Some(PyTimeout::resolve_request_timeout(
+                timeout,
+                self.timeout_secs,
+            )?),
         )?;
 
         let _follow_redirects = match follow_redirects {
@@ -399,7 +402,10 @@ impl PyClient {
             headers,
             auth,
             // setting default timeout from top level
-            Some(PyTimeout::resolve_request_timeout(timeout, self.timeout_secs)?),
+            Some(PyTimeout::resolve_request_timeout(
+                timeout,
+                self.timeout_secs,
+            )?),
         )?;
 
         let _follow_redirects = match follow_redirects {
@@ -477,6 +483,7 @@ impl PyClient {
             // inspect headers/location and decide what to do.
             let raise = self
                 .transport
+                .inner
                 .retries
                 .as_ref()
                 .map(|r| r.raise_on_redirect)
@@ -530,6 +537,7 @@ impl PyClient {
 
         let raise_on_redirect = self
             .transport
+            .inner
             .retries
             .as_ref()
             .map(|r| r.raise_on_redirect)
@@ -718,7 +726,10 @@ impl PyAsyncClient {
             auth,
             // Fall back to the client-level default when no per-request timeout
             // was provided, matching the sync client's behavior.
-            Some(PyTimeout::resolve_request_timeout(timeout, self.timeout_secs)?),
+            Some(PyTimeout::resolve_request_timeout(
+                timeout,
+                self.timeout_secs,
+            )?),
         )?;
 
         let _follow_redirects = match follow_redirects {
@@ -733,14 +744,14 @@ impl PyAsyncClient {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut resp = if _follow_redirects {
                 Self::send_handling_redirects(
-                    transport,
+                    &transport,
                     request,
                     max_redirects,
                     Arc::clone(&cookies),
                 )
                 .await?
             } else {
-                AsyncHTTPTransport::handle_request(transport, request).await?
+                AsyncHTTPTransport::handle_request(&transport, request).await?
             };
             Self::accumulate_cookies(&cookies, &resp.cookies).await;
             let end_time = std::time::Instant::now();
@@ -986,7 +997,10 @@ impl PyAsyncClient {
             auth,
             // Fall back to the client-level default when no per-request timeout
             // was provided, matching the sync client's behavior.
-            Some(PyTimeout::resolve_request_timeout(timeout, self.timeout_secs)?),
+            Some(PyTimeout::resolve_request_timeout(
+                timeout,
+                self.timeout_secs,
+            )?),
         )?;
 
         let _follow_redirects = match follow_redirects {
@@ -1001,21 +1015,14 @@ impl PyAsyncClient {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut resp = if _follow_redirects {
                 Self::send_handling_redirects_stream(
-                    transport.clone(),
+                    &transport.clone(),
                     request,
                     max_redirects,
                     Arc::clone(&cookies),
                 )
                 .await?
             } else {
-                PyAsyncStreamResponse::from_response(
-                    AsyncHTTPTransport::send_raw(
-                        transport.client(),
-                        request,
-                        transport.semaphore(),
-                    )
-                    .await?,
-                )?
+                PyAsyncStreamResponse::from_response(transport.send_raw(request).await?)?
             };
             Self::accumulate_cookies(&cookies, &resp.cookies).await;
             let end_time = std::time::Instant::now();
@@ -1064,7 +1071,7 @@ impl PyAsyncClient {
     }
 
     async fn send_handling_redirects(
-        transport: AsyncHTTPTransport,
+        transport: &AsyncHTTPTransport,
         request: Request,
         max_redirects: u32,
         cookies: Arc<TokioMutex<HashMap<String, String>>>,
@@ -1072,8 +1079,7 @@ impl PyAsyncClient {
         let original_method = request.method().clone();
         let original_url = request.url().clone();
         let original_headers = request.headers().clone();
-        let mut current_response =
-            AsyncHTTPTransport::handle_request(transport.clone(), request).await?;
+        let mut current_response = transport.handle_request(request).await?;
         // Capture any cookies set by the first response before we follow the
         // redirect chain. Without this, Set-Cookie headers from intermediate
         // hops are dropped from the Python-visible client.cookies view.
@@ -1084,7 +1090,7 @@ impl PyAsyncClient {
                 return Ok(current_response);
             }
             current_response = Self::handle_redirect(
-                &transport,
+                transport,
                 &original_url,
                 &original_method,
                 &original_headers,
@@ -1096,6 +1102,7 @@ impl PyAsyncClient {
 
         if (300..400).contains(&current_response.status_code) {
             let raise = transport
+                .inner
                 .retries
                 .as_ref()
                 .map(|r| r.raise_on_redirect)
@@ -1111,7 +1118,7 @@ impl PyAsyncClient {
     }
 
     async fn send_handling_redirects_stream(
-        transport: AsyncHTTPTransport,
+        transport: &AsyncHTTPTransport,
         request: Request,
         max_redirects: u32,
         cookies: Arc<TokioMutex<HashMap<String, String>>>,
@@ -1121,6 +1128,7 @@ impl PyAsyncClient {
         let original_headers = request.headers().clone();
 
         let raise_on_redirect = transport
+            .inner
             .retries
             .as_ref()
             .map(|r| r.raise_on_redirect)
@@ -1129,12 +1137,7 @@ impl PyAsyncClient {
         let mut current_request = request;
         let mut redirects_used: u32 = 0;
         loop {
-            let response = AsyncHTTPTransport::send_raw(
-                transport.client(),
-                current_request,
-                transport.semaphore(),
-            )
-            .await?;
+            let response = transport.send_raw(current_request).await?;
             let status = response.status().as_u16();
 
             if !(300..400).contains(&status) {
@@ -1170,12 +1173,8 @@ impl PyAsyncClient {
             let new_url = determine_redirect_url(&original_url, &location)
                 .map_err(|e| RqxError::new_err(format!("Error parsing url from redirect: {e}")))?;
             let new_method = determine_redirect_method(&original_method, status);
-            current_request = build_redirect_request(
-                transport.client(),
-                new_method,
-                new_url,
-                &original_headers,
-            );
+            current_request =
+                build_redirect_request(transport.client(), new_method, new_url, &original_headers);
 
             redirects_used += 1;
         }
@@ -1201,8 +1200,7 @@ impl PyAsyncClient {
         let new_method = determine_redirect_method(original_method, resp.status_code);
         let current_request =
             build_redirect_request(transport.client(), new_method, new_url, original_headers);
-        let current_response =
-            AsyncHTTPTransport::handle_request(transport.clone(), current_request).await;
+        let current_response = transport.handle_request(current_request).await;
         return current_response;
     }
 }
