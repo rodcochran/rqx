@@ -541,46 +541,43 @@ async def test_max_connections():
 
 
 @pytest.mark.asyncio
-async def test_basic_http2():
-    transport = rqx.AsyncHTTPTransport(http2=True)
+async def test_basic_http2(http2_server):
+    transport = rqx.AsyncHTTPTransport(http2=True, verify=False)
     client = rqx.AsyncClient(transport=transport)
-    url = "https://nghttp2.org/httpbin/get"
-    resp = await client.get(url=url)
+    resp = await client.get(f"{http2_server}/get")
     assert resp.http_version == "HTTP/2.0"
 
 
 @pytest.mark.asyncio
-async def test_basic_http2_explicit_opt_out():
-    transport = rqx.AsyncHTTPTransport(http2=False)
+async def test_basic_http2_explicit_opt_out(http2_server):
+    transport = rqx.AsyncHTTPTransport(http2=False, verify=False)
     client = rqx.AsyncClient(transport=transport)
-    url = "https://nghttp2.org/httpbin/get"
-    resp = await client.get(url=url)
+    resp = await client.get(f"{http2_server}/get")
     assert resp.http_version != "HTTP/2.0"
 
 
 @pytest.mark.asyncio
-async def test_basic_http2_default_negotiates_h2():
+async def test_basic_http2_default_negotiates_h2(http2_server):
     # No http1/http2 kwargs → ALPN. Against h2-capable server → h2.
-    transport = rqx.AsyncHTTPTransport()
+    transport = rqx.AsyncHTTPTransport(verify=False)
     client = rqx.AsyncClient(transport=transport)
-    url = "https://nghttp2.org/httpbin/get"
-    resp = await client.get(url=url)
+    resp = await client.get(f"{http2_server}/get")
     assert resp.http_version == "HTTP/2.0"
 
 
 @pytest.mark.asyncio
-async def test_http_version_pinned_to_h1_async():
-    transport = rqx.AsyncHTTPTransport(http1=True, http2=False)
+async def test_http_version_pinned_to_h1_async(http2_server):
+    transport = rqx.AsyncHTTPTransport(http1=True, http2=False, verify=False)
     client = rqx.AsyncClient(transport=transport)
-    resp = await client.get(url="https://nghttp2.org/httpbin/get")
+    resp = await client.get(f"{http2_server}/get")
     assert resp.http_version == "HTTP/1.1"
 
 
 @pytest.mark.asyncio
-async def test_http_version_pinned_to_h2_prior_knowledge_async():
-    transport = rqx.AsyncHTTPTransport(http1=False, http2=True)
+async def test_http_version_pinned_to_h2_prior_knowledge_async(http2_server):
+    transport = rqx.AsyncHTTPTransport(http1=False, http2=True, verify=False)
     client = rqx.AsyncClient(transport=transport)
-    resp = await client.get(url="https://nghttp2.org/httpbin/get")
+    resp = await client.get(f"{http2_server}/get")
     assert resp.http_version == "HTTP/2.0"
 
 
@@ -596,11 +593,12 @@ def test_proxy_config():
 
 
 @pytest.mark.asyncio
-async def test_verify_is_false_returns_200_on_unsigned_url():
+async def test_verify_is_false_returns_200_on_unsigned_url(http2_server):
+    # The http2_server fixture uses a self-signed cert — verify=False is
+    # required to accept it, which is exactly what this test exercises.
     transport = rqx.AsyncHTTPTransport(verify=False)
     client = rqx.AsyncClient(transport=transport)
-    # hitting a normal HTTPS endpoint still works
-    resp = await client.get("https://nghttp2.org/httpbin/get")
+    resp = await client.get(f"{http2_server}/get")
     assert resp.status_code == 200
 
 
