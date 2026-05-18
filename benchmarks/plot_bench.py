@@ -1,19 +1,29 @@
-"""Render the launch-report charts (throughput + memory + latency).
+"""Render the bench summary charts (throughput + memory + latency).
 
 Style mirrors the ty / Pyrefly / Pyright / mypy chart: dark background, single
 purple bar per client, value labeled to the right.
 
-Throughput + memory come from b1.jsonl. Latency comes from a hardcoded summary
-of b2_latency.py output (we don't have a stable JSON artifact for b2 yet — the
-numbers are the median of the run preserved in
-benchmarks/results/aws-run-20260515/client/manual/b2_latency.log).
+Throughput + memory come from b1_results.jsonl. Latency comes from b2_latency
+run logs (b2_latency-run*.log) in the same directory if present; otherwise
+falls back to the hardcoded launch-run values.
+
+Output filenames are bare (`throughput.png`, `memory.png`, `latency.png`) —
+the destination directory namespaces them by release or context (e.g.
+`benchmarks/0.1.2/throughput.png`). The launch-report originals at
+`docs/launch_*.png` are historical artifacts and are not regenerated here.
 
 Usage:
-    python benchmarks/plot_launch.py path/to/b1.jsonl [--out-dir docs]
+    # Preferred: point at a results directory.
+    python benchmarks/plot_bench.py benchmarks/results/aws-20260518-v012/ \\
+        --out-dir benchmarks/0.1.2
+
+    # Back-compat: hand a b1.jsonl directly. Uses hardcoded b2 fallback.
+    python benchmarks/plot_bench.py path/to/b1.jsonl [--out-dir out]
 """
 
 import argparse
 import json
+import re
 import statistics
 from collections import defaultdict
 from pathlib import Path
@@ -111,9 +121,9 @@ def render_bar_chart(values, units, title, out_path, value_fmt=None,
     print(f"wrote {out_path}")
 
 
-# Hardcoded from b2_latency.log (median of one run, c=100, 10k requests/client).
-# If b2 ever emits JSON, swap to loading it programmatically.
-B2_P50_MS = {
+# Launch-run fallback (median of one run, c=100, 10k requests/client). Used
+# only when no b2_latency-run*.log files are found alongside the b1 jsonl.
+B2_P50_MS_FALLBACK = {
     "rqx": 7.00,
     "aiohttp": 7.85,
     "httpr": 14.32,
@@ -121,13 +131,52 @@ B2_P50_MS = {
 }
 
 
+def load_b2_p50(log_dir: Path) -> dict:
+    """Aggregate b2_latency-run*.log p50 values across runs into {client: median_p50_ms}.
+
+    Each log block looks like:
+
+        rqx (10000 requests)
+          p50:  6.72 ms
+          p75:  8.28 ms
+          ...
+
+    Returns empty dict if no logs found, so the caller can fall back."""
+    block_pat = re.compile(
+        r"(\w+) \(\d+ requests\)\n((?:  p\d+(?:99)?:\s+[\d.]+ ms\n|  max:\s+[\d.]+ ms\n)+)"
+    )
+    p50_pat = re.compile(r"\s+p50:\s+([\d.]+) ms")
+    per_client = defaultdict(list)
+    for path in sorted(log_dir.glob("b2_latency-run*.log")):
+        content = path.read_text()
+        for client, body in block_pat.findall(content):
+            m = p50_pat.search(body)
+            if m:
+                per_client[client].append(float(m.group(1)))
+    return {c: statistics.median(v) for c, v in per_client.items() if v}
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("jsonl")
+    p.add_argument(
+        "results",
+        help="Either a results directory (containing b1_results.jsonl + b2_latency-run*.log) "
+        "or a path to a b1 jsonl file (back-compat).",
+    )
     p.add_argument("--out-dir", default="docs")
     args = p.parse_args()
 
-    runs = load(args.jsonl)
+    results_path = Path(args.results)
+    if results_path.is_dir():
+        b1_path = results_path / "b1_results.jsonl"
+        if not b1_path.exists():
+            raise SystemExit(f"no b1_results.jsonl in {results_path}")
+        b2_p50 = load_b2_p50(results_path) or B2_P50_MS_FALLBACK
+    else:
+        b1_path = results_path
+        b2_p50 = B2_P50_MS_FALLBACK
+
+    runs = load(str(b1_path))
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -135,7 +184,7 @@ def main():
         medians_at(runs, 100, "rps"),
         units="RPS",
         title="HTTP requests per second at concurrency=100 — median of 5 runs, AWS c7i.large client.",
-        out_path=out_dir / "launch_throughput.png",
+        out_path=out_dir / "throughput.png",
         label_overrides={"httpx": "httpx*"},
         footnote="* httpx number is anomalously low on this hardware; cause undiagnosed. See launch_report.md.",
     )
@@ -143,13 +192,13 @@ def main():
         medians_at(runs, 100, "peak_rss_mb"),
         units="MB",
         title="Peak resident memory at concurrency=100 — median of 5 runs, AWS c7i.large client.",
-        out_path=out_dir / "launch_memory.png",
+        out_path=out_dir / "memory.png",
     )
     render_bar_chart(
-        B2_P50_MS,
+        b2_p50,
         units="ms",
         title="Median per-request latency (p50) at concurrency=100 — 10,000 requests per client.",
-        out_path=out_dir / "launch_latency.png",
+        out_path=out_dir / "latency.png",
     )
 
 
