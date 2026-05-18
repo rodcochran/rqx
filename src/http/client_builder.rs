@@ -1,18 +1,152 @@
 use pyo3::Bound;
 use pyo3::prelude::PyResult;
-use pyo3::types::{PyAny, PyAnyMethods, PyBool, PyBytes, PyString, PyTuple};
-use reqwest::Client;
-use reqwest::tls::{Certificate, Identity};
+use pyo3::types::PyAny;
+use reqwest::tls::Identity;
+use reqwest::{Client, ClientBuilder};
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::exceptions::*;
+use crate::http::protocol::HttpVersionConfig;
+use crate::http::proxy::parse_proxies;
+use crate::http::tls::{VerifyConfig, parse_identity};
 use crate::timeout::PyTimeout;
+
+/// Wraps reqwest's ClientBuilder with rqx's configuration vocabulary.
+///
+/// Methods are sliced by *what they configure on reqwest*, not by *which
+/// Python argument they came from* — so each concern owns exactly one
+/// set of reqwest setters and there are no inter-method collisions.
+///
+/// All `with_*` methods consume and return `Self` to support chaining.
+pub struct RqxClientBuilder {
+    inner: ClientBuilder,
+}
+
+impl Default for RqxClientBuilder {
+    fn default() -> Self {
+        todo!()
+    }
+}
+
+impl RqxClientBuilder {
+    /// New builder seeded with rqx's baseline:
+    /// - `redirect::Policy::none()` (PyClient layer handles redirects)
+    /// - `cookie_store(true)`
+    pub fn new() -> Self {
+        let http_client_builder = Client::builder()
+            // Explicitly add no redirects at the transport level, as we let the PyClient take care of it
+            .redirect(reqwest::redirect::Policy::none())
+            .cookie_store(true);
+
+        Self {
+            inner: http_client_builder,
+        }
+    }
+
+    /// Configures the connection pool. Owns every `pool_*` setter on reqwest.
+    ///
+    /// Resolves the precedence between `keepalive_expiry` and `timeout.pool`
+    /// (caller passes the latter as `pool_timeout` — `keepalive_expiry`
+    /// wins when both are set).
+    pub fn with_pool(
+        mut self,
+        max_keepalive: Option<u32>,
+        keepalive_expiry: Option<f64>,
+        pool_timeout: Option<f64>,
+    ) -> Self {
+        if let Some(max_keepalive) = max_keepalive {
+            self.inner = self.inner.pool_max_idle_per_host(max_keepalive as usize);
+        }
+
+        if let Some(ke) = keepalive_expiry {
+            self.inner = self.inner.pool_idle_timeout(Duration::from_secs_f64(ke));
+        }
+
+        if let Some(p) = pool_timeout {
+            // Only set if keepalive_expiry didn't already.
+            if keepalive_expiry.is_none() {
+                self.inner = self.inner.pool_idle_timeout(Duration::from_secs_f64(p));
+            }
+        }
+
+        return self;
+    }
+
+    pub fn with_phase_timeouts(mut self, connect: Option<f64>, read: Option<f64>) -> Self {
+        if let Some(c) = connect {
+            self.inner = self.inner.connect_timeout(Duration::from_secs_f64(c));
+        }
+        if let Some(r) = read {
+            self.inner = self.inner.read_timeout(Duration::from_secs_f64(r));
+        }
+        return self;
+    }
+
+    /// HTTP version selection. Takes a pre-validated [`HttpVersionConfig`];
+    /// the (false, false) error case is caught upstream in `from_args`.
+    pub fn with_http_version(mut self, cfg: HttpVersionConfig) -> Self {
+        match cfg {
+            HttpVersionConfig::Negotiate => {
+                // No-op — reqwest's default does ALPN negotiation over TLS.
+            }
+            HttpVersionConfig::Http1Only => {
+                self.inner = self.inner.http1_only();
+            }
+            HttpVersionConfig::Http2Only => {
+                self.inner = self.inner.http2_prior_knowledge();
+            }
+        }
+        self
+    }
+
+    /// TLS: CA verification and client identity.
+    ///
+    /// `verify` is a pre-parsed [`VerifyConfig`] sum type covering the three
+    /// meaningful states of the Python `verify=` arg (default / disable /
+    /// custom CA). `cert` is a pre-parsed reqwest `Identity` for mTLS.
+    pub fn with_tls(mut self, verify: Option<VerifyConfig>, cert: Option<Identity>) -> Self {
+        if let Some(v) = verify {
+            match v {
+                VerifyConfig::Default => {}
+                VerifyConfig::DisableVerification => {
+                    self.inner = self.inner.danger_accept_invalid_certs(true);
+                }
+                VerifyConfig::CustomCa(ca) => {
+                    self.inner = self.inner.add_root_certificate(ca);
+                }
+            }
+        }
+
+        if let Some(c) = cert {
+            self.inner = self.inner.identity(c);
+        }
+
+        return self;
+    }
+
+    /// Proxy configuration. Takes pre-parsed `reqwest::Proxy` values;
+    /// URL parsing and scheme filtering happen upstream in `parse_proxies`.
+    pub fn with_proxy(mut self, proxies: Vec<reqwest::Proxy>) -> Self {
+        for p in proxies {
+            self.inner = self.inner.proxy(p);
+        }
+        self
+    }
+
+    /// Finalize into a reqwest `Client`. Panics if reqwest's build fails
+    /// (matches the original behavior — failure here indicates a logic
+    /// error in the builder chain, not user input).
+    pub fn build(self) -> Client {
+        self.inner.build().expect("Failed to build HTTP client")
+    }
+}
+
 /*
 
 Helper for constructing the HTTP Client
 
 */
+
 pub fn build_http_client(
     max_keepalive_connections: Option<u32>,
     keepalive_expiry: Option<f64>,
@@ -23,138 +157,26 @@ pub fn build_http_client(
     proxy: Option<HashMap<String, String>>,
     timeout: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<Client> {
-    let mut http_client_builder = Client::builder()
-        // Explicitly add no redirects at the transport level, as we let the PyClient take care of it
-        .redirect(reqwest::redirect::Policy::none())
-        .cookie_store(true);
-
-    if let Some(max_keepalive) = max_keepalive_connections {
-        http_client_builder = http_client_builder.pool_max_idle_per_host(max_keepalive as usize);
-    }
-
-    if let Some(ke) = keepalive_expiry {
-        http_client_builder = http_client_builder.pool_idle_timeout(Duration::from_secs_f64(ke));
-    }
-
-    // Phase timeouts. See PyTimeout for semantics. write= is currently a no-op
-    // because reqwest doesn't expose a per-phase write timeout. pool= maps to
-    // pool_idle_timeout, which is close to but not exactly httpx's
-    // pool-acquisition timeout.
-    if let Some(t) = timeout {
-        let parsed = PyTimeout::extract_any(t)?;
-        if let Some(c) = parsed.connect {
-            http_client_builder = http_client_builder.connect_timeout(Duration::from_secs_f64(c));
+    let (connect_timeout, read_timeout, pool_timeout) = match timeout {
+        Some(t) => {
+            let parsed = PyTimeout::extract_any(t)?;
+            (parsed.connect, parsed.read, parsed.pool)
         }
-        if let Some(r) = parsed.read {
-            http_client_builder = http_client_builder.read_timeout(Duration::from_secs_f64(r));
-        }
-        if let Some(p) = parsed.pool {
-            // Only set if keepalive_expiry didn't already.
-            if keepalive_expiry.is_none() {
-                http_client_builder =
-                    http_client_builder.pool_idle_timeout(Duration::from_secs_f64(p));
-            }
-        }
-    }
+        None => (None, None, None),
+    };
 
-    // HTTP version selection:
-    //   - default (both None / both True): ALPN negotiates over TLS (h2 preferred,
-    //     h1.1 fallback). For plain HTTP, reqwest uses h1.1.
-    //   - http1=True, http2=False: HTTP/1.1 only — never upgrade.
-    //   - http1=False, http2=True: HTTP/2 prior knowledge — no fallback. Will
-    //     fail against h1-only servers; use when you know the server speaks h2.
-    //   - both False: error — at least one protocol must be allowed.
-    let allow_h1 = http1.unwrap_or(true);
-    let allow_h2 = http2.unwrap_or(true);
-    match (allow_h1, allow_h2) {
-        (false, false) => {
-            return Err(RqxError::new_err(
-                "at least one of http1, http2 must be true",
-            ));
-        }
-        (true, false) => {
-            http_client_builder = http_client_builder.http1_only();
-        }
-        (false, true) => {
-            http_client_builder = http_client_builder.http2_prior_knowledge();
-        }
-        (true, true) => {
-            // No-op — reqwest's default does ALPN negotiation over TLS.
-        }
-    }
+    let verify_cfg = verify.map(VerifyConfig::from_py_any).transpose()?;
+    let identity = cert.map(parse_identity).transpose()?;
+    let http_version = HttpVersionConfig::from_args(http1, http2)?;
+    let proxies = parse_proxies(proxy)?;
 
-    if let Some(v) = verify {
-        if v.is_instance_of::<PyBool>() {
-            let verify_enabled = v.extract::<bool>().unwrap();
-            if !verify_enabled {
-                http_client_builder = http_client_builder.danger_accept_invalid_certs(true);
-            }
-        } else if v.is_instance_of::<PyString>() {
-            let path = v
-                .extract::<String>()
-                .map_err(|e| RqxError::new_err(format!("failed to parse CA cert path: {e}")))?;
-            let bytes = std::fs::read(&path)
-                .map_err(|e| RqxError::new_err(format!("failed to read CA cert: {e}")))?;
-            let cert = Certificate::from_pem(&bytes)
-                .map_err(|e| RqxError::new_err(format!("failed to construct CA cert: {e}")))?;
+    let client = RqxClientBuilder::new()
+        .with_pool(max_keepalive_connections, keepalive_expiry, pool_timeout)
+        .with_http_version(http_version)
+        .with_phase_timeouts(connect_timeout, read_timeout)
+        .with_proxy(proxies)
+        .with_tls(verify_cfg, identity)
+        .build();
 
-            http_client_builder = http_client_builder.add_root_certificate(cert);
-        }
-    }
-
-    if let Some(c) = cert {
-        if c.is_instance_of::<PyString>() {
-            let path = c
-                .extract::<String>()
-                .map_err(|e| RqxError::new_err(format!("failed to parse client cert path: {e}")))?;
-            let bytes = std::fs::read(&path)
-                .map_err(|e| RqxError::new_err(format!("failed to read client cert: {e}")))?;
-            let identity = Identity::from_pem(&bytes)
-                .map_err(|e| RqxError::new_err(format!("failed to construct client cert: {e}")))?;
-            http_client_builder = http_client_builder.identity(identity);
-        } else if c.is_instance_of::<PyBytes>() {
-            let bytes: Vec<u8> = c
-                .extract()
-                .map_err(|e| RqxError::new_err(format!("failed to read cert bytes: {e}")))?;
-            let identity = Identity::from_pem(&bytes)
-                .map_err(|e| RqxError::new_err(format!("failed to parse client cert: {e}")))?;
-            http_client_builder = http_client_builder.identity(identity);
-        } else if c.is_instance_of::<PyTuple>() {
-            let tup: (String, String) = c
-                .extract()
-                .map_err(|e| RqxError::new_err(format!("failed to parse cert, key tuple: {e}")))?;
-            let cert_path: String = tup.0;
-            let key_path: String = tup.1;
-            let mut bytes = std::fs::read(&cert_path)
-                .map_err(|e| RqxError::new_err(format!("failed to read {cert_path}: {e}")))?;
-            let mut key_bytes = std::fs::read(&key_path)
-                .map_err(|e| RqxError::new_err(format!("failed to read {key_path}: {e}")))?;
-            bytes.append(&mut key_bytes);
-            let identity = Identity::from_pem(&bytes)
-                .map_err(|e| RqxError::new_err(format!("failed to parse client cert+key: {e}")))?;
-            http_client_builder = http_client_builder.identity(identity);
-        } else {
-            return Err(RqxError::new_err(
-                "cert must be str (path), tuple(str, str) of (cert, key) paths, or bytes (PEM)",
-            ));
-        }
-    }
-
-    if let Some(proxies) = proxy {
-        for (scheme, url) in proxies {
-            let p = match scheme.as_str() {
-                "http" => reqwest::Proxy::http(&url),
-                "https" => reqwest::Proxy::https(&url),
-                _ => continue,
-            }
-            .map_err(|e| RqxError::new_err(format!("invalid proxy: {e}")))?;
-            http_client_builder = http_client_builder.proxy(p);
-        }
-    }
-
-    let http_client = http_client_builder
-        .build()
-        .expect("Failed to build HTTP client");
-
-    return Ok(http_client);
+    Ok(client)
 }
