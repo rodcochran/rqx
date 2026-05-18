@@ -3,10 +3,12 @@
 # extension in release mode, installs the benchmark deps (rqx + httpx +
 # aiohttp), and patches the target benches to point at the remote server.
 #
-# Usage (via the orchestrator): client-setup.sh <SERVER_PRIVATE_IP>
+# Usage (via the orchestrator): client-setup.sh <SERVER_PRIVATE_IP> [REF]
+#   REF: git ref to bench (branch name, tag, or commit SHA). Defaults to main.
 set -euo pipefail
 
-SERVER_IP="${1:?usage: client-setup.sh <SERVER_PRIVATE_IP>}"
+SERVER_IP="${1:?usage: client-setup.sh <SERVER_PRIVATE_IP> [REF]}"
+REF="${2:-main}"
 
 echo "[client-setup] waiting for cloud-init to finish..."
 # `--wait` exits non-zero if cloud-init itself failed (e.g., an apt install
@@ -34,15 +36,22 @@ fi
 export PATH="$HOME/.local/bin:$PATH"
 
 cd "$HOME"
+# `--depth 1 --branch $REF` works for branch names and tags but not arbitrary
+# commit SHAs. If REF is a SHA, fall through to fetch-after-clone.
 if [ ! -d rqx ]; then
-    git clone --depth 1 https://github.com/rodcochran/rqx.git
+    if ! git clone --depth 1 --branch "$REF" https://github.com/rodcochran/rqx.git 2>/dev/null; then
+        echo "[client-setup] shallow clone of $REF failed (probably a SHA); doing full clone + checkout"
+        git clone https://github.com/rodcochran/rqx.git
+        (cd rqx && git checkout "$REF")
+    fi
 else
     # Pull latest so subsequent re-runs pick up bench-script changes you've
-    # pushed to main since the last invocation.
-    (cd rqx && git fetch --depth=1 origin main && git reset --hard origin/main)
+    # pushed since the last invocation.
+    (cd rqx && git fetch origin "$REF" && git reset --hard FETCH_HEAD)
 fi
 
 cd "$HOME/rqx"
+echo "[client-setup] benchmarking $(git rev-parse --short HEAD) ($(git log -1 --pretty=%s))"
 
 # Create venv + install deps if not done
 if [ ! -d .venv ]; then
