@@ -32,7 +32,14 @@ for run in $(seq 1 "$RUNS"); do
                 continue
             fi
             echo "[run $run] $client c=$c" >&2
-            python -u "benchmarks/b1_${client}.py" --c "$c" --run "$run" | tee -a "$OUT"
+            # Tolerate per-client crashes (we've seen httpr SIGABRT at higher
+            # concurrencies). Without this, set -euo pipefail propagates the
+            # failure and kills the whole sweep, losing the runs that would've
+            # succeeded after the crash.
+            if ! python -u "benchmarks/b1_${client}.py" --c "$c" --run "$run" | tee -a "$OUT"; then
+                exit_code=${PIPESTATUS[0]}
+                echo "{\"client\":\"$client\",\"concurrency\":$c,\"run\":$run,\"skipped\":\"crashed_exit_${exit_code}\"}" | tee -a "$OUT"
+            fi
             # cool-down between measurements: lets TIME_WAIT clear, kernel TCP
             # buffers settle, server keepalive timers reset.
             sleep 5
