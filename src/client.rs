@@ -1,4 +1,3 @@
-use http::{HeaderMap, Method};
 use pyo3::Bound;
 use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python, pyclass, pymethods};
 use reqwest::{Request, Response};
@@ -364,44 +363,71 @@ impl Client {
     }
 
     async fn send_handling_redirects(&self, request: Request) -> PyResult<PyResponse> {
+        // Mirrors send_handling_redirects_stream: operate on reqwest::Response
+        // end-to-end through the loop so reading the Location header (and any
+        // intermediate Set-Cookie) requires no GIL acquisition. Only the final
+        // response gets wrapped into PyResponse. See #93.
         let original_method = request.method().clone();
         let original_url = request.url().clone();
         let original_headers = request.headers().clone();
-        let mut current_response = self.transport.handle_request(request).await?;
-        // Capture cookies from the first response before following the redirect
-        // chain — intermediate hops can set cookies we'd otherwise drop.
-        self.accumulate_cookies(&current_response.cookies).await;
 
-        for _ in 1..self.max_redirects {
-            if !(300..400).contains(&current_response.status_code) {
-                return Ok(current_response);
-            }
-            current_response = self
-                .handle_redirect(
-                    &original_url,
-                    &original_method,
-                    &original_headers,
-                    &current_response,
-                )
-                .await?;
-            self.accumulate_cookies(&current_response.cookies).await;
-        }
+        let raise_on_redirect = self
+            .transport
+            .retries
+            .as_ref()
+            .map(|r| r.raise_on_redirect)
+            .unwrap_or(DEFAULT_RAISE_ON_REDIRECT);
 
-        if (300..400).contains(&current_response.status_code) {
-            let raise = self
-                .transport
-                .retries
-                .as_ref()
-                .map(|r| r.raise_on_redirect)
-                .unwrap_or(DEFAULT_RAISE_ON_REDIRECT);
-            if raise {
-                return Err(TooManyRedirects::new_err(format!(
-                    "Exceeded max redirects {}",
-                    self.max_redirects
-                )));
+        let mut current_request = request;
+        let mut redirects_used: u32 = 0;
+        loop {
+            let response = self.transport.send_raw(current_request).await?;
+            let status = response.status().as_u16();
+
+            if !(300..400).contains(&status) {
+                return PyResponse::from_response_async(response).await;
             }
+
+            // Accumulate cookies from this 3xx hop. .cookies() iterates
+            // Set-Cookie headers without consuming the body.
+            let cookies_map: HashMap<String, String> = response
+                .cookies()
+                .map(|c| (c.name().to_string(), c.value().to_string()))
+                .collect();
+            self.accumulate_cookies(&cookies_map).await;
+
+            if redirects_used + 1 >= self.max_redirects {
+                if raise_on_redirect {
+                    return Err(TooManyRedirects::new_err(format!(
+                        "Exceeded max redirects {}",
+                        self.max_redirects
+                    )));
+                }
+                return PyResponse::from_response_async(response).await;
+            }
+
+            let location = response
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .map(String::from)
+                .ok_or_else(|| RqxError::new_err("3xx response missing Location header"))?;
+
+            // Drain the 3xx body to release the connection back to the pool.
+            let _ = response.bytes().await;
+
+            let new_url = determine_redirect_url(&original_url, &location)
+                .map_err(|e| RqxError::new_err(format!("Error parsing url from redirect: {e}")))?;
+            let new_method = determine_redirect_method(&original_method, status);
+            current_request = build_redirect_request(
+                self.transport.client(),
+                new_method,
+                new_url,
+                &original_headers,
+            );
+
+            redirects_used += 1;
         }
-        Ok(current_response)
     }
 
     async fn send_handling_redirects_stream(&self, request: Request) -> PyResult<Response> {
@@ -466,36 +492,6 @@ impl Client {
         }
     }
 
-    async fn handle_redirect(
-        &self,
-        original_url: &Url,
-        original_method: &Method,
-        original_headers: &HeaderMap,
-        resp: &PyResponse,
-    ) -> PyResult<PyResponse> {
-        // PyResponse.headers is a Py<PyHeaders>, which requires the GIL to read.
-        // Python::attach acquires it briefly to pull the Location string out.
-        // See #93 — this path is a candidate for elimination by mirroring the
-        // stream-redirect design (operate on reqwest::Response end-to-end).
-        let location = Python::attach(|py| {
-            resp.headers
-                .borrow(py)
-                .get_first("location")
-                .map(String::from)
-        })
-        .ok_or_else(|| RqxError::new_err("3xx response missing Location header"))?;
-        let new_url = determine_redirect_url(original_url, &location)
-            .map_err(|e| RqxError::new_err(format!("Error parsing url from redirect: {e}")))?;
-
-        let new_method = determine_redirect_method(original_method, resp.status_code);
-        let current_request = build_redirect_request(
-            self.transport.client(),
-            new_method,
-            new_url,
-            original_headers,
-        );
-        self.transport.handle_request(current_request).await
-    }
 }
 
 // ────────────────────────────────────────────────────────────────────────
