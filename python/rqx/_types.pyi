@@ -184,7 +184,7 @@ class PyResponse:
 
 class PyStreamResponse:
     status_code: int
-    headers: dict[str, str]
+    headers: PyHeaders
     url: str
     elapsed: float
     num_retries: int
@@ -216,7 +216,7 @@ class PyStreamResponse:
 
 class PyAsyncStreamResponse:
     status_code: int
-    headers: dict[str, str]
+    headers: PyHeaders
     url: str
     elapsed: float
     num_retries: int
@@ -236,7 +236,7 @@ class PyAsyncStreamResponse:
     def is_server_error(self) -> bool: ...
     @property
     def is_error(self) -> bool: ...
-    def iter_bytes(self, chunk_size: int = 8192) -> AsyncIterator[bytes]: ...
+    def aiter_bytes(self, chunk_size: int = 8192) -> AsyncIterator[bytes]: ...
     async def __aenter__(self) -> PyAsyncStreamResponse: ...
     async def __aexit__(
         self,

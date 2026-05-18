@@ -290,7 +290,7 @@ impl PyAsyncStreamResponse {
     /// delivers from the network. See PyStreamResponse::iter_bytes for the
     /// full explanation.
     #[pyo3(signature = (chunk_size=8192))]
-    fn iter_bytes(&mut self, chunk_size: u32) -> PyResult<PyAsyncByteIterator> {
+    fn aiter_bytes(&mut self, chunk_size: u32) -> PyResult<PyAsyncByteIterator> {
         let response = self.response.take()
             .ok_or_else(|| RqxError::new_err("response already consumed"))?;
         Ok(
