@@ -183,7 +183,16 @@ impl Client {
         timeout: f64,
     ) -> PyResult<PyResponse> {
         self.request(
-            "GET", url, None, None, None, params, headers, auth, follow_redirects, timeout,
+            "GET",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
         )
         .await
     }
@@ -198,7 +207,16 @@ impl Client {
         timeout: f64,
     ) -> PyResult<PyResponse> {
         self.request(
-            "OPTIONS", url, None, None, None, params, headers, auth, follow_redirects, timeout,
+            "OPTIONS",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
         )
         .await
     }
@@ -213,7 +231,16 @@ impl Client {
         timeout: f64,
     ) -> PyResult<PyResponse> {
         self.request(
-            "HEAD", url, None, None, None, params, headers, auth, follow_redirects, timeout,
+            "HEAD",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
         )
         .await
     }
@@ -228,7 +255,16 @@ impl Client {
         timeout: f64,
     ) -> PyResult<PyResponse> {
         self.request(
-            "DELETE", url, None, None, None, params, headers, auth, follow_redirects, timeout,
+            "DELETE",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
         )
         .await
     }
@@ -246,7 +282,16 @@ impl Client {
         timeout: f64,
     ) -> PyResult<PyResponse> {
         self.request(
-            "POST", url, content, data, json, params, headers, auth, follow_redirects, timeout,
+            "POST",
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
         )
         .await
     }
@@ -264,7 +309,16 @@ impl Client {
         timeout: f64,
     ) -> PyResult<PyResponse> {
         self.request(
-            "PUT", url, content, data, json, params, headers, auth, follow_redirects, timeout,
+            "PUT",
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
         )
         .await
     }
@@ -282,7 +336,16 @@ impl Client {
         timeout: f64,
     ) -> PyResult<PyResponse> {
         self.request(
-            "PATCH", url, content, data, json, params, headers, auth, follow_redirects, timeout,
+            "PATCH",
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
         )
         .await
     }
