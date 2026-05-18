@@ -80,6 +80,10 @@ impl Transport {
 
     /// The retry state machine.
     async fn send_with_retries(&self, request: Request) -> PyResult<PyResponse> {
+        // Operates on raw reqwest::Response throughout — reading status and
+        // retry-after directly from response headers without acquiring the GIL.
+        // PyResponse construction happens only at the final return points.
+        // Mirrors the redirect-loop fix from #93.
         let r = self.retries.as_ref().unwrap();
         let method = request.method().to_string();
         let is_retryable_method = r.allowed_methods.contains(&method);
@@ -89,7 +93,7 @@ impl Transport {
 
         let mut num_retries: i32 = 0;
         let mut retry_history: Vec<(String, f64)> = Vec::new();
-        let mut current_response: Option<PyResponse> = None;
+        let mut current_response: Option<Response> = None;
         let mut request_copy: Request;
 
         let start_time = Instant::now();
@@ -108,13 +112,11 @@ impl Transport {
                 let retry_after: f32 = if respect_retry {
                     current_response
                         .as_ref()
-                        .and_then(|r| {
-                            Python::attach(|py| {
-                                r.headers
-                                    .borrow(py)
-                                    .get_first("retry-after")
-                                    .map(String::from)
-                            })
+                        .and_then(|resp| {
+                            resp.headers()
+                                .get("retry-after")
+                                .and_then(|v| v.to_str().ok())
+                                .map(String::from)
                         })
                         .and_then(|v| v.parse::<f32>().ok())
                         .unwrap_or(0.0)
@@ -136,21 +138,38 @@ impl Transport {
                 tokio::time::sleep(Duration::from_secs_f32(backoff_time)).await
             }
 
+            // Drain the previous attempt's body to release the connection back
+            // to the pool before issuing the next request. Required because we
+            // hold raw Response across iterations; PyResponse wrapping would
+            // have drained implicitly via response.bytes().await.
+            if let Some(old) = current_response.take() {
+                let _ = old.bytes().await;
+            }
+
             request_copy = request
                 .try_clone()
                 .ok_or_else(|| RqxError::new_err("Streaming request bodies cannot be retried"))?;
 
             let attempt_start = Instant::now();
-            match self.send(request_copy).await {
+            match self.send_raw(request_copy).await {
                 Ok(resp) => {
                     if !is_retryable_method {
-                        return Ok(resp);
+                        return PyResponse::from_response_async(resp).await;
                     }
 
+                    let status = resp.status().as_u16();
                     let attempt_elapsed = attempt_start.elapsed().as_millis() as f64;
                     if attempt > 0 {
-                        retry_history.push((resp.status_code.to_string(), attempt_elapsed));
+                        retry_history.push((status.to_string(), attempt_elapsed));
                     }
+
+                    if !r.status_forcelist.contains(&status) {
+                        let mut response = PyResponse::from_response_async(resp).await?;
+                        response.num_retries = num_retries;
+                        response.retry_history = retry_history;
+                        return Ok(response);
+                    }
+
                     current_response = Some(resp);
                 }
                 Err(e) => {
@@ -158,38 +177,31 @@ impl Transport {
                         return Err(e);
                     }
                     let attempt_elapsed = attempt_start.elapsed().as_millis() as f64;
-                    current_response = None;
                     if attempt > 0 {
                         retry_history.push((format!("{}", e), attempt_elapsed));
                     }
-                }
-            }
-
-            if let Some(cr) = current_response.as_ref() {
-                if !r.status_forcelist.contains(&cr.status_code) {
-                    let mut resp = current_response.unwrap();
-                    resp.num_retries = num_retries;
-                    resp.retry_history = retry_history;
-                    return Ok(resp);
+                    current_response = None;
                 }
             }
         }
 
         match current_response {
-            Some(mut cr) => {
+            Some(cr) => {
                 // When status_forcelist matched and retries were exhausted:
                 // raise_on_status=true (default) → raise MaxRetriesExceeded
                 // raise_on_status=false → return the failing response so the
                 //   caller can inspect status_code / headers / body.
-                if r.status_forcelist.contains(&cr.status_code) && r.raise_on_status {
+                let status = cr.status().as_u16();
+                if r.status_forcelist.contains(&status) && r.raise_on_status {
                     return Err(MaxRetriesExceeded::new_err(format!(
                         "max retries exceeded: {}",
                         r.total
                     )));
                 }
-                cr.num_retries = num_retries;
-                cr.retry_history = retry_history;
-                Ok(cr)
+                let mut response = PyResponse::from_response_async(cr).await?;
+                response.num_retries = num_retries;
+                response.retry_history = retry_history;
+                Ok(response)
             }
             None => Err(MaxRetriesExceeded::new_err(format!(
                 "max retries exceeded: {}",
