@@ -4,30 +4,22 @@ use url::Url;
 use http::{Method, HeaderMap};
 use reqwest::{Client, Request};
 use pyo3::exceptions::{PyValueError};
-use pyo3::prelude::{
-    PyAny,
-    PyResult,
-};
-use pyo3::Bound;
+use pyo3::prelude::PyResult;
 
 use super::exceptions::*;
-use super::py_json::{py_to_value};
 
 
 pub fn build_client_request(
     http_client: &Client,
-    // py: Python<'_>, 
-    method: &str, 
-    url: &str, 
+    method: &str,
+    url: &str,
     content: Option<&[u8]>,
     data: Option<HashMap<String, String>>,
-    // files: &Bound<'_, PyDict>,
-    json: Option<&Bound<'_, PyAny>>,
+    json: Option<&serde_json::Value>,
     params: Option<HashMap<String, String>>,
     headers: Option<HashMap<String, String>>,
-    // cookies: &Bound<'_, PyDict>,
     auth: Option<(String, String)>,
-    timeout: Option<f64>,
+    timeout: f64,
 ) -> PyResult<Request> {
     let mut builder = http_client
         .request(Method::from_bytes(method.as_bytes()).unwrap(), url);
@@ -36,59 +28,44 @@ pub fn build_client_request(
         .into_iter()
         .filter(|b| *b)
         .count();
-    
+
     if count > 1 {
         return Err(PyValueError::new_err(
             "Only one of content, data, or json may be set",
         ));
     }
 
-    
     if let Some(c) = content {
-        builder = builder
-            .body(c.to_vec())
+        builder = builder.body(c.to_vec())
     };
 
     if let Some(d) = data {
-        builder = builder
-            .form(&d)
+        builder = builder.form(&d)
     }
 
     if let Some(j) = json {
-        builder = builder
-            .json(&py_to_value(
-                // py, 
-                j
-            ))
+        builder = builder.json(j)
     };
 
     if let Some(p) = params {
-        builder = builder
-            .query(&p)
+        builder = builder.query(&p)
     };
-    
+
     if let Some(h) = headers {
-        builder = builder
-            .headers((&h).try_into().expect("valid headers"))
+        builder = builder.headers((&h).try_into().expect("valid headers"))
     };
 
     if let Some(a) = auth {
-        builder = builder
-            .basic_auth(a.0, Some(a.1))
+        builder = builder.basic_auth(a.0, Some(a.1))
     }
 
-    if let Some(t) = timeout {
-        builder = builder.timeout(Duration::from_secs_f64(t))
-    };
+    builder = builder.timeout(Duration::from_secs_f64(timeout));
 
     let request = builder
         .build()
-        .map_err(|e| {
-            RqxError::new_err(format!("Failed to build request: {e}"))
-        })?;
+        .map_err(|e| RqxError::new_err(format!("Failed to build request: {e}")))?;
 
-    return Ok(request)
-
+    return Ok(request);
 }
 
 
