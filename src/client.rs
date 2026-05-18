@@ -44,6 +44,9 @@ pub struct Client {
     max_redirects: u32,
     base_url: Option<Url>,
     cookies: Arc<TokioMutex<HashMap<String, String>>>,
+    /// Client-level default bearer token. Per-request `auth_bearer=`
+    /// overrides this when provided.
+    auth_bearer: Option<String>,
 }
 
 impl Client {
@@ -53,6 +56,7 @@ impl Client {
         follow_redirects: bool,
         max_redirects: u32,
         base_url: Option<Url>,
+        auth_bearer: Option<String>,
     ) -> Self {
         Self {
             transport,
@@ -61,6 +65,7 @@ impl Client {
             max_redirects,
             base_url,
             cookies: Arc::new(TokioMutex::new(HashMap::new())),
+            auth_bearer,
         }
     }
 
@@ -89,10 +94,21 @@ impl Client {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
         let start_time = Instant::now();
+
+        // Resolve bearer: per-request override wins; otherwise fall back to
+        // the client-level default. Then enforce the basic-vs-bearer collision
+        // rule against the effective values that would actually be applied.
+        let bearer = auth_bearer.or_else(|| self.auth_bearer.clone());
+        if auth.is_some() && bearer.is_some() {
+            return Err(RqxError::new_err(
+                "Cannot specify both auth= (basic) and auth_bearer= on the same request",
+            ));
+        }
 
         let resolved_url = resolve_url(self.base_url.as_ref(), url)?;
         let request = build_client_request(
@@ -105,6 +121,7 @@ impl Client {
             params,
             headers,
             auth,
+            bearer.as_deref(),
             timeout,
         )?;
 
@@ -132,12 +149,20 @@ impl Client {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<(Response, f64)> {
         // Returns (response, elapsed_secs) — the pyclass wraps the Response
         // into PyStreamResponse / PyAsyncStreamResponse and sets elapsed.
         let start_time = Instant::now();
+
+        let bearer = auth_bearer.or_else(|| self.auth_bearer.clone());
+        if auth.is_some() && bearer.is_some() {
+            return Err(RqxError::new_err(
+                "Cannot specify both auth= (basic) and auth_bearer= on the same request",
+            ));
+        }
 
         let resolved_url = resolve_url(self.base_url.as_ref(), url)?;
         let request = build_client_request(
@@ -150,6 +175,7 @@ impl Client {
             params,
             headers,
             auth,
+            bearer.as_deref(),
             timeout,
         )?;
 
@@ -179,6 +205,7 @@ impl Client {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
@@ -191,6 +218,7 @@ impl Client {
             params,
             headers,
             auth,
+            auth_bearer,
             follow_redirects,
             timeout,
         )
@@ -203,6 +231,7 @@ impl Client {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
@@ -215,6 +244,7 @@ impl Client {
             params,
             headers,
             auth,
+            auth_bearer,
             follow_redirects,
             timeout,
         )
@@ -227,6 +257,7 @@ impl Client {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
@@ -239,6 +270,7 @@ impl Client {
             params,
             headers,
             auth,
+            auth_bearer,
             follow_redirects,
             timeout,
         )
@@ -251,6 +283,7 @@ impl Client {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
@@ -263,6 +296,7 @@ impl Client {
             params,
             headers,
             auth,
+            auth_bearer,
             follow_redirects,
             timeout,
         )
@@ -278,6 +312,7 @@ impl Client {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
@@ -290,6 +325,7 @@ impl Client {
             params,
             headers,
             auth,
+            auth_bearer,
             follow_redirects,
             timeout,
         )
@@ -305,6 +341,7 @@ impl Client {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
@@ -317,6 +354,7 @@ impl Client {
             params,
             headers,
             auth,
+            auth_bearer,
             follow_redirects,
             timeout,
         )
@@ -332,6 +370,7 @@ impl Client {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
@@ -344,6 +383,7 @@ impl Client {
             params,
             headers,
             auth,
+            auth_bearer,
             follow_redirects,
             timeout,
         )
@@ -449,7 +489,7 @@ pub struct PyClient {
 #[pymethods]
 impl PyClient {
     #[new]
-    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, base_url=None, transport=None))]
+    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, base_url=None, auth_bearer=None, transport=None))]
     fn __new__(
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
@@ -457,6 +497,7 @@ impl PyClient {
         follow_redirects: Option<bool>,
         max_redirects: Option<u32>,
         base_url: Option<&str>,
+        auth_bearer: Option<String>,
         transport: Option<PyRef<'_, HTTPTransport>>,
     ) -> PyResult<Self> {
         let timeout_secs = PyTimeout::resolve_request_timeout(timeout, DEFAULT_TIMEOUT)?;
@@ -482,6 +523,7 @@ impl PyClient {
                 follow,
                 max_r,
                 parsed_base_url,
+                auth_bearer,
             ),
         })
     }
@@ -496,7 +538,7 @@ impl PyClient {
         self.inner.cookies_snapshot()
     }
 
-    #[pyo3(signature = (method, url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (method, url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn request(
         &self,
         py: Python<'_>,
@@ -508,6 +550,7 @@ impl PyClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
@@ -524,13 +567,14 @@ impl PyClient {
                 params,
                 headers,
                 auth,
+                auth_bearer,
                 follow_redirects,
                 timeout_f64,
             ),
         )
     }
 
-    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn get(
         &self,
         py: Python<'_>,
@@ -538,6 +582,7 @@ impl PyClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
@@ -545,11 +590,11 @@ impl PyClient {
         block_on_inner(
             py,
             self.inner
-                .get(url, params, headers, auth, follow_redirects, t),
+                .get(url, params, headers, auth, auth_bearer, follow_redirects, t),
         )
     }
 
-    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn options(
         &self,
         py: Python<'_>,
@@ -557,6 +602,7 @@ impl PyClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
@@ -564,11 +610,11 @@ impl PyClient {
         block_on_inner(
             py,
             self.inner
-                .options(url, params, headers, auth, follow_redirects, t),
+                .options(url, params, headers, auth, auth_bearer, follow_redirects, t),
         )
     }
 
-    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn head(
         &self,
         py: Python<'_>,
@@ -576,6 +622,7 @@ impl PyClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
@@ -583,11 +630,11 @@ impl PyClient {
         block_on_inner(
             py,
             self.inner
-                .head(url, params, headers, auth, follow_redirects, t),
+                .head(url, params, headers, auth, auth_bearer, follow_redirects, t),
         )
     }
 
-    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn delete(
         &self,
         py: Python<'_>,
@@ -595,6 +642,7 @@ impl PyClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
@@ -602,11 +650,11 @@ impl PyClient {
         block_on_inner(
             py,
             self.inner
-                .delete(url, params, headers, auth, follow_redirects, t),
+                .delete(url, params, headers, auth, auth_bearer, follow_redirects, t),
         )
     }
 
-    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn post(
         &self,
         py: Python<'_>,
@@ -617,6 +665,7 @@ impl PyClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
@@ -632,13 +681,14 @@ impl PyClient {
                 params,
                 headers,
                 auth,
+                auth_bearer,
                 follow_redirects,
                 t,
             ),
         )
     }
 
-    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn put(
         &self,
         py: Python<'_>,
@@ -649,6 +699,7 @@ impl PyClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
@@ -664,13 +715,14 @@ impl PyClient {
                 params,
                 headers,
                 auth,
+                auth_bearer,
                 follow_redirects,
                 t,
             ),
         )
     }
 
-    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn patch(
         &self,
         py: Python<'_>,
@@ -681,6 +733,7 @@ impl PyClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
@@ -696,13 +749,14 @@ impl PyClient {
                 params,
                 headers,
                 auth,
+                auth_bearer,
                 follow_redirects,
                 t,
             ),
         )
     }
 
-    #[pyo3(signature = (method, url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (method, url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn stream(
         &self,
         py: Python<'_>,
@@ -714,6 +768,7 @@ impl PyClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyStreamResponse> {
@@ -730,6 +785,7 @@ impl PyClient {
                 params,
                 headers,
                 auth,
+                auth_bearer,
                 follow_redirects,
                 t,
             ),
@@ -766,7 +822,7 @@ pub struct PyAsyncClient {
 #[pymethods]
 impl PyAsyncClient {
     #[new]
-    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, base_url=None, transport=None))]
+    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, base_url=None, auth_bearer=None, transport=None))]
     fn __new__(
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
@@ -774,6 +830,7 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
         max_redirects: Option<u32>,
         base_url: Option<&str>,
+        auth_bearer: Option<String>,
         transport: Option<PyRef<'_, AsyncHTTPTransport>>,
     ) -> PyResult<Self> {
         let timeout_secs = PyTimeout::resolve_request_timeout(timeout, DEFAULT_TIMEOUT)?;
@@ -799,6 +856,7 @@ impl PyAsyncClient {
                 follow,
                 max_r,
                 parsed_base_url,
+                auth_bearer,
             ),
         })
     }
@@ -813,7 +871,7 @@ impl PyAsyncClient {
         self.inner.cookies_snapshot()
     }
 
-    #[pyo3(signature = (method, url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (method, url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn request<'a>(
         &self,
         py: Python<'a>,
@@ -825,6 +883,7 @@ impl PyAsyncClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
@@ -845,6 +904,7 @@ impl PyAsyncClient {
                     params,
                     headers,
                     auth,
+                    auth_bearer,
                     follow_redirects,
                     t,
                 )
@@ -852,7 +912,7 @@ impl PyAsyncClient {
         })
     }
 
-    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn get<'a>(
         &self,
         py: Python<'a>,
@@ -860,6 +920,7 @@ impl PyAsyncClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
@@ -868,12 +929,12 @@ impl PyAsyncClient {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .get(&url, params, headers, auth, follow_redirects, t)
+                .get(&url, params, headers, auth, auth_bearer, follow_redirects, t)
                 .await
         })
     }
 
-    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn options<'a>(
         &self,
         py: Python<'a>,
@@ -881,6 +942,7 @@ impl PyAsyncClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
@@ -889,12 +951,12 @@ impl PyAsyncClient {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .options(&url, params, headers, auth, follow_redirects, t)
+                .options(&url, params, headers, auth, auth_bearer, follow_redirects, t)
                 .await
         })
     }
 
-    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn head<'a>(
         &self,
         py: Python<'a>,
@@ -902,6 +964,7 @@ impl PyAsyncClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
@@ -910,12 +973,12 @@ impl PyAsyncClient {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .head(&url, params, headers, auth, follow_redirects, t)
+                .head(&url, params, headers, auth, auth_bearer, follow_redirects, t)
                 .await
         })
     }
 
-    #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (url, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn delete<'a>(
         &self,
         py: Python<'a>,
@@ -923,6 +986,7 @@ impl PyAsyncClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
@@ -931,12 +995,12 @@ impl PyAsyncClient {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .delete(&url, params, headers, auth, follow_redirects, t)
+                .delete(&url, params, headers, auth, auth_bearer, follow_redirects, t)
                 .await
         })
     }
 
-    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn post<'a>(
         &self,
         py: Python<'a>,
@@ -947,6 +1011,7 @@ impl PyAsyncClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
@@ -965,6 +1030,7 @@ impl PyAsyncClient {
                     params,
                     headers,
                     auth,
+                    auth_bearer,
                     follow_redirects,
                     t,
                 )
@@ -972,7 +1038,7 @@ impl PyAsyncClient {
         })
     }
 
-    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn put<'a>(
         &self,
         py: Python<'a>,
@@ -983,6 +1049,7 @@ impl PyAsyncClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
@@ -1001,6 +1068,7 @@ impl PyAsyncClient {
                     params,
                     headers,
                     auth,
+                    auth_bearer,
                     follow_redirects,
                     t,
                 )
@@ -1008,7 +1076,7 @@ impl PyAsyncClient {
         })
     }
 
-    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn patch<'a>(
         &self,
         py: Python<'a>,
@@ -1019,6 +1087,7 @@ impl PyAsyncClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
@@ -1037,6 +1106,7 @@ impl PyAsyncClient {
                     params,
                     headers,
                     auth,
+                    auth_bearer,
                     follow_redirects,
                     t,
                 )
@@ -1044,7 +1114,7 @@ impl PyAsyncClient {
         })
     }
 
-    #[pyo3(signature = (method, url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
+    #[pyo3(signature = (method, url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn stream<'a>(
         &self,
         py: Python<'a>,
@@ -1056,6 +1126,7 @@ impl PyAsyncClient {
         params: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
         auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
@@ -1076,6 +1147,7 @@ impl PyAsyncClient {
                     params,
                     headers,
                     auth,
+                    auth_bearer,
                     follow_redirects,
                     t,
                 )
