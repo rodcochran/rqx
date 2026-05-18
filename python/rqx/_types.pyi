@@ -304,6 +304,7 @@ class PyClient:
         follow_redirects: bool | None = None,
         max_redirects: int | None = None,
         base_url: str | None = None,
+        auth_bearer: str | None = None,
         transport: HTTPTransport | None = None,
     ) -> None: ...
 
@@ -317,6 +318,7 @@ class PyClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
@@ -327,6 +329,7 @@ class PyClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
@@ -337,6 +340,7 @@ class PyClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
@@ -347,6 +351,7 @@ class PyClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
@@ -360,6 +365,7 @@ class PyClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
@@ -373,6 +379,7 @@ class PyClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
@@ -386,6 +393,7 @@ class PyClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
@@ -396,6 +404,7 @@ class PyClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
@@ -410,6 +419,7 @@ class PyClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyStreamResponse: ...
@@ -441,6 +451,7 @@ class PyAsyncClient:
         follow_redirects: bool | None = None,
         max_redirects: int | None = None,
         base_url: str | None = None,
+        auth_bearer: str | None = None,
         transport: AsyncHTTPTransport | None = None,
     ) -> None: ...
 
@@ -454,6 +465,7 @@ class PyAsyncClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
@@ -464,6 +476,7 @@ class PyAsyncClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
@@ -474,6 +487,7 @@ class PyAsyncClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
@@ -484,6 +498,7 @@ class PyAsyncClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
@@ -497,6 +512,7 @@ class PyAsyncClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
@@ -510,6 +526,7 @@ class PyAsyncClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
@@ -523,6 +540,7 @@ class PyAsyncClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
@@ -533,6 +551,7 @@ class PyAsyncClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
@@ -547,6 +566,7 @@ class PyAsyncClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
+        auth_bearer: str | None = None,
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyAsyncStreamResponse]: ...

@@ -46,6 +46,12 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         path = parsed.path  # e.g. "/flaky/3"
         params = parse_qs(parsed.query)  # e.g. {"request_id": ["abc"]}
 
+        # /echo-auth — echo the request's Authorization header back as JSON.
+        # Used to verify that auth_bearer= sets `Authorization: Bearer <token>`.
+        if path == "/echo-auth":
+            self._echo_auth()
+            return
+
         # Compressed endpoints don't need a request_id.
         if path.startswith("/compressed/"):
             algorithm = path.removeprefix("/compressed/")
@@ -133,6 +139,13 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         path = parsed.path  # e.g. "/flaky/3"
         params = parse_qs(parsed.query)  # e.g. {"request_id": ["abc"]}
 
+        if path == "/echo-auth":
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length > 0:
+                self.rfile.read(content_length)
+            self._echo_auth()
+            return
+
         request_id = params["request_id"][0]
 
         if path == "/reset":
@@ -145,6 +158,53 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
 
         self.send_response(404)
         self.end_headers()
+
+    # PUT/PATCH/DELETE/HEAD/OPTIONS aren't auto-handled by BaseHTTPRequestHandler.
+    # We only need them for /echo-auth coverage in test_auth_bearer.py.
+    def do_PUT(self):
+        self._handle_body_verb_for_echo_auth()
+
+    def do_PATCH(self):
+        self._handle_body_verb_for_echo_auth()
+
+    def do_DELETE(self):
+        self._handle_simple_verb_for_echo_auth()
+
+    def do_HEAD(self):
+        self._handle_simple_verb_for_echo_auth()
+
+    def do_OPTIONS(self):
+        self._handle_simple_verb_for_echo_auth()
+
+    def _handle_body_verb_for_echo_auth(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/echo-auth":
+            self.send_response(404)
+            self.end_headers()
+            return
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > 0:
+            self.rfile.read(content_length)
+        self._echo_auth()
+
+    def _handle_simple_verb_for_echo_auth(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/echo-auth":
+            self.send_response(404)
+            self.end_headers()
+            return
+        self._echo_auth()
+
+    def _echo_auth(self):
+        auth_header = self.headers.get("Authorization", "")
+        body = json.dumps({"authorization": auth_header}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        # HEAD must not include a body.
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     def _reset_connection(self, request_id):
         self.counters[request_id] += 1

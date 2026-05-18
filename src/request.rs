@@ -18,6 +18,7 @@ pub fn build_client_request(
     params: Option<HashMap<String, String>>,
     headers: Option<HashMap<String, String>>,
     auth: Option<(String, String)>,
+    auth_bearer: Option<&str>,
     timeout: f64,
 ) -> PyResult<Request> {
     let mut builder = http_client.request(Method::from_bytes(method.as_bytes()).unwrap(), url);
@@ -55,6 +56,10 @@ pub fn build_client_request(
 
     if let Some(a) = auth {
         builder = builder.basic_auth(a.0, Some(a.1))
+    }
+
+    if let Some(token) = auth_bearer {
+        builder = builder.bearer_auth(token);
     }
 
     builder = builder.timeout(Duration::from_secs_f64(timeout));
