@@ -1,13 +1,12 @@
+use http::{HeaderMap, Method};
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::PyResult;
+use reqwest::{Client, Request};
 use std::collections::HashMap;
 use std::time::Duration;
 use url::Url;
-use http::{Method, HeaderMap};
-use reqwest::{Client, Request};
-use pyo3::exceptions::{PyValueError};
-use pyo3::prelude::PyResult;
 
 use super::exceptions::*;
-
 
 pub fn build_client_request(
     http_client: &Client,
@@ -21,8 +20,7 @@ pub fn build_client_request(
     auth: Option<(String, String)>,
     timeout: f64,
 ) -> PyResult<Request> {
-    let mut builder = http_client
-        .request(Method::from_bytes(method.as_bytes()).unwrap(), url);
+    let mut builder = http_client.request(Method::from_bytes(method.as_bytes()).unwrap(), url);
 
     let count = [content.is_some(), data.is_some(), json.is_some()]
         .into_iter()
@@ -68,19 +66,18 @@ pub fn build_client_request(
     return Ok(request);
 }
 
-
 pub fn build_redirect_request(
     http_client: &Client,
-    method: Method, 
-    url: Url, 
+    method: Method,
+    url: Url,
     headers: &HeaderMap,
 ) -> Request {
-    http_client.request(method, url)
+    http_client
+        .request(method, url)
         .headers(headers.clone())
         .build()
         .unwrap()
 }
-
 
 /// Pick the request method to use when following an HTTP redirect.
 ///
@@ -101,10 +98,7 @@ pub fn build_redirect_request(
 ///     carrying the body forward, so POST→POST via 307 silently becomes
 ///     a body-less POST. Fixing that means threading the original body
 ///     into `build_redirect_request`.
-pub fn determine_redirect_method(
-    original_method: &Method,
-    status_code: u16,
-) -> Method {
+pub fn determine_redirect_method(original_method: &Method, status_code: u16) -> Method {
     if (status_code == 302 || status_code == 303) && original_method != Method::HEAD {
         Method::GET
     } else {
@@ -112,9 +106,6 @@ pub fn determine_redirect_method(
     }
 }
 
-pub fn determine_redirect_url(
-    current_url: &Url,
-    location: &str,
-) -> PyResult<Url> {
+pub fn determine_redirect_url(current_url: &Url, location: &str) -> PyResult<Url> {
     Ok(current_url.join(location).unwrap())
 }

@@ -57,7 +57,13 @@ impl PyClient {
         };
 
         Ok(Self {
-            inner: Client::new(transport_inner, timeout_secs, follow, max_r, parsed_base_url),
+            inner: Client::new(
+                transport_inner,
+                timeout_secs,
+                follow,
+                max_r,
+                parsed_base_url,
+            ),
         })
     }
 
@@ -87,12 +93,22 @@ impl PyClient {
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
         let json_value = json.map(py_to_value);
-        let timeout_f64 =
-            PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        block_on_inner(py, self.inner.request(
-            method, url, content, data, json_value, params, headers, auth,
-            follow_redirects, timeout_f64,
-        ))
+        let timeout_f64 = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
+        block_on_inner(
+            py,
+            self.inner.request(
+                method,
+                url,
+                content,
+                data,
+                json_value,
+                params,
+                headers,
+                auth,
+                follow_redirects,
+                timeout_f64,
+            ),
+        )
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
@@ -107,7 +123,11 @@ impl PyClient {
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        block_on_inner(py, self.inner.get(url, params, headers, auth, follow_redirects, t))
+        block_on_inner(
+            py,
+            self.inner
+                .get(url, params, headers, auth, follow_redirects, t),
+        )
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
@@ -122,7 +142,11 @@ impl PyClient {
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        block_on_inner(py, self.inner.options(url, params, headers, auth, follow_redirects, t))
+        block_on_inner(
+            py,
+            self.inner
+                .options(url, params, headers, auth, follow_redirects, t),
+        )
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
@@ -137,7 +161,11 @@ impl PyClient {
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        block_on_inner(py, self.inner.head(url, params, headers, auth, follow_redirects, t))
+        block_on_inner(
+            py,
+            self.inner
+                .head(url, params, headers, auth, follow_redirects, t),
+        )
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
@@ -152,7 +180,11 @@ impl PyClient {
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        block_on_inner(py, self.inner.delete(url, params, headers, auth, follow_redirects, t))
+        block_on_inner(
+            py,
+            self.inner
+                .delete(url, params, headers, auth, follow_redirects, t),
+        )
     }
 
     #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
@@ -171,7 +203,20 @@ impl PyClient {
     ) -> PyResult<PyResponse> {
         let json_value = json.map(py_to_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        block_on_inner(py, self.inner.post(url, content, data, json_value, params, headers, auth, follow_redirects, t))
+        block_on_inner(
+            py,
+            self.inner.post(
+                url,
+                content,
+                data,
+                json_value,
+                params,
+                headers,
+                auth,
+                follow_redirects,
+                t,
+            ),
+        )
     }
 
     #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
@@ -190,7 +235,20 @@ impl PyClient {
     ) -> PyResult<PyResponse> {
         let json_value = json.map(py_to_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        block_on_inner(py, self.inner.put(url, content, data, json_value, params, headers, auth, follow_redirects, t))
+        block_on_inner(
+            py,
+            self.inner.put(
+                url,
+                content,
+                data,
+                json_value,
+                params,
+                headers,
+                auth,
+                follow_redirects,
+                t,
+            ),
+        )
     }
 
     #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
@@ -209,7 +267,20 @@ impl PyClient {
     ) -> PyResult<PyResponse> {
         let json_value = json.map(py_to_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        block_on_inner(py, self.inner.patch(url, content, data, json_value, params, headers, auth, follow_redirects, t))
+        block_on_inner(
+            py,
+            self.inner.patch(
+                url,
+                content,
+                data,
+                json_value,
+                params,
+                headers,
+                auth,
+                follow_redirects,
+                t,
+            ),
+        )
     }
 
     #[pyo3(signature = (method, url, content=None, data=None, json=None, params=None, headers=None, auth=None, follow_redirects=None, timeout=None))]
@@ -229,10 +300,21 @@ impl PyClient {
     ) -> PyResult<PyStreamResponse> {
         let json_value = json.map(py_to_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let (response, elapsed) = block_on_inner(py, self.inner.stream(
-            method, url, content, data, json_value, params, headers, auth,
-            follow_redirects, t,
-        ))?;
+        let (response, elapsed) = block_on_inner(
+            py,
+            self.inner.stream(
+                method,
+                url,
+                content,
+                data,
+                json_value,
+                params,
+                headers,
+                auth,
+                follow_redirects,
+                t,
+            ),
+        )?;
         let mut resp = PyStreamResponse::from_response(response)?;
         resp.elapsed = elapsed;
         Ok(resp)
@@ -292,7 +374,13 @@ impl PyAsyncClient {
         };
 
         Ok(Self {
-            inner: Client::new(transport_inner, timeout_secs, follow, max_r, parsed_base_url),
+            inner: Client::new(
+                transport_inner,
+                timeout_secs,
+                follow,
+                max_r,
+                parsed_base_url,
+            ),
         })
     }
 
@@ -328,10 +416,20 @@ impl PyAsyncClient {
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            inner.request(
-                &method, &url, content.as_deref(), data, json_value, params,
-                headers, auth, follow_redirects, t,
-            ).await
+            inner
+                .request(
+                    &method,
+                    &url,
+                    content.as_deref(),
+                    data,
+                    json_value,
+                    params,
+                    headers,
+                    auth,
+                    follow_redirects,
+                    t,
+                )
+                .await
         })
     }
 
@@ -350,7 +448,9 @@ impl PyAsyncClient {
         let url = url.to_string();
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            inner.get(&url, params, headers, auth, follow_redirects, t).await
+            inner
+                .get(&url, params, headers, auth, follow_redirects, t)
+                .await
         })
     }
 
@@ -369,7 +469,9 @@ impl PyAsyncClient {
         let url = url.to_string();
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            inner.options(&url, params, headers, auth, follow_redirects, t).await
+            inner
+                .options(&url, params, headers, auth, follow_redirects, t)
+                .await
         })
     }
 
@@ -388,7 +490,9 @@ impl PyAsyncClient {
         let url = url.to_string();
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            inner.head(&url, params, headers, auth, follow_redirects, t).await
+            inner
+                .head(&url, params, headers, auth, follow_redirects, t)
+                .await
         })
     }
 
@@ -407,7 +511,9 @@ impl PyAsyncClient {
         let url = url.to_string();
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            inner.delete(&url, params, headers, auth, follow_redirects, t).await
+            inner
+                .delete(&url, params, headers, auth, follow_redirects, t)
+                .await
         })
     }
 
@@ -431,7 +537,19 @@ impl PyAsyncClient {
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            inner.post(&url, content.as_deref(), data, json_value, params, headers, auth, follow_redirects, t).await
+            inner
+                .post(
+                    &url,
+                    content.as_deref(),
+                    data,
+                    json_value,
+                    params,
+                    headers,
+                    auth,
+                    follow_redirects,
+                    t,
+                )
+                .await
         })
     }
 
@@ -455,7 +573,19 @@ impl PyAsyncClient {
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            inner.put(&url, content.as_deref(), data, json_value, params, headers, auth, follow_redirects, t).await
+            inner
+                .put(
+                    &url,
+                    content.as_deref(),
+                    data,
+                    json_value,
+                    params,
+                    headers,
+                    auth,
+                    follow_redirects,
+                    t,
+                )
+                .await
         })
     }
 
@@ -479,7 +609,19 @@ impl PyAsyncClient {
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            inner.patch(&url, content.as_deref(), data, json_value, params, headers, auth, follow_redirects, t).await
+            inner
+                .patch(
+                    &url,
+                    content.as_deref(),
+                    data,
+                    json_value,
+                    params,
+                    headers,
+                    auth,
+                    follow_redirects,
+                    t,
+                )
+                .await
         })
     }
 
@@ -505,10 +647,20 @@ impl PyAsyncClient {
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (response, elapsed) = inner.stream(
-                &method, &url, content.as_deref(), data, json_value, params,
-                headers, auth, follow_redirects, t,
-            ).await?;
+            let (response, elapsed) = inner
+                .stream(
+                    &method,
+                    &url,
+                    content.as_deref(),
+                    data,
+                    json_value,
+                    params,
+                    headers,
+                    auth,
+                    follow_redirects,
+                    t,
+                )
+                .await?;
             let mut resp = PyAsyncStreamResponse::from_response(response)?;
             resp.elapsed = elapsed;
             Ok(resp)

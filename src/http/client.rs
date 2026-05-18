@@ -9,8 +9,8 @@
 // sync side (which calls from outside any tokio runtime).
 
 use http::{HeaderMap, Method};
-use pyo3::prelude::PyResult;
 use pyo3::Python;
+use pyo3::prelude::PyResult;
 use reqwest::{Request, Response};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,8 +21,7 @@ use url::Url;
 use crate::exceptions::*;
 use crate::http::transport::Transport;
 use crate::request::{
-    build_client_request, build_redirect_request, determine_redirect_method,
-    determine_redirect_url,
+    build_client_request, build_redirect_request, determine_redirect_method, determine_redirect_url,
 };
 use crate::response::PyResponse;
 use crate::retry::DEFAULT_RAISE_ON_REDIRECT;
@@ -178,8 +177,19 @@ impl Client {
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
-        self.request("GET", url, None, None, None, params, headers, auth, follow_redirects, timeout)
-            .await
+        self.request(
+            "GET",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
+        .await
     }
 
     pub async fn options(
@@ -191,8 +201,19 @@ impl Client {
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
-        self.request("OPTIONS", url, None, None, None, params, headers, auth, follow_redirects, timeout)
-            .await
+        self.request(
+            "OPTIONS",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
+        .await
     }
 
     pub async fn head(
@@ -204,8 +225,19 @@ impl Client {
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
-        self.request("HEAD", url, None, None, None, params, headers, auth, follow_redirects, timeout)
-            .await
+        self.request(
+            "HEAD",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
+        .await
     }
 
     pub async fn delete(
@@ -217,8 +249,19 @@ impl Client {
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
-        self.request("DELETE", url, None, None, None, params, headers, auth, follow_redirects, timeout)
-            .await
+        self.request(
+            "DELETE",
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
+        .await
     }
 
     pub async fn post(
@@ -233,8 +276,19 @@ impl Client {
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
-        self.request("POST", url, content, data, json, params, headers, auth, follow_redirects, timeout)
-            .await
+        self.request(
+            "POST",
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
+        .await
     }
 
     pub async fn put(
@@ -249,8 +303,19 @@ impl Client {
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
-        self.request("PUT", url, content, data, json, params, headers, auth, follow_redirects, timeout)
-            .await
+        self.request(
+            "PUT",
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
+        .await
     }
 
     pub async fn patch(
@@ -265,8 +330,19 @@ impl Client {
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
-        self.request("PATCH", url, content, data, json, params, headers, auth, follow_redirects, timeout)
-            .await
+        self.request(
+            "PATCH",
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
+        )
+        .await
     }
 
     // ── Internal redirect + cookie helpers ─────────────────────────────
