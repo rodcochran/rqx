@@ -11,6 +11,7 @@
 #   --skip-up         skip pulumi up (assume infra already exists)
 #   --skip-destroy    leave infra running after benches (you handle teardown)
 #   --runs-per-bench N    override default (5)
+#   --ref REF         git ref (branch, tag, or commit SHA) to bench. Default: main.
 #
 # Env (optional):
 #   PULUMI_STACK      stack to use (default: dev)
@@ -22,11 +23,13 @@ set -euo pipefail
 SKIP_UP=false
 SKIP_DESTROY=false
 RUNS_PER_BENCH=5
+REF="main"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --skip-up) SKIP_UP=true; shift ;;
         --skip-destroy) SKIP_DESTROY=true; shift ;;
         --runs-per-bench) RUNS_PER_BENCH="$2"; shift 2 ;;
+        --ref) REF="$2"; shift 2 ;;
         *) echo "unknown flag: $1" >&2; exit 1 ;;
     esac
 done
@@ -65,6 +68,7 @@ log "client public: $CLIENT_IP"
 log "server private: $SERVER_IP_PRIVATE (public: $SERVER_IP_PUBLIC)"
 log "results bucket: $BUCKET"
 log "run id: $RUN_ID"
+log "ref: $REF"
 
 # ---------- wait for SSH ----------
 wait_for_ssh() {
@@ -91,7 +95,7 @@ ssh "${SSH_OPTS[@]}" "ubuntu@$SERVER_IP_PUBLIC" 'bash -s' < "$SCRIPTS_DIR/server
 
 # ---------- client setup ----------
 log "running client-setup.sh on $CLIENT_IP (this is the long pole — ~10-15 min)..."
-ssh "${SSH_OPTS[@]}" "ubuntu@$CLIENT_IP" "bash -s $SERVER_IP_PRIVATE" < "$SCRIPTS_DIR/client-setup.sh"
+ssh "${SSH_OPTS[@]}" "ubuntu@$CLIENT_IP" "bash -s $SERVER_IP_PRIVATE $REF" < "$SCRIPTS_DIR/client-setup.sh"
 
 # ---------- run benches ----------
 log "running benches on $CLIENT_IP (run id: $RUN_ID)..."
