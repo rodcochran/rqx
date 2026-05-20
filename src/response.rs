@@ -97,8 +97,25 @@ impl PyResponse {
     /// json.loads round-trip (which was measurably slower than calling json.loads
     /// directly — see benchmarks/b5_json_parsing.py / docs/improvements.md).
     fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let value: serde_json::Value = serde_json::from_slice(self.content.as_bytes(py))
-            .map_err(|e| RqxError::new_err(format!("invalid JSON response: {e}")))?;
+        let bytes = self.content.as_bytes(py);
+        let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| {
+            let content_type = self
+                .headers
+                .borrow(py)
+                .get_first("content-type")
+                .map(String::from)
+                .unwrap_or_else(|| "<none>".to_string());
+            // Preview the first ~100 bytes of the body, lossy-decoded as UTF-8,
+            // so the user can see what was actually returned (e.g. an HTML error
+            // page or plain-text rejection message) when the body isn't JSON.
+            let preview_len = bytes.len().min(100);
+            let preview = String::from_utf8_lossy(&bytes[..preview_len]);
+            let ellipsis = if bytes.len() > 100 { "..." } else { "" };
+            RqxError::new_err(format!(
+                "response is not JSON (HTTP {}, content-type: {}): {:?}{} ({})",
+                self.status_code, content_type, preview, ellipsis, e
+            ))
+        })?;
         value_to_py(py, value)
     }
 

@@ -11,6 +11,7 @@ use tokio::runtime::Builder as RtBuilder;
 
 mod client;
 mod headers;
+mod http;
 mod py_json;
 mod request;
 mod response;
