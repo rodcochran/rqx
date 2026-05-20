@@ -46,6 +46,12 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         path = parsed.path  # e.g. "/flaky/3"
         params = parse_qs(parsed.query)  # e.g. {"request_id": ["abc"]}
 
+        # /echo-auth — echo the request's Authorization header back as JSON.
+        # Used to verify that auth_bearer= sets `Authorization: Bearer <token>`.
+        if path == "/echo-auth":
+            self._echo_auth()
+            return
+
         # Compressed endpoints don't need a request_id.
         if path.startswith("/compressed/"):
             algorithm = path.removeprefix("/compressed/")
@@ -133,6 +139,13 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         path = parsed.path  # e.g. "/flaky/3"
         params = parse_qs(parsed.query)  # e.g. {"request_id": ["abc"]}
 
+        if path == "/echo-auth":
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length > 0:
+                self.rfile.read(content_length)
+            self._echo_auth()
+            return
+
         request_id = params["request_id"][0]
 
         if path == "/reset":
@@ -145,6 +158,53 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
 
         self.send_response(404)
         self.end_headers()
+
+    # PUT/PATCH/DELETE/HEAD/OPTIONS aren't auto-handled by BaseHTTPRequestHandler.
+    # We only need them for /echo-auth coverage in test_auth_bearer.py.
+    def do_PUT(self):
+        self._handle_body_verb_for_echo_auth()
+
+    def do_PATCH(self):
+        self._handle_body_verb_for_echo_auth()
+
+    def do_DELETE(self):
+        self._handle_simple_verb_for_echo_auth()
+
+    def do_HEAD(self):
+        self._handle_simple_verb_for_echo_auth()
+
+    def do_OPTIONS(self):
+        self._handle_simple_verb_for_echo_auth()
+
+    def _handle_body_verb_for_echo_auth(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/echo-auth":
+            self.send_response(404)
+            self.end_headers()
+            return
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > 0:
+            self.rfile.read(content_length)
+        self._echo_auth()
+
+    def _handle_simple_verb_for_echo_auth(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/echo-auth":
+            self.send_response(404)
+            self.end_headers()
+            return
+        self._echo_auth()
+
+    def _echo_auth(self):
+        auth_header = self.headers.get("Authorization", "")
+        body = json.dumps({"authorization": auth_header}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        # HEAD must not include a body.
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     def _reset_connection(self, request_id):
         self.counters[request_id] += 1
@@ -206,6 +266,137 @@ class MTLSHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
         print("MTLS API returned 200")
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Local HTTP/2-capable server fixture (#78).
+#
+# Replaces test reliance on nghttp2.org/httpbin/ for HTTP/2 negotiation
+# coverage. Uses hypercorn over TLS with ALPN advertising both h2 and
+# http/1.1, so the same fixture covers:
+#   - ALPN-negotiated h2 (no version override on the client)
+#   - explicit h2=True
+#   - explicit h2=False (server falls back to h1)
+#   - h2 prior knowledge (client proposes only h2 via ALPN)
+# ────────────────────────────────────────────────────────────────────────
+
+
+async def _http2_app(scope, receive, send):
+    """Minimal ASGI app that returns 200 + {"ok": true} for any HTTP request.
+
+    The tests only assert on .status_code and .http_version, so we don't need
+    httpbin-style request echoing.
+    """
+    if scope["type"] != "http":
+        return
+    # Drain the request body — some clients won't accept a response until the
+    # request body has been read.
+    while True:
+        msg = await receive()
+        if not msg.get("more_body", False):
+            break
+    body = b'{"ok": true}'
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
+def _free_port():
+    """Pick an unused localhost port. Closes the probe socket before returning,
+    so there's a brief race window before hypercorn re-binds — acceptable for
+    tests."""
+    import socket as _socket
+
+    s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+@pytest.fixture(scope="session")
+def http2_server():
+    """Local HTTPS server speaking both HTTP/2 and HTTP/1.1 via ALPN.
+
+    Replaces nghttp2.org/httpbin/ for HTTP version-negotiation coverage.
+    Returns a base URL like https://localhost:PORT. The TLS cert is the
+    self-signed cert generated by tests/ssl/generate_certs.sh, so callers
+    should pass `verify=False` (or point verify= at tests/ssl/certs/ca-cert.pem).
+    """
+    import asyncio
+
+    from hypercorn.asyncio import serve
+    from hypercorn.config import Config
+
+    # Ensure certs exist (mtls_server uses the same script).
+    with filelock.FileLock(str(LOCK_PATH)):
+        if not (CERTS_DIR / "server-cert.pem").exists():
+            subprocess.run(
+                ["bash", f"{script_dir}/ssl/generate_certs.sh"],
+                check=True,
+            )
+
+    port = _free_port()
+    config = Config()
+    config.bind = [f"127.0.0.1:{port}"]
+    config.certfile = str(CERTS_DIR / "server-cert.pem")
+    config.keyfile = str(CERTS_DIR / "server-key.pem")
+    # ALPN: advertise h2 first, then http/1.1. Clients that propose either
+    # will negotiate to their preferred version.
+    config.alpn_protocols = ["h2", "http/1.1"]
+    # Hypercorn logs every request by default; silence for clean test output.
+    config.accesslog = None
+    config.errorlog = None
+
+    shutdown = threading.Event()
+
+    async def _shutdown_trigger():
+        # Polls the threading.Event so the asyncio loop can react to a
+        # cross-thread shutdown signal without blocking.
+        while not shutdown.is_set():
+            await asyncio.sleep(0.05)
+
+    def _run():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(
+                serve(_http2_app, config, shutdown_trigger=_shutdown_trigger)
+            )
+        finally:
+            loop.close()
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    # Wait for the port to accept connections before yielding — otherwise the
+    # first test races the server startup.
+    import socket as _socket
+
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        try:
+            with _socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                break
+        except OSError:
+            time.sleep(0.05)
+    else:
+        shutdown.set()
+        raise RuntimeError(f"http2_server didn't come up on port {port}")
+
+    try:
+        yield f"https://localhost:{port}"
+    finally:
+        shutdown.set()
+        thread.join(timeout=5.0)
 
 
 @pytest.fixture(scope="session")
