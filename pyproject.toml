@@ -37,6 +37,7 @@ dev = [
     "maturin>=1.12,<2.0",
     "brotli",
     "zstandard",
+    "hypercorn",
 ]
 benchmarks = [
     "numpy",

@@ -15,7 +15,12 @@ if [ ! -d rqx ]; then
 fi
 
 cd "$HOME/rqx/benchmarks"
-docker compose up -d
+# sudo because the ubuntu user's group membership for `docker` isn't always
+# active in the SSH session that runs this script — cloud-init adds ubuntu
+# to the docker group, but the membership only applies to sessions started
+# after that completes, and there's a race with cloud-init final stage on
+# the Noble AMI. sudo sidesteps the issue.
+sudo docker compose up -d
 
 # Wait for nginx to actually serve. Compose returning isn't enough — the
 # container can take a couple seconds to bind the port.
@@ -30,7 +35,7 @@ done
 
 curl -sf http://localhost:8080/json > /dev/null || {
     echo "[server-setup] FATAL: nginx never responded on :8080"
-    docker compose logs nginx | tail -50
+    sudo docker compose logs nginx | tail -50
     exit 1
 }
 
