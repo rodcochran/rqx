@@ -95,3 +95,43 @@ async def test_aclose_then_iter_raises(flaky_server):
         with pytest.raises(rqx.RqxError):
             async for _ in resp.aiter_bytes():
                 pass
+
+
+# ---------------------------------------------------------------------------
+# aiter_text / aiter_lines
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_aiter_text_reassembles_body(flaky_server):
+    async with rqx.AsyncClient() as client:
+        resp = await client.stream("GET", f"{flaky_server}/streamable")
+        parts = [chunk async for chunk in resp.aiter_text()]
+    assert "".join(parts) == '{"streamed": true}'
+
+
+@pytest.mark.asyncio
+async def test_aiter_text_honors_charset(flaky_server):
+    async with rqx.AsyncClient() as client:
+        resp = await client.stream("GET", f"{flaky_server}/latin1")
+        parts = [chunk async for chunk in resp.aiter_text()]
+    assert "".join(parts) == "café"
+
+
+@pytest.mark.asyncio
+async def test_aiter_text_reassembles_multibyte_across_chunks(flaky_server):
+    # Async analog of the sync /bigtext test: the decoder must hold partial
+    # multibyte chars across __anext__ calls.
+    async with rqx.AsyncClient() as client:
+        resp = await client.stream("GET", f"{flaky_server}/bigtext")
+        text = "".join([chunk async for chunk in resp.aiter_text()])
+    assert text == "aé€🙂" * 100_000
+    assert "�" not in text
+
+
+@pytest.mark.asyncio
+async def test_aiter_lines_splits_and_strips_terminators(flaky_server):
+    async with rqx.AsyncClient() as client:
+        resp = await client.stream("GET", f"{flaky_server}/lines")
+        lines = [line async for line in resp.aiter_lines()]
+    assert lines == ["first", "second", "third"]
