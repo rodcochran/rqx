@@ -493,6 +493,7 @@ pub struct PyStreamResponse {
     pub parts: ResponseParts,
     pub(crate) body: Option<Body>,
     pub content_cache: PyOnceLock<Py<PyBytes>>,
+    pub headers_cache: PyOnceLock<Py<PyHeaders>>,
 }
 
 #[pymethods]
@@ -654,9 +655,15 @@ impl PyStreamResponse {
     }
 
     #[getter]
-    fn headers(&self) -> PyHeaders {
-        // can we figure out a way to have this referenced instead of cloned?
-        PyHeaders::from_header_map(self.parts.headers.clone())
+    fn headers(&self, py: Python<'_>) -> PyResult<Py<PyHeaders>> {
+        // Materialized once and cached — sound because a response's headers are
+        // read-only. Repeat access is then a refcount bump, and
+        // `resp.headers is resp.headers` holds (matching httpx).
+        self.headers_cache
+            .get_or_try_init(py, || {
+                Py::new(py, PyHeaders::from_header_map(self.parts.headers.clone()))
+            })
+            .map(|h| h.clone_ref(py))
     }
 
     #[getter]
@@ -753,6 +760,7 @@ impl PyStreamResponse {
             parts: ResponseParts::from_reqwest(&response),
             body: Some(Body::Live(response)),
             content_cache: PyOnceLock::new(),
+            headers_cache: PyOnceLock::new(),
         })
     }
 }
@@ -766,6 +774,7 @@ pub struct PyAsyncStreamResponse {
     // never held across an await or a GIL acquisition.
     pub(crate) body: Arc<Mutex<Option<Body>>>,
     pub content_cache: PyOnceLock<Py<PyBytes>>,
+    pub headers_cache: PyOnceLock<Py<PyHeaders>>,
 }
 
 #[pymethods]
@@ -926,9 +935,15 @@ impl PyAsyncStreamResponse {
     }
 
     #[getter]
-    fn headers(&self) -> PyHeaders {
-        // can we figure out a way to have this referenced instead of cloned?
-        PyHeaders::from_header_map(self.parts.headers.clone())
+    fn headers(&self, py: Python<'_>) -> PyResult<Py<PyHeaders>> {
+        // Materialized once and cached — sound because a response's headers are
+        // read-only. Repeat access is then a refcount bump, and
+        // `resp.headers is resp.headers` holds (matching httpx).
+        self.headers_cache
+            .get_or_try_init(py, || {
+                Py::new(py, PyHeaders::from_header_map(self.parts.headers.clone()))
+            })
+            .map(|h| h.clone_ref(py))
     }
 
     #[getter]
@@ -1039,6 +1054,7 @@ impl PyAsyncStreamResponse {
             parts: ResponseParts::from_reqwest(&response),
             body: Arc::new(Mutex::new(Some(Body::Live(response)))),
             content_cache: PyOnceLock::new(),
+            headers_cache: PyOnceLock::new(),
         })
     }
 }

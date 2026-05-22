@@ -252,3 +252,10 @@ def test_iter_lines_splits_and_strips_terminators(flaky_server):
     with client.stream("GET", f"{flaky_server}/lines") as resp:
         lines = list(resp.iter_lines())
     assert lines == ["first", "second", "third"]
+
+
+def test_stream_headers_are_cached(flaky_server):
+    # Same cached-headers behavior as the buffered response.
+    client = rqx.Client()
+    with client.stream("GET", f"{flaky_server}/streamable") as resp:
+        assert resp.headers is resp.headers

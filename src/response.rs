@@ -121,8 +121,9 @@ impl ResponseParts {
 #[pyclass]
 pub struct PyResponse {
     pub parts: ResponseParts,
-    pub body: Bytes,                            // Rust source of truth
-    pub content_cache: PyOnceLock<Py<PyBytes>>, // .content materialized lazily at the edge
+    pub body: Bytes,                              // Rust source of truth
+    pub content_cache: PyOnceLock<Py<PyBytes>>,   // .content materialized lazily at the edge
+    pub headers_cache: PyOnceLock<Py<PyHeaders>>, // .headers materialized lazily at the edge
 }
 
 #[pymethods]
@@ -133,9 +134,15 @@ impl PyResponse {
     }
 
     #[getter]
-    fn headers(&self) -> PyHeaders {
-        // can we figure out a way to have this referenced instead of cloned?
-        PyHeaders::from_header_map(self.parts.headers.clone())
+    fn headers(&self, py: Python<'_>) -> PyResult<Py<PyHeaders>> {
+        // Materialized once and cached — sound because a response's headers are
+        // read-only. Repeat access is then a refcount bump, and
+        // `resp.headers is resp.headers` holds (matching httpx).
+        self.headers_cache
+            .get_or_try_init(py, || {
+                Py::new(py, PyHeaders::from_header_map(self.parts.headers.clone()))
+            })
+            .map(|h| h.clone_ref(py))
     }
 
     #[getter]
@@ -286,6 +293,7 @@ impl PyResponse {
             parts: ResponseParts::from_reqwest(&response),
             body: response.bytes().await.map_err(map_reqwest_error)?,
             content_cache: PyOnceLock::<Py<PyBytes>>::new(),
+            headers_cache: PyOnceLock::<Py<PyHeaders>>::new(),
         })
     }
 }
