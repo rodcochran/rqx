@@ -155,12 +155,24 @@ impl PyResponse {
         &self.parts.encoding_override
     }
 
+    #[getter]
+    fn encoding(&self) -> String {
+        self.parts.encoding()
+    }
+
     /// Override the encoding used by `.text`. Set to any encoding label
     /// `encoding_rs` understands ("utf-8", "iso-8859-1", "windows-1252", ...).
     /// Invalid labels silently fall back to UTF-8 when decoding.
     #[setter]
     fn set_encoding(&mut self, value: String) {
         self.parts.encoding_override = Some(value);
+    }
+
+    #[getter]
+    fn content(&self, py: Python<'_>) -> Py<PyBytes> {
+        self.content_cache
+            .get_or_init(py, || PyBytes::new(py, &self.body).unbind())
+            .clone_ref(py)
     }
 
     /// Decoded response body as a string.
