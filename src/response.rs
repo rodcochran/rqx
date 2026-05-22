@@ -14,7 +14,6 @@ use reqwest::Response;
 use super::exceptions::{HTTPStatusError, RqxError, map_reqwest_error};
 use super::headers::PyHeaders;
 use super::py_json::value_to_py;
-use super::runtime::RUNTIME;
 
 /*
 Pure Rust implementation of the response parts to avoid overhead with GIL and FFI
@@ -219,6 +218,34 @@ impl PyResponse {
             }
             Err(e) => Err(RqxError::new_err(format!("invalid Status Code: {e}"))),
         }
+    }
+
+    #[getter]
+    fn is_informational(&self) -> bool {
+        self.parts.is_informational()
+    }
+
+    #[getter]
+    fn is_success(&self) -> bool {
+        self.parts.is_success()
+    }
+
+    #[getter]
+    fn is_redirect(&self) -> bool {
+        self.parts.is_redirect()
+    }
+
+    #[getter]
+    fn is_client_error(&self) -> bool {
+        self.parts.is_client_error()
+    }
+    #[getter]
+    fn is_server_error(&self) -> bool {
+        self.parts.is_server_error()
+    }
+    #[getter]
+    fn is_error(&self) -> bool {
+        self.parts.is_error()
     }
 }
 
