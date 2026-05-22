@@ -1,16 +1,20 @@
+use std::collections::HashMap;
+use std::pin::Pin;
+use std::sync::Arc;
+
 use bytes::Bytes;
 use encoding_rs::{Decoder, UTF_8};
 use futures::{Stream, StreamExt};
 use pyo3::Bound;
 use pyo3::prelude::{Py, PyAny, PyRef, PyRefMut, PyResult, Python, pyclass, pymethods};
+use pyo3::sync::PyOnceLock;
+use pyo3::types::PyBytes;
 use reqwest::Response;
-use std::collections::HashMap;
-use std::pin::Pin;
-use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 
 use super::exceptions::*;
 use super::headers::PyHeaders;
+use super::py_json::value_to_py;
 use super::response::ResponseParts;
 use super::runtime::RUNTIME;
 
@@ -185,14 +189,33 @@ impl PyAsyncByteIterator {
 Response object
 */
 
+pub enum Body {
+    Live(reqwest::Response),
+    Buffered(Bytes),
+}
+
 #[pyclass]
 pub struct PyStreamResponse {
     pub parts: ResponseParts,
-    pub(crate) response: Option<reqwest::Response>,
+    pub(crate) body: Option<Body>,
+    pub content_cache: PyOnceLock<Py<PyBytes>>,
 }
 
 #[pymethods]
 impl PyStreamResponse {
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __exit__(
+        &mut self,
+        _exc_type: Option<&Bound<'_, PyAny>>,
+        _exc_value: Option<&Bound<'_, PyAny>>,
+        _traceback: Option<&Bound<'_, PyAny>>,
+    ) {
+        self.body = None; // drops the response, closes connection
+    }
+
     /// Iterate over response bytes as they arrive.
     ///
     /// NOTE: `chunk_size` is currently accepted for API compatibility but is
@@ -203,22 +226,32 @@ impl PyStreamResponse {
     /// we haven't wired up yet.
     #[pyo3(signature = (chunk_size=8192))]
     fn iter_bytes(&mut self, chunk_size: u32) -> PyResult<PyByteIterator> {
-        let response = self
-            .response
-            .take()
-            .ok_or_else(|| RqxError::new_err("response already consumed"))?;
-        Ok(PyByteIterator {
+        let response = match self.body.take() {
+            Some(Body::Live(r)) => r,
+            Some(other) => {
+                // Buffered — restore it, then error
+                self.body = Some(other);
+                return Err(RqxError::new_err("response already read into memory"));
+            }
+            None => return Err(RqxError::new_err("response already consumed or closed")),
+        };
+        return Ok(PyByteIterator {
             stream: Arc::new(TokioMutex::new(Box::pin(response.bytes_stream()))),
             chunk_size,
-        })
+        });
     }
 
     #[pyo3(signature = (chunk_size=8192))]
     fn iter_text(&mut self, chunk_size: u32) -> PyResult<PyTextIterator> {
-        let response = self
-            .response
-            .take()
-            .ok_or_else(|| RqxError::new_err("response already consumed"))?;
+        let response = match self.body.take() {
+            Some(Body::Live(r)) => r,
+            Some(other) => {
+                // Buffered — restore it, then error
+                self.body = Some(other);
+                return Err(RqxError::new_err("response already read into memory"));
+            }
+            None => return Err(RqxError::new_err("response already consumed or closed")),
+        };
 
         // should add an encoding override on the struct.
         let encoding = UTF_8;
@@ -232,20 +265,72 @@ impl PyStreamResponse {
         })
     }
 
-    // #[pyo3(signature = (chunk_size=8192))]
-    // fn iter_bytes(&mut self, chunk_size: u32) -> PyResult<PyByteIterator> {}
-
-    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf
+    fn read(&mut self, py: Python<'_>) -> PyResult<Py<PyBytes>> {
+        match self.body.take() {
+            Some(Body::Live(response)) => {
+                let bytes = py
+                    .detach(|| {
+                        RUNTIME
+                            .get()
+                            .expect("runtime not initialized")
+                            .block_on(async { response.bytes().await })
+                    })
+                    .map_err(map_reqwest_error)?;
+                self.body = Some(Body::Buffered(bytes));
+            }
+            Some(buffered) => self.body = Some(buffered), // already Buffered — restore unchanged
+            None => return Err(RqxError::new_err("response already consumed or closed")),
+        }
+        self.content(py) // single, cached materialization — shared with the .content getter
     }
 
-    fn __exit__(
-        &mut self,
-        _exc_type: Option<&Bound<'_, PyAny>>,
-        _exc_value: Option<&Bound<'_, PyAny>>,
-        _traceback: Option<&Bound<'_, PyAny>>,
-    ) {
-        self.response = None; // drops the response, closes connection
+    #[getter]
+    fn content(&self, py: Python<'_>) -> PyResult<Py<PyBytes>> {
+        match &self.body {
+            Some(Body::Buffered(bytes)) => Ok(self
+                .content_cache
+                .get_or_init(py, || PyBytes::new(py, bytes).unbind())
+                .clone_ref(py)),
+            Some(Body::Live(_)) => Err(RqxError::new_err("response not read; call read() first")),
+            None => Err(RqxError::new_err("response consumed or closed")),
+        }
+    }
+
+    #[getter]
+    fn text(&self) -> PyResult<String> {
+        match &self.body {
+            Some(Body::Buffered(bytes)) => {
+                let encoding = self.parts.resolved_encoding();
+                let (decoded, _, _) = encoding.decode(bytes);
+                Ok(decoded.into_owned())
+            }
+            Some(Body::Live(_)) => Err(RqxError::new_err("response not read; call read() first")),
+            None => Err(RqxError::new_err("response consumed or closed")),
+        }
+    }
+
+    fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        match &self.body {
+            Some(Body::Buffered(bytes)) => {
+                let value = match serde_json::from_slice(bytes) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let content_type = self.parts.content_type().unwrap_or("<none>");
+                        let preview_len = bytes.len().min(100);
+                        let preview = String::from_utf8_lossy(&bytes[..preview_len]);
+                        let ellipsis = if bytes.len() > 100 { "..." } else { "" };
+                        return Err(RqxError::new_err(format!(
+                            "response is not JSON (HTTP {}, content-type: {}): {:?}{} ({})",
+                            self.parts.status_code, content_type, preview, ellipsis, e
+                        )));
+                    }
+                };
+
+                value_to_py(py, value)
+            }
+            Some(Body::Live(_)) => Err(RqxError::new_err("response not read; call read() first")),
+            None => Err(RqxError::new_err("response consumed or closed")),
+        }
     }
 
     #[getter]
@@ -341,7 +426,8 @@ impl PyStreamResponse {
     pub fn from_response(response: Response) -> PyResult<PyStreamResponse> {
         Ok(PyStreamResponse {
             parts: ResponseParts::from_reqwest(&response),
-            response: Some(response),
+            body: Some(Body::Live(response)),
+            content_cache: PyOnceLock::new(),
         })
     }
 }

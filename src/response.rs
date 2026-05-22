@@ -43,7 +43,7 @@ impl ResponseParts {
             .unwrap_or_else(|| "utf-8".to_string())
     }
 
-    fn resolved_encoding(&self) -> &'static Encoding {
+    pub fn resolved_encoding(&self) -> &'static Encoding {
         if let Some(label) = &self.encoding_override {
             return Encoding::for_label(label.as_bytes()).unwrap_or(encoding_rs::UTF_8);
         }
@@ -65,7 +65,7 @@ impl ResponseParts {
         Encoding::for_label(charset.as_str().as_bytes())
     }
 
-    fn content_type(&self) -> Option<&str> {
+    pub fn content_type(&self) -> Option<&str> {
         self.headers.get("content-type")?.to_str().ok()
     }
 
