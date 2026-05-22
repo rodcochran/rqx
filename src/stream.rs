@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use encoding_rs::Decoder;
+use encoding_rs::{Decoder, Encoding};
 use futures::{Stream, StreamExt};
 use pyo3::Bound;
 use pyo3::prelude::{Py, PyAny, PyRef, PyRefMut, PyResult, Python, pyclass, pymethods};
@@ -25,64 +25,30 @@ use super::runtime::RUNTIME;
 /// thread boundaries when shared via `Arc`.
 type ChunkStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
 
-/// Feed bytes through a streaming `Decoder`, returning the decoded text.
-///
-/// `Decoder::decode_to_string` writes into the String's existing spare capacity
-/// and returns `OutputFull` (writing nothing) if there isn't room — it does NOT
-/// grow the String. So reserve the worst-case output up front, then a single
-/// call consumes the whole input.
-fn decode_chunk(decoder: &mut Decoder, src: &[u8], last: bool) -> String {
-    let mut out = String::new();
-    if let Some(needed) = decoder.max_utf8_buffer_length(src.len()) {
-        out.reserve(needed);
+/// A streaming text decoder: an `encoding_rs::Decoder` plus the capacity
+/// handling its `decode_to_string` requires (that method writes into the
+/// String's existing spare capacity and returns `OutputFull`, writing nothing,
+/// if there's none — it does NOT grow the String). Held by the text and line
+/// iterators so both decode identically.
+struct TextDecoder(Decoder);
+
+impl TextDecoder {
+    fn new(encoding: &'static Encoding) -> Self {
+        Self(encoding.new_decoder())
     }
-    // Reserved worst-case capacity above, so this consumes all of `src` in one
-    // call; the (CoderResult, read, replaced) tuple isn't needed.
-    let _ = decoder.decode_to_string(src, &mut out, last);
-    out
-}
 
-/// Characters Python's `str.splitlines()` treats as line boundaries. Mirrored so
-/// `iter_lines` matches httpx (which uses `splitlines`), including SSE's lone
-/// `\r` terminator.
-fn is_line_break(c: char) -> bool {
-    matches!(
-        c,
-        '\n' | '\r'
-            | '\u{0b}'
-            | '\u{0c}'
-            | '\u{1c}'
-            | '\u{1d}'
-            | '\u{1e}'
-            | '\u{85}'
-            | '\u{2028}'
-            | '\u{2029}'
-    )
-}
-
-/// Equivalent of Python `str.splitlines()`: split on the line-break set,
-/// stripping terminators, with `\r\n` treated as a single break and no trailing
-/// empty segment after a final terminator.
-fn split_lines(text: &str) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\r' {
-            if chars.peek() == Some(&'\n') {
-                chars.next(); // consume the LF of a CRLF
-            }
-            lines.push(std::mem::take(&mut current));
-        } else if is_line_break(c) {
-            lines.push(std::mem::take(&mut current));
-        } else {
-            current.push(c);
+    /// Decode one chunk of bytes to text. `last` flushes any partial character
+    /// the decoder is holding at end of stream.
+    fn decode(&mut self, src: &[u8], last: bool) -> String {
+        let mut out = String::new();
+        if let Some(needed) = self.0.max_utf8_buffer_length(src.len()) {
+            out.reserve(needed);
         }
+        // Reserved worst-case capacity above, so this consumes all of `src` in
+        // one call; the (CoderResult, read, replaced) tuple isn't needed.
+        let _ = self.0.decode_to_string(src, &mut out, last);
+        out
     }
-    if !current.is_empty() {
-        lines.push(current);
-    }
-    lines
 }
 
 /// Splits a stream of decoded text into lines, reassembling lines that span
@@ -98,6 +64,48 @@ struct LineDecoder {
 }
 
 impl LineDecoder {
+    /// Characters Python's `str.splitlines()` treats as line boundaries.
+    /// Mirrored so `iter_lines` matches httpx, including SSE's lone `\r`.
+    fn is_line_break(c: char) -> bool {
+        matches!(
+            c,
+            '\n' | '\r'
+                | '\u{0b}'
+                | '\u{0c}'
+                | '\u{1c}'
+                | '\u{1d}'
+                | '\u{1e}'
+                | '\u{85}'
+                | '\u{2028}'
+                | '\u{2029}'
+        )
+    }
+
+    /// Equivalent of Python `str.splitlines()`: split on the line-break set,
+    /// stripping terminators, with `\r\n` treated as a single break and no
+    /// trailing empty segment after a final terminator.
+    fn split_lines(text: &str) -> Vec<String> {
+        let mut lines = Vec::new();
+        let mut current = String::new();
+        let mut chars = text.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\r' {
+                if chars.peek() == Some(&'\n') {
+                    chars.next(); // consume the LF of a CRLF
+                }
+                lines.push(std::mem::take(&mut current));
+            } else if Self::is_line_break(c) {
+                lines.push(std::mem::take(&mut current));
+            } else {
+                current.push(c);
+            }
+        }
+        if !current.is_empty() {
+            lines.push(current);
+        }
+        lines
+    }
+
     fn feed(&mut self, text: &str) -> Vec<String> {
         let mut text = if self.trailing_cr {
             self.trailing_cr = false;
@@ -115,8 +123,8 @@ impl LineDecoder {
             return Vec::new();
         }
 
-        let trailing_newline = text.chars().next_back().is_some_and(is_line_break);
-        let mut lines = split_lines(&text);
+        let trailing_newline = text.chars().next_back().is_some_and(Self::is_line_break);
+        let mut lines = Self::split_lines(&text);
 
         // A single unterminated segment is just more of the partial line.
         if lines.len() == 1 && !trailing_newline {
@@ -204,7 +212,7 @@ struct PyTextIterator {
     // the plumbing is in place when we implement that.
     #[allow(dead_code)]
     chunk_size: u32,
-    decoder: Decoder,
+    decoder: TextDecoder,
     finished: bool,
 }
 
@@ -244,7 +252,7 @@ impl PyTextIterator {
                 // A chunk may complete no character (the decoder holds the
                 // partial bytes), so loop until decoding yields some text.
                 Some(src) => {
-                    let text = decode_chunk(&mut slf.decoder, &src, false);
+                    let text = slf.decoder.decode(&src, false);
                     if !text.is_empty() {
                         return Ok(Some(text));
                     }
@@ -252,7 +260,7 @@ impl PyTextIterator {
                 // End of stream — flush any character the decoder still holds.
                 None => {
                     slf.finished = true;
-                    let text = decode_chunk(&mut slf.decoder, &[], true);
+                    let text = slf.decoder.decode(&[], true);
                     return Ok((!text.is_empty()).then_some(text));
                 }
             }
@@ -265,7 +273,7 @@ struct PyLineIterator {
     stream: Arc<TokioMutex<ChunkStream>>,
     #[allow(dead_code)]
     chunk_size: u32,
-    decoder: Decoder,
+    decoder: TextDecoder,
     lines: LineDecoder,
     // Complete lines decoded from a chunk but not yet yielded — one chunk can
     // produce many lines, but __next__ hands back one at a time.
@@ -309,7 +317,7 @@ impl PyLineIterator {
 
             match chunk {
                 Some(src) => {
-                    let text = decode_chunk(&mut slf.decoder, &src, false);
+                    let text = slf.decoder.decode(&src, false);
                     let lines = slf.lines.feed(&text);
                     slf.pending.extend(lines);
                 }
@@ -317,7 +325,7 @@ impl PyLineIterator {
                     // End of stream: flush the byte decoder, feed any final
                     // text through the line splitter, THEN flush the line
                     // buffer. Both flushes are required, in this order.
-                    let text = decode_chunk(&mut slf.decoder, &[], true);
+                    let text = slf.decoder.decode(&[], true);
                     let lines = slf.lines.feed(&text);
                     slf.pending.extend(lines);
                     if let Some(last) = slf.lines.flush() {
@@ -435,12 +443,10 @@ impl PyStreamResponse {
             None => return Err(RqxError::new_err("response already consumed or closed")),
         };
 
-        let decoder = self.parts.resolved_encoding().new_decoder();
-
         Ok(PyTextIterator {
             stream: Arc::new(TokioMutex::new(Box::pin(response.bytes_stream()))),
             chunk_size,
-            decoder: decoder,
+            decoder: TextDecoder::new(self.parts.resolved_encoding()),
             finished: false,
         })
     }
@@ -458,7 +464,7 @@ impl PyStreamResponse {
         Ok(PyLineIterator {
             stream: Arc::new(TokioMutex::new(Box::pin(response.bytes_stream()))),
             chunk_size,
-            decoder: self.parts.resolved_encoding().new_decoder(),
+            decoder: TextDecoder::new(self.parts.resolved_encoding()),
             lines: LineDecoder::default(),
             pending: VecDeque::new(),
             finished: false,
@@ -783,16 +789,16 @@ impl PyAsyncStreamResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{LineDecoder, split_lines};
+    use super::LineDecoder;
 
     #[test]
     fn split_lines_matches_splitlines() {
-        assert_eq!(split_lines("a\nb"), ["a", "b"]);
-        assert_eq!(split_lines("a\n"), ["a"]); // no trailing empty after a terminator
-        assert_eq!(split_lines("a\n\n"), ["a", ""]);
-        assert!(split_lines("").is_empty());
-        assert_eq!(split_lines("a\r\nb"), ["a", "b"]); // CRLF is a single break
-        assert_eq!(split_lines("a\rb"), ["a", "b"]); // lone CR is a break
+        assert_eq!(LineDecoder::split_lines("a\nb"), ["a", "b"]);
+        assert_eq!(LineDecoder::split_lines("a\n"), ["a"]); // no trailing empty after a terminator
+        assert_eq!(LineDecoder::split_lines("a\n\n"), ["a", ""]);
+        assert!(LineDecoder::split_lines("").is_empty());
+        assert_eq!(LineDecoder::split_lines("a\r\nb"), ["a", "b"]); // CRLF is a single break
+        assert_eq!(LineDecoder::split_lines("a\rb"), ["a", "b"]); // lone CR is a break
     }
 
     #[test]
