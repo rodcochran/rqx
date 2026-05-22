@@ -791,7 +791,7 @@ impl PyClient {
             ),
         )?;
         let mut resp = PyStreamResponse::from_response(response)?;
-        resp.elapsed = elapsed;
+        resp.parts.elapsed = elapsed;
         Ok(resp)
     }
 
@@ -1185,7 +1185,7 @@ impl PyAsyncClient {
                 )
                 .await?;
             let mut resp = PyAsyncStreamResponse::from_response(response)?;
-            resp.elapsed = elapsed;
+            resp.parts.elapsed = elapsed;
             Ok(resp)
         })
     }

@@ -10,6 +10,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 
 use super::exceptions::*;
+use super::headers::PyHeaders;
+use super::response::ResponseParts;
 use super::runtime::RUNTIME;
 
 /// Streaming HTTP body source. `Pin<Box<dyn ...>>` is standard practice for
@@ -185,30 +187,7 @@ Response object
 
 #[pyclass]
 pub struct PyStreamResponse {
-    #[pyo3(get)]
-    pub status_code: u16,
-
-    #[pyo3(get)]
-    pub headers: HashMap<String, String>,
-
-    #[pyo3(get)]
-    pub url: String,
-
-    #[pyo3(get)]
-    pub(crate) elapsed: f64,
-
-    #[pyo3(get)]
-    pub(crate) num_retries: i32,
-
-    #[pyo3(get)]
-    pub(crate) retry_history: Vec<(String, f64)>,
-
-    #[pyo3(get)]
-    pub(crate) http_version: String,
-
-    #[pyo3(get)]
-    pub(crate) cookies: HashMap<String, String>,
-
+    pub parts: ResponseParts,
     pub(crate) response: Option<reqwest::Response>,
 }
 
@@ -269,81 +248,99 @@ impl PyStreamResponse {
         self.response = None; // drops the response, closes connection
     }
 
-    /// `True` for 1xx responses.
+    #[getter]
+    fn status_code(&self) -> u16 {
+        self.parts.status_code
+    }
+
+    #[getter]
+    fn headers(&self) -> PyHeaders {
+        // can we figure out a way to have this referenced instead of cloned?
+        PyHeaders::from_header_map(self.parts.headers.clone())
+    }
+
+    #[getter]
+    fn url(&self) -> &str {
+        &self.parts.url
+    }
+
+    #[getter]
+    fn elapsed(&self) -> f64 {
+        self.parts.elapsed
+    }
+
+    #[getter]
+    fn num_retries(&self) -> u32 {
+        self.parts.num_retries
+    }
+
+    #[getter]
+    fn retry_history(&self) -> &[(String, f64)] {
+        &self.parts.retry_history
+    }
+
+    #[getter]
+    fn http_version(&self) -> &str {
+        &self.parts.http_version
+    }
+
+    #[getter]
+    fn cookies(&self) -> &HashMap<String, String> {
+        &self.parts.cookies
+    }
+
+    #[getter]
+    fn encoding_override(&self) -> &Option<String> {
+        // potential to have return value &Option<str>
+        &self.parts.encoding_override
+    }
+
+    #[getter]
+    fn encoding(&self) -> String {
+        self.parts.encoding()
+    }
+
+    /// Override the encoding used by `.text`. Set to any encoding label
+    /// `encoding_rs` understands ("utf-8", "iso-8859-1", "windows-1252", ...).
+    /// Invalid labels silently fall back to UTF-8 when decoding.
+    #[setter]
+    fn set_encoding(&mut self, value: String) {
+        self.parts.encoding_override = Some(value);
+    }
+
     #[getter]
     fn is_informational(&self) -> bool {
-        (100..200).contains(&self.status_code)
+        self.parts.is_informational()
     }
 
-    /// `True` for 2xx responses.
     #[getter]
     fn is_success(&self) -> bool {
-        (200..300).contains(&self.status_code)
+        self.parts.is_success()
     }
 
-    /// `True` for 3xx responses that carry a `Location` header.
-    ///
-    /// Mirrors httpx: a 3xx without Location (e.g. 304 Not Modified) isn't
-    /// classified as a redirect because nothing can follow it.
     #[getter]
     fn is_redirect(&self) -> bool {
-        (300..400).contains(&self.status_code)
-            && self
-                .headers
-                .keys()
-                .any(|k| k.eq_ignore_ascii_case("location"))
+        self.parts.is_redirect()
     }
 
-    /// `True` for 4xx responses.
     #[getter]
     fn is_client_error(&self) -> bool {
-        (400..500).contains(&self.status_code)
+        self.parts.is_client_error()
     }
-
-    /// `True` for 5xx responses.
     #[getter]
     fn is_server_error(&self) -> bool {
-        (500..600).contains(&self.status_code)
+        self.parts.is_server_error()
     }
-
-    /// `True` for any 4xx or 5xx response.
     #[getter]
     fn is_error(&self) -> bool {
-        (400..600).contains(&self.status_code)
+        self.parts.is_error()
     }
 }
 
 impl PyStreamResponse {
     pub fn from_response(response: Response) -> PyResult<PyStreamResponse> {
-        let status_code = response.status().as_u16();
-
-        let headers = response
-            .headers()
-            .iter()
-            .map(|(k, v)| {
-                (
-                    k.to_string(),
-                    v.to_str().unwrap_or("<non-utf8>").to_string(),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-
-        let url = response.url().as_str().to_owned();
-        let http_version = format!("{:?}", response.version());
-        let cookies: HashMap<String, String> = response
-            .cookies()
-            .map(|c| (c.name().to_string(), c.value().to_string()))
-            .collect();
-
         Ok(PyStreamResponse {
-            status_code: status_code,
-            headers: headers,
-            url: url,
-            elapsed: 0.0,
-            num_retries: 0,
-            retry_history: Vec::new(),
-            http_version: http_version,
-            cookies: cookies,
+            parts: ResponseParts::from_reqwest(&response),
             response: Some(response),
         })
     }
@@ -351,30 +348,7 @@ impl PyStreamResponse {
 
 #[pyclass]
 pub struct PyAsyncStreamResponse {
-    #[pyo3(get)]
-    pub status_code: u16,
-
-    #[pyo3(get)]
-    pub headers: HashMap<String, String>,
-
-    #[pyo3(get)]
-    pub url: String,
-
-    #[pyo3(get)]
-    pub(crate) elapsed: f64,
-
-    #[pyo3(get)]
-    pub(crate) num_retries: i32,
-
-    #[pyo3(get)]
-    pub(crate) retry_history: Vec<(String, f64)>,
-
-    #[pyo3(get)]
-    pub(crate) http_version: String,
-
-    #[pyo3(get)]
-    pub(crate) cookies: HashMap<String, String>,
-
+    pub parts: ResponseParts,
     pub(crate) response: Option<reqwest::Response>,
 }
 
@@ -411,81 +385,99 @@ impl PyAsyncStreamResponse {
         pyo3_async_runtimes::tokio::future_into_py(py, async move { Ok(false) })
     }
 
-    /// `True` for 1xx responses.
+    #[getter]
+    fn status_code(&self) -> u16 {
+        self.parts.status_code
+    }
+
+    #[getter]
+    fn headers(&self) -> PyHeaders {
+        // can we figure out a way to have this referenced instead of cloned?
+        PyHeaders::from_header_map(self.parts.headers.clone())
+    }
+
+    #[getter]
+    fn url(&self) -> &str {
+        &self.parts.url
+    }
+
+    #[getter]
+    fn elapsed(&self) -> f64 {
+        self.parts.elapsed
+    }
+
+    #[getter]
+    fn num_retries(&self) -> u32 {
+        self.parts.num_retries
+    }
+
+    #[getter]
+    fn retry_history(&self) -> &[(String, f64)] {
+        &self.parts.retry_history
+    }
+
+    #[getter]
+    fn http_version(&self) -> &str {
+        &self.parts.http_version
+    }
+
+    #[getter]
+    fn cookies(&self) -> &HashMap<String, String> {
+        &self.parts.cookies
+    }
+
+    #[getter]
+    fn encoding_override(&self) -> &Option<String> {
+        // potential to have return value &Option<str>
+        &self.parts.encoding_override
+    }
+
+    #[getter]
+    fn encoding(&self) -> String {
+        self.parts.encoding()
+    }
+
+    /// Override the encoding used by `.text`. Set to any encoding label
+    /// `encoding_rs` understands ("utf-8", "iso-8859-1", "windows-1252", ...).
+    /// Invalid labels silently fall back to UTF-8 when decoding.
+    #[setter]
+    fn set_encoding(&mut self, value: String) {
+        self.parts.encoding_override = Some(value);
+    }
+
     #[getter]
     fn is_informational(&self) -> bool {
-        (100..200).contains(&self.status_code)
+        self.parts.is_informational()
     }
 
-    /// `True` for 2xx responses.
     #[getter]
     fn is_success(&self) -> bool {
-        (200..300).contains(&self.status_code)
+        self.parts.is_success()
     }
 
-    /// `True` for 3xx responses that carry a `Location` header.
-    ///
-    /// Mirrors httpx: a 3xx without Location (e.g. 304 Not Modified) isn't
-    /// classified as a redirect because nothing can follow it.
     #[getter]
     fn is_redirect(&self) -> bool {
-        (300..400).contains(&self.status_code)
-            && self
-                .headers
-                .keys()
-                .any(|k| k.eq_ignore_ascii_case("location"))
+        self.parts.is_redirect()
     }
 
-    /// `True` for 4xx responses.
     #[getter]
     fn is_client_error(&self) -> bool {
-        (400..500).contains(&self.status_code)
+        self.parts.is_client_error()
     }
-
-    /// `True` for 5xx responses.
     #[getter]
     fn is_server_error(&self) -> bool {
-        (500..600).contains(&self.status_code)
+        self.parts.is_server_error()
     }
-
-    /// `True` for any 4xx or 5xx response.
     #[getter]
     fn is_error(&self) -> bool {
-        (400..600).contains(&self.status_code)
+        self.parts.is_error()
     }
 }
 
 impl PyAsyncStreamResponse {
     pub fn from_response(response: Response) -> PyResult<PyAsyncStreamResponse> {
-        let status_code = response.status().as_u16();
-
-        let headers = response
-            .headers()
-            .iter()
-            .map(|(k, v)| {
-                (
-                    k.to_string(),
-                    v.to_str().unwrap_or("<non-utf8>").to_string(),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-
-        let url = response.url().as_str().to_owned();
-        let http_version = format!("{:?}", response.version());
-        let cookies: HashMap<String, String> = response
-            .cookies()
-            .map(|c| (c.name().to_string(), c.value().to_string()))
-            .collect();
-
         Ok(PyAsyncStreamResponse {
-            status_code: status_code,
-            headers: headers,
-            url: url,
-            elapsed: 0.0,
-            num_retries: 0,
-            retry_history: Vec::new(),
-            http_version: http_version,
-            cookies: cookies,
+            parts: ResponseParts::from_reqwest(&response),
             response: Some(response),
         })
     }

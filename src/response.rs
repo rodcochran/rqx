@@ -34,7 +34,7 @@ pub struct ResponseParts {
 }
 
 impl ResponseParts {
-    fn encoding(&self) -> String {
+    pub fn encoding(&self) -> String {
         if let Some(e) = &self.encoding_override {
             return e.clone();
         }
@@ -73,29 +73,48 @@ impl ResponseParts {
         self.headers.get_all(key).iter().next()
     }
 
-    fn is_informational(&self) -> bool {
+    pub fn is_informational(&self) -> bool {
         (100..200).contains(&self.status_code)
     }
 
-    fn is_success(&self) -> bool {
+    pub fn is_success(&self) -> bool {
         (200..300).contains(&self.status_code)
     }
 
-    fn is_redirect(&self) -> bool {
+    pub fn is_redirect(&self) -> bool {
         (300..400).contains(&self.status_code)
             && self.get_first_header_for_key("location").is_some()
     }
 
-    fn is_client_error(&self) -> bool {
+    pub fn is_client_error(&self) -> bool {
         (400..500).contains(&self.status_code)
     }
 
-    fn is_server_error(&self) -> bool {
+    pub fn is_server_error(&self) -> bool {
         (500..600).contains(&self.status_code)
     }
 
-    fn is_error(&self) -> bool {
+    pub fn is_error(&self) -> bool {
         (400..600).contains(&self.status_code)
+    }
+}
+
+impl ResponseParts {
+    pub fn from_reqwest(response: &Response) -> Self {
+        ResponseParts {
+            status_code: response.status().as_u16(),
+            headers: response.headers().clone(),
+            url: response.url().to_string(),
+            elapsed: 0.0,
+            num_retries: 0,
+            retry_history: Vec::new(),
+            http_version: format!("{:?}", response.version()),
+            cookies: response
+                .cookies()
+                .map(|c| (c.name().to_string(), c.value().to_string()))
+                .collect(),
+            encoding_override: None,
+        }
     }
 }
 
@@ -263,29 +282,9 @@ impl PyResponse {
 
 impl PyResponse {
     pub async fn from_response(response: Response) -> PyResult<PyResponse> {
-        let status_code = response.status().as_u16();
-        let headers = response.headers().clone();
-        let url = response.url().to_string();
-        let http_version = format!("{:?}", response.version());
-        let cookies: HashMap<String, String> = response
-            .cookies()
-            .map(|c| (c.name().to_string(), c.value().to_string()))
-            .collect();
-        let body = response.bytes().await.map_err(map_reqwest_error)?;
-
         Ok(PyResponse {
-            parts: ResponseParts {
-                status_code: status_code,
-                headers: headers,
-                url: url,
-                elapsed: 0.0,
-                num_retries: 0,
-                retry_history: Vec::new(),
-                http_version: http_version,
-                cookies: cookies,
-                encoding_override: None,
-            },
-            body: body,
+            parts: ResponseParts::from_reqwest(&response),
+            body: response.bytes().await.map_err(map_reqwest_error)?,
             content_cache: PyOnceLock::<Py<PyBytes>>::new(),
         })
     }
