@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use encoding_rs::{Decoder, UTF_8};
+use encoding_rs::Decoder;
 use futures::{Stream, StreamExt};
 use pyo3::Bound;
 use pyo3::prelude::{Py, PyAny, PyRef, PyRefMut, PyResult, Python, pyclass, pymethods};
@@ -137,12 +137,21 @@ impl PyTextIterator {
                 }
             };
 
-            // dst gets mutated inside decoder
+            // `decode_to_string` writes into dst's existing spare capacity and
+            // returns OutputFull (writing nothing) if there isn't room — it does
+            // NOT grow the String. Reserve the worst-case output up front so a
+            // single decode call always consumes the whole chunk.
+            if let Some(needed) = slf.decoder.max_utf8_buffer_length(src.len()) {
+                dst.reserve(needed);
+            }
             let _decode_result = slf.decoder.decode_to_string(&src, dst, false);
         }
 
         // Flush decoder
         if slf.finished {
+            if let Some(needed) = slf.decoder.max_utf8_buffer_length(0) {
+                dst.reserve(needed);
+            }
             let _flush_result = slf.decoder.decode_to_string(&[], dst, true);
             if dst.is_empty() {
                 return Ok(None);
@@ -253,9 +262,7 @@ impl PyStreamResponse {
             None => return Err(RqxError::new_err("response already consumed or closed")),
         };
 
-        // should add an encoding override on the struct.
-        let encoding = UTF_8;
-        let decoder = encoding.new_decoder();
+        let decoder = self.parts.resolved_encoding().new_decoder();
 
         Ok(PyTextIterator {
             stream: Arc::new(TokioMutex::new(Box::pin(response.bytes_stream()))),
@@ -436,6 +443,7 @@ impl PyStreamResponse {
 pub struct PyAsyncStreamResponse {
     pub parts: ResponseParts,
     pub(crate) response: Option<reqwest::Response>,
+    pub content_cache: PyOnceLock<Py<PyBytes>>,
 }
 
 #[pymethods]
@@ -565,6 +573,7 @@ impl PyAsyncStreamResponse {
         Ok(PyAsyncStreamResponse {
             parts: ResponseParts::from_reqwest(&response),
             response: Some(response),
+            content_cache: PyOnceLock::new(),
         })
     }
 }
