@@ -222,7 +222,12 @@ impl PyStreamResponse {
         _exc_value: Option<&Bound<'_, PyAny>>,
         _traceback: Option<&Bound<'_, PyAny>>,
     ) {
-        self.body = None; // drops the response, closes connection
+        self.close();
+    }
+
+    fn close(&mut self) {
+        // drops the response, closes connection
+        self.body = None;
     }
 
     /// Iterate over response bytes as they arrive.
@@ -426,6 +431,16 @@ impl PyStreamResponse {
     #[getter]
     fn is_error(&self) -> bool {
         self.parts.is_error()
+    }
+
+    #[getter]
+    fn is_closed(&self) -> bool {
+        self.body.is_none()
+    }
+
+    #[getter]
+    fn is_consumed(&self) -> bool {
+        !matches!(self.body, Some(Body::Live(_)))
     }
 }
 

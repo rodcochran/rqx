@@ -190,3 +190,53 @@ def test_iter_text_reassembles_multibyte_across_chunks(flaky_server):
         text = "".join(resp.iter_text())
     assert text == expected
     assert "�" not in text
+
+
+# ---------------------------------------------------------------------------
+# State machine — is_consumed / is_closed / close
+# ---------------------------------------------------------------------------
+
+
+def test_fresh_stream_not_consumed_not_closed(flaky_server):
+    client = rqx.Client()
+    with client.stream("GET", f"{flaky_server}/streamable") as resp:
+        assert resp.is_consumed is False
+        assert resp.is_closed is False
+
+
+def test_read_consumes_but_does_not_close(flaky_server):
+    client = rqx.Client()
+    with client.stream("GET", f"{flaky_server}/streamable") as resp:
+        resp.read()
+        assert resp.is_consumed is True
+        assert resp.is_closed is False  # buffered — still readable
+
+
+def test_streaming_consumes_and_closes(flaky_server):
+    client = rqx.Client()
+    with client.stream("GET", f"{flaky_server}/streamable") as resp:
+        list(resp.iter_bytes())
+        assert resp.is_consumed is True
+        assert resp.is_closed is True  # streamed off, nothing retained
+
+
+def test_close_then_iter_raises(flaky_server):
+    client = rqx.Client()
+    with client.stream("GET", f"{flaky_server}/streamable") as resp:
+        resp.close()
+        assert resp.is_closed is True
+        with pytest.raises(rqx.RqxError):
+            list(resp.iter_bytes())
+
+
+def test_close_after_read_drops_buffer(flaky_server):
+    # close() sets body = None, which drops the buffer — the deliberate
+    # "close drops everything" choice. .content then errors.
+    client = rqx.Client()
+    with client.stream("GET", f"{flaky_server}/streamable") as resp:
+        resp.read()
+        assert resp.content  # readable while buffered
+        resp.close()
+        assert resp.is_closed is True
+        with pytest.raises(rqx.RqxError):
+            _ = resp.content
