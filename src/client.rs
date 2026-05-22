@@ -128,14 +128,14 @@ impl Client {
         let follow = follow_redirects.unwrap_or(self.follow_redirects);
         let mut resp = if follow {
             let raw = self.follow_redirects(request).await?;
-            PyResponse::from_response_async(raw).await?
+            PyResponse::from_response(raw).await?
         } else {
             self.transport.handle_request(request).await?
         };
 
-        self.accumulate_cookies(&resp.cookies).await;
+        self.accumulate_cookies(&resp.parts.cookies).await;
 
-        resp.elapsed = (Instant::now() - start_time).as_secs_f64();
+        resp.parts.elapsed = (Instant::now() - start_time).as_secs_f64();
         Ok(resp)
     }
 
@@ -929,7 +929,15 @@ impl PyAsyncClient {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .get(&url, params, headers, auth, auth_bearer, follow_redirects, t)
+                .get(
+                    &url,
+                    params,
+                    headers,
+                    auth,
+                    auth_bearer,
+                    follow_redirects,
+                    t,
+                )
                 .await
         })
     }
@@ -951,7 +959,15 @@ impl PyAsyncClient {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .options(&url, params, headers, auth, auth_bearer, follow_redirects, t)
+                .options(
+                    &url,
+                    params,
+                    headers,
+                    auth,
+                    auth_bearer,
+                    follow_redirects,
+                    t,
+                )
                 .await
         })
     }
@@ -973,7 +989,15 @@ impl PyAsyncClient {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .head(&url, params, headers, auth, auth_bearer, follow_redirects, t)
+                .head(
+                    &url,
+                    params,
+                    headers,
+                    auth,
+                    auth_bearer,
+                    follow_redirects,
+                    t,
+                )
                 .await
         })
     }
@@ -995,7 +1019,15 @@ impl PyAsyncClient {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .delete(&url, params, headers, auth, auth_bearer, follow_redirects, t)
+                .delete(
+                    &url,
+                    params,
+                    headers,
+                    auth,
+                    auth_bearer,
+                    follow_redirects,
+                    t,
+                )
                 .await
         })
     }

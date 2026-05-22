@@ -39,7 +39,7 @@ impl ResponseParts {
         if let Some(e) = &self.encoding_override {
             return e.clone();
         }
-        self.detect_encoding_from_headers(&self.headers)
+        self.detect_encoding_from_headers()
             .map(|enc| enc.name().to_lowercase())
             .unwrap_or_else(|| "utf-8".to_string())
     }
@@ -49,7 +49,7 @@ impl ResponseParts {
             return Encoding::for_label(label.as_bytes()).unwrap_or(encoding_rs::UTF_8);
         }
         &self
-            .detect_encoding_from_headers(&self.headers)
+            .detect_encoding_from_headers()
             .unwrap_or(encoding_rs::UTF_8)
     }
 
@@ -59,15 +59,15 @@ impl ResponseParts {
     /// quoting, whitespace, multiple parameters, etc. without reinventing a
     /// MIME parser. Returns `None` if the header is missing, unparseable, has
     /// no charset parameter, or names an encoding `encoding_rs` doesn't know.
-    fn detect_encoding_from_headers(&self, headers: &HeaderMap) -> Option<&'static Encoding> {
-        let content_type = headers.get("content-type")?;
-        let content_type_str = match content_type.to_str() {
-            Ok(c) => c,
-            Err(_e) => return None,
-        };
+    fn detect_encoding_from_headers(&self) -> Option<&'static Encoding> {
+        let content_type_str = self.content_type()?;
         let mime: Mime = Mime::from_str(content_type_str).ok()?;
         let charset = mime.get_param(mime::CHARSET)?;
         Encoding::for_label(charset.as_str().as_bytes())
+    }
+
+    fn content_type(&self) -> Option<&str> {
+        self.headers.get("content-type")?.to_str().ok()
     }
 
     fn get_first_header_for_key(&self, key: &str) -> Option<&HeaderValue> {
@@ -187,36 +187,31 @@ impl PyResponse {
     /// json.loads round-trip (which was measurably slower than calling json.loads
     /// directly — see benchmarks/b5_json_parsing.py / docs/improvements.md).
     fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let bytes = self.content.as_bytes(py);
-        let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| {
-            let content_type = self
-                .headers
-                .borrow(py)
-                .get_first("content-type")
-                .map(String::from)
-                .unwrap_or_else(|| "<none>".to_string());
-            // Preview the first ~100 bytes of the body, lossy-decoded as UTF-8,
-            // so the user can see what was actually returned (e.g. an HTML error
-            // page or plain-text rejection message) when the body isn't JSON.
-            let preview_len = bytes.len().min(100);
-            let preview = String::from_utf8_lossy(&bytes[..preview_len]);
-            let ellipsis = if bytes.len() > 100 { "..." } else { "" };
-            RqxError::new_err(format!(
-                "response is not JSON (HTTP {}, content-type: {}): {:?}{} ({})",
-                self.status_code, content_type, preview, ellipsis, e
-            ))
-        })?;
+        let value = match serde_json::from_slice(&self.body) {
+            Ok(v) => v,
+            Err(e) => {
+                let content_type = self.parts.content_type().unwrap_or("<none>");
+                let preview_len = self.body.len().min(100);
+                let preview = String::from_utf8_lossy(&self.body[..preview_len]);
+                let ellipsis = if self.body.len() > 100 { "..." } else { "" };
+                return Err(RqxError::new_err(format!(
+                    "response is not JSON (HTTP {}, content-type: {}): {:?}{} ({})",
+                    self.parts.status_code, content_type, preview, ellipsis, e
+                )));
+            }
+        };
+
         value_to_py(py, value)
     }
 
     fn raise_for_status(&self) -> PyResult<()> {
-        let s_result = StatusCode::from_u16(self.status_code);
+        let s_result = StatusCode::from_u16(self.parts.status_code);
         match s_result {
             Ok(s) => {
                 if !s.is_success() {
                     Err(HTTPStatusError::new_err(format!(
                         "{} error",
-                        self.status_code
+                        self.parts.status_code
                     )))
                 } else {
                     Ok(())
@@ -228,123 +223,31 @@ impl PyResponse {
 }
 
 impl PyResponse {
-    pub fn from_response(py: Python<'_>, response: Response) -> PyResult<PyResponse> {
+    pub async fn from_response(response: Response) -> PyResult<PyResponse> {
         let status_code = response.status().as_u16();
-
-        // Collect into Vec to preserve insertion order and duplicate keys
-        // (e.g. Set-Cookie). PyHeaders does case-insensitive lookup on top.
-        let header_pairs: Vec<(String, String)> = response
-            .headers()
-            .iter()
-            .map(|(k, v)| {
-                (
-                    k.to_string(),
-                    v.to_str().unwrap_or("<non-utf8>").to_string(),
-                )
-            })
-            .collect();
-        let headers = Py::new(py, PyHeaders::from_pairs(header_pairs))?;
-
-        let url = response.url().as_str().to_owned();
+        let headers = response.headers().clone();
+        let url = response.url().to_string();
         let http_version = format!("{:?}", response.version());
         let cookies: HashMap<String, String> = response
             .cookies()
             .map(|c| (c.name().to_string(), c.value().to_string()))
             .collect();
-
-        let body = py.detach(|| {
-            RUNTIME
-                .get()
-                .ok_or_else(|| RqxError::new_err("runtime not initialized"))?
-                .block_on(async { response.bytes().await.map_err(map_reqwest_error) })
-        })?;
-        // Build PyBytes once under the GIL. No Vec<u8> intermediate; callers get
-        // the same Python bytes object on every access instead of a fresh clone.
-        let content = PyBytes::new(py, &body).unbind();
-
-        Ok(PyResponse {
-            status_code: status_code,
-            headers: headers,
-            content: content,
-            url: url,
-            elapsed: 0.0,
-            num_retries: 0,
-            retry_history: Vec::new(),
-            http_version: http_version,
-            cookies: cookies,
-            encoding_override: None,
-        })
-    }
-
-    pub async fn from_response_async(response: Response) -> PyResult<PyResponse> {
-        let status_code = response.status().as_u16();
-
-        let header_pairs: Vec<(String, String)> = response
-            .headers()
-            .iter()
-            .map(|(k, v)| {
-                (
-                    k.to_string(),
-                    v.to_str().unwrap_or("<non-utf8>").to_string(),
-                )
-            })
-            .collect();
-
-        let url = response.url().as_str().to_owned();
-        let http_version = format!("{:?}", response.version());
-        let cookies: HashMap<String, String> = response
-            .cookies()
-            .map(|c| (c.name().to_string(), c.value().to_string()))
-            .collect();
-
         let body = response.bytes().await.map_err(map_reqwest_error)?;
-        // Briefly acquire the GIL to allocate a Python bytes object directly
-        // from the response body. No .await crosses this closure so there's
-        // no deadlock risk with the GIL acquire that pyo3-async-runtimes
-        // performs later to dispatch our result back to Python.
-        //
-        // This is one of three viable ways to get the body into Python:
-        //
-        //   1. (current) Build Py<PyBytes> here, inside the async future.
-        //      Cost: one extra GIL acquire per response (this one here,
-        //      plus the one pyo3-async-runtimes already does when it
-        //      resolves the Python future). Under heavy completion storms
-        //      those two acquires can contend for the same lock.
-        //
-        //   2. Return an intermediate struct holding bytes::Bytes from the
-        //      future, and `impl IntoPyObject` on it so PyBytes is built
-        //      during the conversion step — which runs inside the GIL
-        //      acquire that pyo3-async-runtimes already does. Zero extra
-        //      acquires per response; requires a two-struct split and an
-        //      IntoPyObject impl that has to live alongside the pyclass.
-        //
-        //   3. Keep the body as Vec<u8> on the response struct, and clone
-        //      to Python bytes on every `.content` access. Zero extra
-        //      acquires in the future, but every access allocates, and the
-        //      body lives on both heaps for its lifetime (roughly 2x RSS
-        //      on the response path).
-        //
-        // Picked (1) because it's simpler than (2) while keeping the
-        // single-allocation property of (3). If profiling ever shows the
-        // double GIL acquire showing up as tail latency at high concurrency,
-        // switch to (2).
-        let (content, headers) = Python::attach(|py| -> PyResult<(Py<PyBytes>, Py<PyHeaders>)> {
-            let content = PyBytes::new(py, &body).unbind();
-            let headers = Py::new(py, PyHeaders::from_pairs(header_pairs))?;
-            Ok((content, headers))
-        })?;
 
         Ok(PyResponse {
-            status_code: status_code,
-            headers: headers,
-            content: content,
-            url: url,
-            elapsed: 0.0,
-            num_retries: 0,
-            retry_history: Vec::new(),
-            http_version: http_version,
-            cookies: cookies,
-            encoding_override: None,
+            parts: ResponseParts {
+                status_code: status_code,
+                headers: headers,
+                url: url,
+                elapsed: 0.0,
+                num_retries: 0,
+                retry_history: Vec::new(),
+                http_version: http_version,
+                cookies: cookies,
+                encoding_override: None,
+            },
+            body: body,
+            content_cache: PyOnceLock::<Py<PyBytes>>::new(),
         })
     }
 }
