@@ -240,3 +240,15 @@ def test_close_after_read_drops_buffer(flaky_server):
         assert resp.is_closed is True
         with pytest.raises(rqx.RqxError):
             _ = resp.content
+
+
+# ---------------------------------------------------------------------------
+# iter_lines — end-to-end wiring (cross-chunk edge cases live in Rust unit tests)
+# ---------------------------------------------------------------------------
+
+
+def test_iter_lines_splits_and_strips_terminators(flaky_server):
+    client = rqx.Client()
+    with client.stream("GET", f"{flaky_server}/lines") as resp:
+        lines = list(resp.iter_lines())
+    assert lines == ["first", "second", "third"]

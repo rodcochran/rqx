@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -24,6 +24,129 @@ use super::runtime::RUNTIME;
 /// so it must not move once polled (hence Pin), and `+ Send` lets it cross
 /// thread boundaries when shared via `Arc`.
 type ChunkStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
+
+/// Feed bytes through a streaming `Decoder`, returning the decoded text.
+///
+/// `Decoder::decode_to_string` writes into the String's existing spare capacity
+/// and returns `OutputFull` (writing nothing) if there isn't room — it does NOT
+/// grow the String. So reserve the worst-case output up front, then a single
+/// call consumes the whole input.
+fn decode_chunk(decoder: &mut Decoder, src: &[u8], last: bool) -> String {
+    let mut out = String::new();
+    if let Some(needed) = decoder.max_utf8_buffer_length(src.len()) {
+        out.reserve(needed);
+    }
+    // Reserved worst-case capacity above, so this consumes all of `src` in one
+    // call; the (CoderResult, read, replaced) tuple isn't needed.
+    let _ = decoder.decode_to_string(src, &mut out, last);
+    out
+}
+
+/// Characters Python's `str.splitlines()` treats as line boundaries. Mirrored so
+/// `iter_lines` matches httpx (which uses `splitlines`), including SSE's lone
+/// `\r` terminator.
+fn is_line_break(c: char) -> bool {
+    matches!(
+        c,
+        '\n' | '\r'
+            | '\u{0b}'
+            | '\u{0c}'
+            | '\u{1c}'
+            | '\u{1d}'
+            | '\u{1e}'
+            | '\u{85}'
+            | '\u{2028}'
+            | '\u{2029}'
+    )
+}
+
+/// Equivalent of Python `str.splitlines()`: split on the line-break set,
+/// stripping terminators, with `\r\n` treated as a single break and no trailing
+/// empty segment after a final terminator.
+fn split_lines(text: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\r' {
+            if chars.peek() == Some(&'\n') {
+                chars.next(); // consume the LF of a CRLF
+            }
+            lines.push(std::mem::take(&mut current));
+        } else if is_line_break(c) {
+            lines.push(std::mem::take(&mut current));
+        } else {
+            current.push(c);
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+/// Splits a stream of decoded text into lines, reassembling lines that span
+/// chunk boundaries. Port of httpx's `LineDecoder`. Pure — no I/O, no pyo3 — so
+/// the cross-chunk behavior is unit-testable with hand-fed `&str` chunks.
+#[derive(Default)]
+struct LineDecoder {
+    /// The partial trailing line carried across `feed` calls.
+    buffer: String,
+    /// A trailing `\r` deferred to the next `feed`, so a `\r\n` split across a
+    /// chunk boundary isn't mistaken for two separate line endings.
+    trailing_cr: bool,
+}
+
+impl LineDecoder {
+    fn feed(&mut self, text: &str) -> Vec<String> {
+        let mut text = if self.trailing_cr {
+            self.trailing_cr = false;
+            format!("\r{text}")
+        } else {
+            text.to_string()
+        };
+
+        if text.ends_with('\r') {
+            self.trailing_cr = true;
+            text.pop();
+        }
+
+        if text.is_empty() {
+            return Vec::new();
+        }
+
+        let trailing_newline = text.chars().next_back().is_some_and(is_line_break);
+        let mut lines = split_lines(&text);
+
+        // A single unterminated segment is just more of the partial line.
+        if lines.len() == 1 && !trailing_newline {
+            self.buffer.push_str(&lines[0]);
+            return Vec::new();
+        }
+
+        // Any buffered partial line is the start of this chunk's first segment.
+        if !self.buffer.is_empty() {
+            lines[0] = format!("{}{}", self.buffer, lines[0]);
+            self.buffer.clear();
+        }
+
+        // A non-newline-terminated tail becomes the next partial line.
+        if !trailing_newline {
+            self.buffer = lines.pop().unwrap();
+        }
+
+        lines
+    }
+
+    /// Emit the final partial line at end of stream, if any.
+    fn flush(&mut self) -> Option<String> {
+        if self.buffer.is_empty() && !self.trailing_cr {
+            return None;
+        }
+        self.trailing_cr = false;
+        Some(std::mem::take(&mut self.buffer))
+    }
+}
 
 #[pyclass]
 struct PyByteIterator {
@@ -99,12 +222,74 @@ impl PyTextIterator {
         let py = slf.py();
         let stream = Arc::clone(&slf.stream);
 
-        // need to try to decode chunks with slf.decoder
-        let dst = &mut String::new();
+        loop {
+            let chunk = py.detach(|| {
+                RUNTIME
+                    .get()
+                    .expect("runtime not initialized")
+                    .block_on(async {
+                        // .lock().await on TokioMutex yields on contention
+                        // instead of blocking the OS thread.
+                        let mut guard = stream.lock().await;
+                        guard.as_mut().next().await.transpose()
+                    })
+            });
+
+            let chunk = match chunk {
+                Ok(c) => c,
+                Err(e) => return Err(RqxError::new_err(format!("stream error: {e}"))),
+            };
+
+            match chunk {
+                // A chunk may complete no character (the decoder holds the
+                // partial bytes), so loop until decoding yields some text.
+                Some(src) => {
+                    let text = decode_chunk(&mut slf.decoder, &src, false);
+                    if !text.is_empty() {
+                        return Ok(Some(text));
+                    }
+                }
+                // End of stream — flush any character the decoder still holds.
+                None => {
+                    slf.finished = true;
+                    let text = decode_chunk(&mut slf.decoder, &[], true);
+                    return Ok((!text.is_empty()).then_some(text));
+                }
+            }
+        }
+    }
+}
+
+#[pyclass]
+struct PyLineIterator {
+    stream: Arc<TokioMutex<ChunkStream>>,
+    #[allow(dead_code)]
+    chunk_size: u32,
+    decoder: Decoder,
+    lines: LineDecoder,
+    // Complete lines decoded from a chunk but not yet yielded — one chunk can
+    // produce many lines, but __next__ hands back one at a time.
+    pending: VecDeque<String>,
+    finished: bool,
+}
+
+#[pymethods]
+impl PyLineIterator {
+    fn __iter__(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
+        slf
+    }
+
+    fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<String>> {
+        let py = slf.py();
+        let stream = Arc::clone(&slf.stream);
 
         loop {
-            if !dst.is_empty() {
-                break;
+            // Drain already-decoded lines before touching the network.
+            if let Some(line) = slf.pending.pop_front() {
+                return Ok(Some(line));
+            }
+            if slf.finished {
+                return Ok(None);
             }
 
             let chunk = py.detach(|| {
@@ -112,53 +297,36 @@ impl PyTextIterator {
                     .get()
                     .expect("runtime not initialized")
                     .block_on(async {
-                        // .lock().await on TokioMutex — yields on contention
-                        // instead of blocking the OS thread. Guard is still held
-                        // across the next await, but now it's an async-aware
-                        // guard, which is what clippy wants.
                         let mut guard = stream.lock().await;
                         guard.as_mut().next().await.transpose()
                     })
             });
 
-            let c = match chunk {
-                Ok(_c) => _c,
-                Err(e) => {
-                    return Err(RqxError::new_err(format!("stream error: {e}")));
-                }
+            let chunk = match chunk {
+                Ok(c) => c,
+                Err(e) => return Err(RqxError::new_err(format!("stream error: {e}"))),
             };
 
-            let src = match c {
-                Some(_c) => _c,
+            match chunk {
+                Some(src) => {
+                    let text = decode_chunk(&mut slf.decoder, &src, false);
+                    let lines = slf.lines.feed(&text);
+                    slf.pending.extend(lines);
+                }
                 None => {
-                    // No bytes - end of stream
+                    // End of stream: flush the byte decoder, feed any final
+                    // text through the line splitter, THEN flush the line
+                    // buffer. Both flushes are required, in this order.
+                    let text = decode_chunk(&mut slf.decoder, &[], true);
+                    let lines = slf.lines.feed(&text);
+                    slf.pending.extend(lines);
+                    if let Some(last) = slf.lines.flush() {
+                        slf.pending.push_back(last);
+                    }
                     slf.finished = true;
-                    break;
                 }
-            };
-
-            // `decode_to_string` writes into dst's existing spare capacity and
-            // returns OutputFull (writing nothing) if there isn't room — it does
-            // NOT grow the String. Reserve the worst-case output up front so a
-            // single decode call always consumes the whole chunk.
-            if let Some(needed) = slf.decoder.max_utf8_buffer_length(src.len()) {
-                dst.reserve(needed);
-            }
-            let _decode_result = slf.decoder.decode_to_string(&src, dst, false);
-        }
-
-        // Flush decoder
-        if slf.finished {
-            if let Some(needed) = slf.decoder.max_utf8_buffer_length(0) {
-                dst.reserve(needed);
-            }
-            let _flush_result = slf.decoder.decode_to_string(&[], dst, true);
-            if dst.is_empty() {
-                return Ok(None);
             }
         }
-
-        return Ok(Some(dst.to_string()));
     }
 }
 
@@ -273,6 +441,26 @@ impl PyStreamResponse {
             stream: Arc::new(TokioMutex::new(Box::pin(response.bytes_stream()))),
             chunk_size,
             decoder: decoder,
+            finished: false,
+        })
+    }
+
+    #[pyo3(signature = (chunk_size=8192))]
+    fn iter_lines(&mut self, chunk_size: u32) -> PyResult<PyLineIterator> {
+        let response = match self.body.take() {
+            Some(Body::Live(r)) => r,
+            Some(other) => {
+                self.body = Some(other);
+                return Err(RqxError::new_err("response already read into memory"));
+            }
+            None => return Err(RqxError::new_err("response already consumed or closed")),
+        };
+        Ok(PyLineIterator {
+            stream: Arc::new(TokioMutex::new(Box::pin(response.bytes_stream()))),
+            chunk_size,
+            decoder: self.parts.resolved_encoding().new_decoder(),
+            lines: LineDecoder::default(),
+            pending: VecDeque::new(),
             finished: false,
         })
     }
@@ -590,5 +778,57 @@ impl PyAsyncStreamResponse {
             response: Some(response),
             content_cache: PyOnceLock::new(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LineDecoder, split_lines};
+
+    #[test]
+    fn split_lines_matches_splitlines() {
+        assert_eq!(split_lines("a\nb"), ["a", "b"]);
+        assert_eq!(split_lines("a\n"), ["a"]); // no trailing empty after a terminator
+        assert_eq!(split_lines("a\n\n"), ["a", ""]);
+        assert!(split_lines("").is_empty());
+        assert_eq!(split_lines("a\r\nb"), ["a", "b"]); // CRLF is a single break
+        assert_eq!(split_lines("a\rb"), ["a", "b"]); // lone CR is a break
+    }
+
+    #[test]
+    fn feed_emits_complete_lines() {
+        let mut d = LineDecoder::default();
+        assert_eq!(d.feed("a\nb\nc\n"), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn feed_buffers_partial_line_across_chunks() {
+        let mut d = LineDecoder::default();
+        assert!(d.feed("ab").is_empty()); // unterminated — buffered, nothing yet
+        assert_eq!(d.feed("cd\n"), ["abcd"]); // completed by the next chunk
+    }
+
+    #[test]
+    fn feed_reassembles_crlf_split_across_chunks() {
+        // The case we can't force over a socket: "\r\n" straddles the boundary.
+        // The trailing "\r" must be deferred, not emitted as a lone-CR line.
+        let mut d = LineDecoder::default();
+        assert!(d.feed("a\r").is_empty()); // trailing CR deferred
+        assert_eq!(d.feed("\nb\n"), ["a", "b"]); // no spurious empty line
+    }
+
+    #[test]
+    fn feed_treats_lone_cr_as_terminator() {
+        let mut d = LineDecoder::default();
+        assert_eq!(d.feed("a\rb\r"), ["a"]); // "b" deferred (its own trailing CR)
+        assert_eq!(d.flush(), Some("b".to_string()));
+    }
+
+    #[test]
+    fn flush_emits_final_unterminated_line() {
+        let mut d = LineDecoder::default();
+        assert!(d.feed("last line").is_empty());
+        assert_eq!(d.flush(), Some("last line".to_string()));
+        assert_eq!(d.flush(), None); // nothing left
     }
 }
