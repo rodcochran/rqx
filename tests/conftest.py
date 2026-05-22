@@ -109,6 +109,21 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        # /bigtext — ~1 MB of mixed-width multibyte UTF-8, big enough that
+        # reqwest delivers it in many network chunks. Exercises the streaming
+        # text decoder's cross-chunk character reassembly: with this many
+        # 2/3/4-byte chars, chunk boundaries almost certainly land mid-character,
+        # so a decoder that didn't hold partial bytes across __next__ calls would
+        # corrupt the output.
+        if path == "/bigtext":
+            body = ("aé€🙂" * 100_000).encode("utf-8")  # 1+2+3+4 bytes per unit
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         request_id = params["request_id"][0]
 
         if path == "/reset":

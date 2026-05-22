@@ -164,3 +164,29 @@ def test_json_after_read_on_non_json_raises(flaky_server):
         resp.read()
         with pytest.raises(rqx.RqxError):
             resp.json()
+
+
+# ---------------------------------------------------------------------------
+# Cross-chunk reassembly — multibyte chars split across network chunks
+# ---------------------------------------------------------------------------
+
+
+def test_bigtext_spans_multiple_chunks(flaky_server):
+    # Guards the reassembly test below: if the ~1 MB body arrived in a single
+    # chunk, that test would be vacuous. Over a real socket it splits into many.
+    client = rqx.Client()
+    with client.stream("GET", f"{flaky_server}/bigtext") as resp:
+        n_chunks = len(list(resp.iter_bytes()))
+    assert n_chunks > 1
+
+
+def test_iter_text_reassembles_multibyte_across_chunks(flaky_server):
+    # The decoder must hold a partial multibyte char across __next__ calls.
+    # With ~1 MB of 1/2/3/4-byte chars, a chunk boundary almost certainly lands
+    # mid-character; broken reassembly would yield U+FFFD or the wrong length.
+    expected = "aé€🙂" * 100_000
+    client = rqx.Client()
+    with client.stream("GET", f"{flaky_server}/bigtext") as resp:
+        text = "".join(resp.iter_text())
+    assert text == expected
+    assert "�" not in text
