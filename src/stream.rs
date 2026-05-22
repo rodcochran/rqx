@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use encoding_rs::{Decoder, Encoding};
@@ -651,7 +651,11 @@ impl PyStreamResponse {
 #[pyclass]
 pub struct PyAsyncStreamResponse {
     pub parts: ResponseParts,
-    pub(crate) response: Option<reqwest::Response>,
+    // Shared + interior-mutable so `aread`'s future can store the buffered bytes
+    // back onto self *after* the await (it can't hold `&mut self` across it).
+    // A std Mutex is enough: every critical section is a tiny take/store that's
+    // never held across an await or a GIL acquisition.
+    pub(crate) body: Arc<Mutex<Option<Body>>>,
     pub content_cache: PyOnceLock<Py<PyBytes>>,
 }
 
@@ -665,15 +669,111 @@ impl PyAsyncStreamResponse {
     /// full explanation.
     #[pyo3(signature = (chunk_size=8192))]
     fn aiter_bytes(&mut self, chunk_size: u32) -> PyResult<PyAsyncByteIterator> {
-        let response = self
-            .response
-            .take()
-            .ok_or_else(|| RqxError::new_err("response already consumed"))?;
+        let mut guard = self.body.lock().unwrap();
+        let response = match guard.take() {
+            Some(Body::Live(r)) => r,
+            Some(other) => {
+                *guard = Some(other);
+                return Err(RqxError::new_err("response already read into memory"));
+            }
+            None => return Err(RqxError::new_err("response already consumed or closed")),
+        };
+        drop(guard);
         Ok(PyAsyncByteIterator {
             stream: Arc::new(TokioMutex::new(Box::pin(response.bytes_stream()))),
             chunk_size,
         })
     }
+
+    /// Read the entire remaining body into memory and return it as `bytes`.
+    /// Buffers in place, so `.content`/`.text`/`.json()` work afterward.
+    fn aread<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let body = Arc::clone(&self.body);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            // Take the live handle under the lock, but never hold the lock
+            // across the await or a GIL acquisition.
+            let live = {
+                let mut guard = body.lock().unwrap();
+                match guard.take() {
+                    Some(Body::Live(r)) => r,
+                    Some(Body::Buffered(b)) => {
+                        // Already read — restore and return the same bytes.
+                        *guard = Some(Body::Buffered(b.clone()));
+                        drop(guard);
+                        return Python::attach(|py| Ok(PyBytes::new(py, &b).unbind()));
+                    }
+                    None => {
+                        return Err(RqxError::new_err("response already consumed or closed"));
+                    }
+                }
+            };
+            let bytes = live.bytes().await.map_err(map_reqwest_error)?;
+            *body.lock().unwrap() = Some(Body::Buffered(bytes.clone()));
+            Python::attach(|py| Ok(PyBytes::new(py, &bytes).unbind()))
+        })
+    }
+
+    /// Release the connection (or drop the buffer) early.
+    fn aclose<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let body = Arc::clone(&self.body);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            *body.lock().unwrap() = None;
+            Ok(())
+        })
+    }
+
+    #[getter]
+    fn content(&self, py: Python<'_>) -> PyResult<Py<PyBytes>> {
+        let bytes = match &*self.body.lock().unwrap() {
+            Some(Body::Buffered(b)) => b.clone(),
+            Some(Body::Live(_)) => {
+                return Err(RqxError::new_err("response not read; call aread() first"));
+            }
+            None => return Err(RqxError::new_err("response consumed or closed")),
+        };
+        Ok(self
+            .content_cache
+            .get_or_init(py, || PyBytes::new(py, &bytes).unbind())
+            .clone_ref(py))
+    }
+
+    #[getter]
+    fn text(&self) -> PyResult<String> {
+        let bytes = match &*self.body.lock().unwrap() {
+            Some(Body::Buffered(b)) => b.clone(),
+            Some(Body::Live(_)) => {
+                return Err(RqxError::new_err("response not read; call aread() first"));
+            }
+            None => return Err(RqxError::new_err("response consumed or closed")),
+        };
+        let (decoded, _, _) = self.parts.resolved_encoding().decode(&bytes);
+        Ok(decoded.into_owned())
+    }
+
+    fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let bytes = match &*self.body.lock().unwrap() {
+            Some(Body::Buffered(b)) => b.clone(),
+            Some(Body::Live(_)) => {
+                return Err(RqxError::new_err("response not read; call aread() first"));
+            }
+            None => return Err(RqxError::new_err("response consumed or closed")),
+        };
+        let value = match serde_json::from_slice(&bytes) {
+            Ok(v) => v,
+            Err(e) => {
+                let content_type = self.parts.content_type().unwrap_or("<none>");
+                let preview_len = bytes.len().min(100);
+                let preview = String::from_utf8_lossy(&bytes[..preview_len]);
+                let ellipsis = if bytes.len() > 100 { "..." } else { "" };
+                return Err(RqxError::new_err(format!(
+                    "response is not JSON (HTTP {}, content-type: {}): {:?}{} ({})",
+                    self.parts.status_code, content_type, preview, ellipsis, e
+                )));
+            }
+        };
+        value_to_py(py, value)
+    }
+
     fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         pyo3_async_runtimes::tokio::future_into_py(py, async move { Ok(slf) })
     }
@@ -685,7 +785,11 @@ impl PyAsyncStreamResponse {
         _exc_value: Option<&Bound<'_, PyAny>>,
         _traceback: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        pyo3_async_runtimes::tokio::future_into_py(py, async move { Ok(false) })
+        let body = Arc::clone(&self.body);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            *body.lock().unwrap() = None;
+            Ok(false)
+        })
     }
 
     #[getter]
@@ -775,13 +879,23 @@ impl PyAsyncStreamResponse {
     fn is_error(&self) -> bool {
         self.parts.is_error()
     }
+
+    #[getter]
+    fn is_closed(&self) -> bool {
+        self.body.lock().unwrap().is_none()
+    }
+
+    #[getter]
+    fn is_consumed(&self) -> bool {
+        !matches!(*self.body.lock().unwrap(), Some(Body::Live(_)))
+    }
 }
 
 impl PyAsyncStreamResponse {
     pub fn from_response(response: Response) -> PyResult<PyAsyncStreamResponse> {
         Ok(PyAsyncStreamResponse {
             parts: ResponseParts::from_reqwest(&response),
-            response: Some(response),
+            body: Arc::new(Mutex::new(Some(Body::Live(response)))),
             content_cache: PyOnceLock::new(),
         })
     }
