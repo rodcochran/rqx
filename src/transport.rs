@@ -57,7 +57,7 @@ impl Transport {
     /// Single-attempt — returns the deserialized Python response.
     async fn send(&self, request: Request) -> PyResult<PyResponse> {
         let response = self.send_raw(request).await?;
-        PyResponse::from_response_async(response).await
+        PyResponse::from_response(response).await
     }
 
     /// Single-attempt — returns the raw reqwest Response (escape hatch / streaming).
@@ -91,7 +91,7 @@ impl Transport {
         let respect_retry = r.respect_retry_after_header;
         let total_timeout: f64 = r.total_timeout.unwrap_or(f64::INFINITY);
 
-        let mut num_retries: i32 = 0;
+        let mut num_retries: u32 = 0;
         let mut retry_history: Vec<(String, f64)> = Vec::new();
         let mut current_response: Option<Response> = None;
         let mut request_copy: Request;
@@ -154,7 +154,7 @@ impl Transport {
             match self.send_raw(request_copy).await {
                 Ok(resp) => {
                     if !is_retryable_method {
-                        return PyResponse::from_response_async(resp).await;
+                        return PyResponse::from_response(resp).await;
                     }
 
                     let status = resp.status().as_u16();
@@ -164,9 +164,9 @@ impl Transport {
                     }
 
                     if !r.status_forcelist.contains(&status) {
-                        let mut response = PyResponse::from_response_async(resp).await?;
-                        response.num_retries = num_retries;
-                        response.retry_history = retry_history;
+                        let mut response = PyResponse::from_response(resp).await?;
+                        response.parts.num_retries = num_retries;
+                        response.parts.retry_history = retry_history;
                         return Ok(response);
                     }
 
@@ -198,9 +198,9 @@ impl Transport {
                         r.total
                     )));
                 }
-                let mut response = PyResponse::from_response_async(cr).await?;
-                response.num_retries = num_retries;
-                response.retry_history = retry_history;
+                let mut response = PyResponse::from_response(cr).await?;
+                response.parts.num_retries = num_retries;
+                response.parts.retry_history = retry_history;
                 Ok(response)
             }
             None => Err(MaxRetriesExceeded::new_err(format!(

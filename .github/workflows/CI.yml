@@ -43,6 +43,9 @@ jobs:
         with:
           enable-cache: true
       - uses: dtolnay/rust-toolchain@stable
+      # Rust unit tests (LineDecoder, etc.). Runs without the extension-module
+      # feature so the test binary links libpython (provided by setup-python).
+      - run: cargo test --lib
       - run: uv sync --extra dev --frozen
       - run: uv run maturin develop
       - run: uv run pytest tests/ -n 8

@@ -91,3 +91,11 @@ async def test_headers_from_async_response_is_case_insensitive():
     assert resp.headers["Content-Type"] == resp.headers["content-type"]
     assert "Content-Type" in resp.headers
     assert "CONTENT-TYPE" in resp.headers
+
+
+def test_response_headers_are_cached():
+    """`.headers` materializes once and returns the same object on repeat
+    access — safe because a response's headers are read-only, and it matches
+    httpx (`resp.headers is resp.headers`)."""
+    resp = rqx.Client().get(f"{HTTPBIN_HOST}/get")
+    assert resp.headers is resp.headers

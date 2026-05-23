@@ -23,10 +23,12 @@ impl PyHeaders {
         let mut inner = HeaderMap::new();
         if let Some(map) = init {
             for (k, v) in map {
-                let name = HeaderName::from_str(&k)
-                    .map_err(|e| PyValueError::new_err(format!("invalid header name {k:?}: {e}")))?;
-                let value = HeaderValue::from_str(&v)
-                    .map_err(|e| PyValueError::new_err(format!("invalid header value {v:?}: {e}")))?;
+                let name = HeaderName::from_str(&k).map_err(|e| {
+                    PyValueError::new_err(format!("invalid header name {k:?}: {e}"))
+                })?;
+                let value = HeaderValue::from_str(&v).map_err(|e| {
+                    PyValueError::new_err(format!("invalid header value {v:?}: {e}"))
+                })?;
                 inner.insert(name, value);
             }
         }
@@ -34,8 +36,7 @@ impl PyHeaders {
     }
 
     fn __getitem__(&self, key: &str) -> PyResult<String> {
-        let name = HeaderName::from_str(key)
-            .map_err(|_| PyKeyError::new_err(key.to_string()))?;
+        let name = HeaderName::from_str(key).map_err(|_| PyKeyError::new_err(key.to_string()))?;
         let values: Vec<&str> = self
             .inner
             .get_all(&name)
@@ -58,8 +59,7 @@ impl PyHeaders {
     }
 
     fn __delitem__(&mut self, key: &str) -> PyResult<()> {
-        let name = HeaderName::from_str(key)
-            .map_err(|_| PyKeyError::new_err(key.to_string()))?;
+        let name = HeaderName::from_str(key).map_err(|_| PyKeyError::new_err(key.to_string()))?;
         if self.inner.remove(&name).is_none() {
             return Err(PyKeyError::new_err(key.to_string()));
         }
@@ -118,7 +118,10 @@ impl PyHeaders {
     }
 
     fn values(&self) -> Vec<String> {
-        self.inner.values().map(|v| v.to_str().unwrap_or("").to_string()).collect()
+        self.inner
+            .values()
+            .map(|v| v.to_str().unwrap_or("").to_string())
+            .collect()
     }
 
     fn items(&self) -> Vec<(String, String)> {
@@ -154,5 +157,9 @@ impl PyHeaders {
             .ok()
             .and_then(|name| self.inner.get(&name))
             .and_then(|v| v.to_str().ok())
+    }
+
+    pub fn from_header_map(header_map: HeaderMap) -> Self {
+        Self { inner: header_map }
     }
 }
