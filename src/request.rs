@@ -7,6 +7,7 @@ use std::time::Duration;
 use url::Url;
 
 use super::exceptions::*;
+use crate::query_params::QueryParams;
 
 pub fn build_client_request(
     http_client: &Client,
@@ -15,7 +16,7 @@ pub fn build_client_request(
     content: Option<&[u8]>,
     data: Option<HashMap<String, String>>,
     json: Option<&serde_json::Value>,
-    params: Option<HashMap<String, String>>,
+    params: Option<QueryParams>,
     headers: Option<HashMap<String, String>>,
     auth: Option<(String, String)>,
     auth_bearer: Option<&str>,
@@ -47,7 +48,7 @@ pub fn build_client_request(
     };
 
     if let Some(p) = params {
-        builder = builder.query(&p)
+        builder = builder.query(&p.0)
     };
 
     if let Some(h) = headers {

@@ -74,6 +74,19 @@ def test_params_threaded_through(flaky_server):
     assert "foo=bar" in resp.url
 
 
+def test_params_accept_httpx_style_scalars(flaky_server):
+    resp = rqx.get(
+        f"{flaky_server}/streamable",
+        params={"page": 1, "active": True, "ratio": 0.5, "empty": None},
+    )
+
+    assert resp.status_code == 200
+    assert "page=1" in resp.url
+    assert "active=true" in resp.url
+    assert "ratio=0.5" in resp.url
+    assert "empty=" not in resp.url
+
+
 def test_headers_threaded_through(flaky_server):
     """A custom header round-trips — we don't have an echo endpoint, but we
     can at least confirm the call doesn't fail with the kwarg present."""
