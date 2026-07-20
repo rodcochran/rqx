@@ -11,9 +11,9 @@ rqx is a personal learning project for PyO3 and maturin. The structure of the wo
 Two documents capture this:
 
 - **[docs/reqx_project_spec.md](docs/reqx_project_spec.md)** — the original project specification: problem statement, design constraints, acceptance criteria.
-- **[docs/report.md](docs/report.md)** — the write-up: design decisions, benchmark methodology and full measurement results, lessons learned.
+- **[docs/report.md](docs/report.md)** — the write-up: design decisions, lessons learned, and the things that didn't work. Written while the project was still called `reqx`, against an early local-machine benchmark; the architectural discussion holds, the numbers in it are superseded.
 
-If you only have time for one, read the report. The benchmark numbers, the architectural trade-offs (sync vs async paths, retry placement, JSON parsing strategy, runtime singleton), and the things that didn't work all live there.
+Read the report for the architectural trade-offs (sync vs async paths, retry placement, JSON parsing strategy, runtime singleton). For performance numbers, use the benchmark section below and [benchmarks/0.1.3/report.md](benchmarks/0.1.3/report.md).
 
 ## Quick look
 
@@ -49,7 +49,7 @@ The API targets feature parity with [httpx](https://github.com/encode/httpx) —
 pip install rqx
 ```
 
-To build from source (Rust toolchain + Python 3.9+ required):
+To build from source (Rust toolchain + Python 3.8+ required):
 
 ```bash
 git clone https://github.com/rodcochran/rqx.git
@@ -60,19 +60,21 @@ just test         # full test suite
 
 ## Benchmarks
 
-Measured on a paired AWS c7i.large client/server (2 vCPU each, dedicated CPU) in `us-east-1`, hitting nginx over an intra-VPC private IP. Each cell is the median of 5 runs; each (client, concurrency, run) executes in its own Python subprocess to keep clients from contaminating each other's measurements. Full methodology and raw data: [docs/launch_report.md](docs/launch_report.md).
+Measured on a paired AWS c7i.large client/server (2 vCPU each, dedicated CPU) in `us-east-1`, hitting nginx over an intra-VPC private IP. Each bar is the median of 5 runs; each (client, concurrency, run) executes in its own Python subprocess to keep clients from contaminating each other's measurements.
 
-![Throughput at concurrency=100](docs/launch_throughput.png)
+Charts below are from the 0.1.3 run (2026-05-23). Full methodology, per-concurrency tables, and limitations: [benchmarks/0.1.3/report.md](benchmarks/0.1.3/report.md). The earlier 0.1.1 run is kept at [docs/launch_report.md](docs/launch_report.md) for comparison.
 
-![Memory at concurrency=100](docs/launch_memory.png)
+![Throughput at concurrency=100](benchmarks/0.1.3/throughput.png)
 
-![Median latency at concurrency=100](docs/launch_latency.png)
+![Memory at concurrency=100](benchmarks/0.1.3/memory.png)
+
+![Median latency at concurrency=100](benchmarks/0.1.3/latency.png)
 
 httpx is the modern successor to requests, aiohttp is the de-facto async HTTP library, and httpr is another Rust-backed alternative.
 
 ## Status
 
-Pre-0.1.0. Usable but the API may shift in small ways before the first tagged release. Performance results in the project report. Open issues track the v0.x roadmap — anything labeled `httpx-feature-parity` is a known surface gap.
+0.1.3, published on PyPI. Usable, but the API may still shift in small ways during 0.x. Open issues track the v0.x roadmap — anything labeled `httpx-feature-parity` is a known surface gap.
 
 ## Contributing
 
