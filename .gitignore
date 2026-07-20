@@ -81,6 +81,16 @@ benchmarks/nginx/certs/
 benchmarks/nginx/*.json
 docs/bench_results/
 
+# Bench result output (commit canonical runs explicitly with `git add -f`;
+# everything else stays local + S3).
+benchmarks/results/
+b1_results.jsonl
+
+# Pulumi state / stack secrets
+benchmarks/infra/node_modules/
+benchmarks/infra/bin/
+benchmarks/infra/.pulumi/
+
 # certs stuf
 *.pem
 *.csr

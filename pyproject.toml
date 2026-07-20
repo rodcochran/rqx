@@ -24,6 +24,9 @@ Changelog = "https://github.com/rodcochran/rqx/releases"
 [tool.maturin]
 module-name = "rqx._rqx"
 python-source = "python"
+# Build the wheel with pyo3's extension-module behavior. Kept here (rather than
+# always-on in Cargo.toml) so `cargo test`/`cargo build` can link libpython.
+features = ["extension-module"]
 
 [project.optional-dependencies]
 dev = [
@@ -37,6 +40,7 @@ dev = [
     "maturin>=1.12,<2.0",
     "brotli",
     "zstandard",
+    "hypercorn",
 ]
 benchmarks = [
     "numpy",

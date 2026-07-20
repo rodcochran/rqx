@@ -55,7 +55,7 @@ openssl req \
     -days 365 \
     -noenc \
     -subj /C=US/ST=CA/L="San Francisco"/O=rqx/ \
-    -quiet
+    -batch
 
 echo "Generated self-signed cert"
 
@@ -69,7 +69,7 @@ openssl req \
     -out $CERTS_DIR/server.csr \
     -noenc \
     -subj /C=US/ST=CA/L="San Francisco"/O="rqx Test Server"/ \
-    -quiet
+    -batch
 
 
 echo "Generated server key"
@@ -99,7 +99,7 @@ openssl req \
     -out $CERTS_DIR/client.csr \
     -noenc \
     -subj /C=US/ST=CA/L="San Francisco"/O="rqx Test Client"/ \
-    -quiet
+    -batch
 
 # Due to limitation with Reqwests TLS, some of the keys were failing. Known issue.
 # Creating the traditional style of keys to prevent propagating that error.
@@ -107,7 +107,10 @@ openssl rsa -in $CERTS_DIR/client-key.pem -out $CERTS_DIR/client-key.pem -tradit
 
 echo "Generated client key"
 
-# Sign CSR:
+# Sign CSR.
+# -extfile is required: without extensions, openssl emits an X.509 v1
+# cert. rustls (via reqwest) only accepts v3, so any v1 cert fails with
+# `InvalidCertificate(UnsupportedCertVersion)` at client construction.
 openssl x509 \
     -req \
     -in $CERTS_DIR/client.csr \
@@ -115,7 +118,8 @@ openssl x509 \
     -CAkey $CERTS_DIR/ca-key.pem \
     -CAcreateserial \
     -out $CERTS_DIR/client-cert.pem \
-    -days 365
+    -days 365 \
+    -extfile $SCRIPT_DIR/client_extfile.txt
 
 echo "Signed Client CSR"
 

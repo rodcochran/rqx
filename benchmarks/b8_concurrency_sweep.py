@@ -1,12 +1,15 @@
 """Concurrency sweep — end-to-end latency distribution at varying concurrency.
 
-Runs rqx and httpr at c = 1, 10, 50, 100 against localhost nginx. For each
-(client, concurrency) we capture the full end-to-end latency distribution
-(percentiles + histogram) so we can see how the p99/p50 ratio behaves.
+Runs all four clients (rqx, httpr, httpx, aiohttp) at c = 1, 10, 50, 100 against
+the configured nginx target. For each (client, concurrency) we capture the full
+end-to-end latency distribution (percentiles + histogram) so we can see how the
+p99/p50 ratio behaves.
 
 Design notes:
 - One client per library lives for the entire run — connection pool stays warm
   across concurrency levels.
+- All clients are constructed with MAX_CONNECTIONS well above the highest
+  concurrency tested, so the connection pool is never the bottleneck.
 - Time-bounded sweeps (warmup + measure) instead of fixed request count. Keeps
   the sample size roughly proportional to throughput at each concurrency.
 - Per-level warmup at the chosen concurrency (so connection pool scales to that
@@ -14,8 +17,6 @@ Design notes:
 - 3 runs by default. Reports per-run numbers and the median. Run-to-run
   variance is visible.
 - Failures are counted and printed, not silently swallowed.
-- Order alternates across runs (rqx first / httpr first) to dilute order
-  effects.
 
 Usage:
   python benchmarks/b8_concurrency_sweep.py
@@ -27,16 +28,92 @@ import asyncio
 import json
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 
+import aiohttp
 import httpr
+import httpx
 import numpy as np
 import rqx
 
 TARGET_URL = "http://localhost:8080/json"
 CONCURRENCY_LEVELS = [1, 10, 50, 100]
 WARMUP_SECONDS = 2
-MEASURE_SECONDS = 10
-DEFAULT_RUNS = 3
+MEASURE_SECONDS = 15
+DEFAULT_RUNS = 2
+
+# Connection-pool ceiling for every client. Above the highest concurrency
+# tested so the pool isn't a confounder.
+MAX_CONNECTIONS = 1500
+
+
+# --------------------------------------------------------------------------
+# Client factories — each returns an async context manager that yields the
+# session-like client object. The get_fn knows how to make a request against
+# that specific client type.
+# --------------------------------------------------------------------------
+
+
+def _rqx_client():
+    transport = rqx.AsyncHTTPTransport(
+        max_connections=MAX_CONNECTIONS,
+        max_keepalive_connections=MAX_CONNECTIONS,
+    )
+    return rqx.AsyncClient(transport=transport)
+
+
+def _httpx_client():
+    return httpx.AsyncClient(
+        limits=httpx.Limits(
+            max_connections=MAX_CONNECTIONS,
+            max_keepalive_connections=MAX_CONNECTIONS,
+        ),
+    )
+
+
+def _aiohttp_session():
+    connector = aiohttp.TCPConnector(
+        limit=MAX_CONNECTIONS,
+        limit_per_host=MAX_CONNECTIONS,
+    )
+    return aiohttp.ClientSession(connector=connector)
+
+
+def _httpr_client():
+    # httpr doesn't expose a pool-size knob on AsyncClient. Documented
+    # limitation; comparison with the other three is best-effort.
+    return httpr.AsyncClient()
+
+
+async def rqx_get(client, url):
+    return await client.get(url)
+
+
+async def httpr_get(client, url):
+    return await client.get(url)
+
+
+async def httpx_get(client, url):
+    return await client.get(url)
+
+
+async def aiohttp_get(session, url):
+    # aiohttp's response must be opened as an async context manager and
+    # explicitly read so the connection returns to the pool.
+    async with session.get(url) as resp:
+        await resp.read()
+
+
+# Order is fixed so runs are reproducible. We rely on warmup + multiple runs
+# to dilute any residual order effects (TIME_WAIT pressure, JIT-style cache
+# effects, etc).
+CLIENTS = [
+    ("rqx", _rqx_client, rqx_get),
+    ("httpr", _httpr_client, httpr_get),
+    ("httpx", _httpx_client, httpx_get),
+    ("aiohttp", _aiohttp_session, aiohttp_get),
+]
+CLIENT_NAMES = [name for name, _, _ in CLIENTS]
 
 
 async def sweep(client, get_fn, concurrency, duration):
@@ -61,14 +138,6 @@ async def sweep(client, get_fn, concurrency, duration):
 
     await asyncio.gather(*[worker() for _ in range(concurrency)])
     return latencies, failures
-
-
-async def rqx_get(client, url):
-    return await client.get(url)
-
-
-async def httpr_get(client, url):
-    return await client.get(url)
 
 
 def summarize(latencies):
@@ -153,21 +222,22 @@ def print_sweep_result(client_name, concurrency, per_run_stats, pooled_latencies
 
 
 async def main(json_path=None, runs=DEFAULT_RUNS):
+    # httpr.AsyncClient runs sync Rust on asyncio's default ThreadPoolExecutor.
+    # Default size is min(32, cpu+4) — would cap httpr at ~6 in-flight on a
+    # 2-vCPU box, badly skewing the high-concurrency comparison. Bump to
+    # MAX_CONNECTIONS. Native-async clients (rqx, httpx, aiohttp) aren't
+    # affected.
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=MAX_CONNECTIONS))
+
     per_run_stats = defaultdict(list)
     pooled_latencies = defaultdict(list)
     failures_per_run = defaultdict(list)
 
     for run_idx in range(runs):
-        client_order = (
-            [("rqx", rqx.AsyncClient, rqx_get),
-             ("httpr", httpr.AsyncClient, httpr_get)]
-            if run_idx % 2 == 0 else
-            [("httpr", httpr.AsyncClient, httpr_get),
-             ("rqx", rqx.AsyncClient, rqx_get)]
-        )
         print(f"\n\n########  RUN {run_idx + 1} / {runs}  ########")
-        for name, cls, get_fn in client_order:
-            async with cls() as client:
+        for name, factory, get_fn in CLIENTS:
+            async with factory() as client:
                 for concurrency in CONCURRENCY_LEVELS:
                     print(f"[{name} c={concurrency}] warmup...", flush=True)
                     await sweep(client, get_fn, concurrency, WARMUP_SECONDS)
@@ -191,7 +261,7 @@ async def main(json_path=None, runs=DEFAULT_RUNS):
 
     final = {}
     for concurrency in CONCURRENCY_LEVELS:
-        for name in ["rqx", "httpr"]:
+        for name in CLIENT_NAMES:
             key = (name, concurrency)
             med = print_sweep_result(
                 name, concurrency,
@@ -213,7 +283,7 @@ async def main(json_path=None, runs=DEFAULT_RUNS):
     for c in CONCURRENCY_LEVELS:
         print(f"  c={c:<4d}", end="")
     print()
-    for name in ["rqx", "httpr"]:
+    for name in CLIENT_NAMES:
         print(f"  {name:<10s}", end="")
         for c in CONCURRENCY_LEVELS:
             r = final[f"{name}_c{c}"]["median_stats"]["p99_over_p50"]
@@ -225,7 +295,7 @@ async def main(json_path=None, runs=DEFAULT_RUNS):
     print("VARIANCE CHECK: p99 across runs (sorted / spread)")
     print("=" * 72)
     print(f"  {'client':<10s} {'c':<5s} {'runs p99 (ms)':<30s} {'spread':<10s}")
-    for name in ["rqx", "httpr"]:
+    for name in CLIENT_NAMES:
         for c in CONCURRENCY_LEVELS:
             key = (name, c)
             p99s = sorted([s["p99"] for s in per_run_stats[key]])
@@ -241,6 +311,8 @@ async def main(json_path=None, runs=DEFAULT_RUNS):
                 "warmup_seconds": WARMUP_SECONDS,
                 "measure_seconds": MEASURE_SECONDS,
                 "runs": runs,
+                "max_connections": MAX_CONNECTIONS,
+                "clients": CLIENT_NAMES,
             },
             "results": final,
         }

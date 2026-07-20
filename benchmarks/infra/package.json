@@ -1,0 +1,11 @@
+{
+  "name": "rqx-bench-infra",
+  "main": "index.ts",
+  "devDependencies": {
+    "@types/node": "^20"
+  },
+  "dependencies": {
+    "@pulumi/aws": "^6.0.0",
+    "@pulumi/pulumi": "^3.251.0"
+  }
+}

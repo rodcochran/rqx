@@ -65,7 +65,7 @@ async def test_stream_follow_redirects_completes_chain_async(flaky_server):
         "GET", f"{flaky_server}/redirect-once", follow_redirects=True
     ) as resp:
         chunks = []
-        async for chunk in resp.iter_bytes():
+        async for chunk in resp.aiter_bytes():
             chunks.append(chunk)
     body = b"".join(chunks)
     assert body == b'{"streamed": true}'

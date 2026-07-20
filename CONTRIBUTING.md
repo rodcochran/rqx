@@ -60,7 +60,7 @@ docs/                    Project spec, report, benchmark output
 
 Performance regressions are easy to introduce in a Rust/Python FFI project — every GIL acquire, every allocation crossing the boundary matters. Before merging anything that touches the hot path, run the relevant bench.
 
-- `benchmarks/b1_throughput.py` through `b10_tls_handshake.py` — each focuses on one dimension (throughput, latency, pool, memory, JSON, retry overhead, network latency, concurrency sweep, payload sweep, TLS handshake).
+- `benchmarks/b1_{rqx,httpr,httpx,aiohttp}.py` + `run_b1.sh` — throughput sweep, per-client subprocess to keep tokio runtimes and the httpr threadpool from cross-contaminating. `b2_latency.py` through `b10_tls_handshake.py` cover the other dimensions (latency, pool, memory, JSON, retry overhead, network latency, concurrency sweep, payload sweep, TLS handshake).
 - `benchmarks/run_all.sh` — full sweep. Builds in release mode, starts the local delay server, restarts nginx between benches to drain TCP TIME_WAIT (otherwise tail outliers explode). Output lands under `/tmp/reqx_bench_<timestamp>/`.
 - `benchmarks/docker-compose.yaml` — the nginx + delay-server stack the benches hit.
 

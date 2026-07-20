@@ -1,0 +1,40 @@
+# Dependabot version updates.
+# Docs: https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Three ecosystems live in this repo:
+#   - pip: Python deps in pyproject.toml
+#   - cargo: Rust deps in Cargo.toml / Cargo.lock
+#   - github-actions: action versions pinned in .github/workflows/*.yml
+#
+# Minor + patch updates are grouped into a single PR per ecosystem per week to
+# reduce churn. Major updates land as individual PRs so they can be reviewed
+# in isolation. Bump `interval` to `monthly` if weekly proves too noisy.
+
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      rust-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
