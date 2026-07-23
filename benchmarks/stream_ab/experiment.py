@@ -69,6 +69,8 @@ if __name__ == "__main__":
     parser.add_argument("--base-url", default="http://127.0.0.1:8080")
     parser.add_argument("--venvs", default="/venvs")
     parser.add_argument("--out", default="/results")
+    parser.add_argument("--base-ref", default="")
+    parser.add_argument("--head-ref", default="")
     args = parser.parse_args()
 
     out = Path(args.out)
@@ -84,7 +86,9 @@ if __name__ == "__main__":
     )
     experiment.run()
 
-    report = Report.load(str(experiment.records))
+    report = Report.load(
+        str(experiment.records), base_ref=args.base_ref, head_ref=args.head_ref
+    )
     print(report.render())
     (out / f"answer-{slug}.txt").write_text(report.render())
     (out / f"answer-{slug}.json").write_text(report.to_json())

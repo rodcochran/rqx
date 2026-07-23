@@ -136,11 +136,23 @@ class Comparison:
     head: Measurements
 
     @property
+    def shared_rounds(self) -> list[int]:
+        return sorted(set(self.base.by_round) & set(self.head.by_round))
+
+    @property
+    def per_round_diffs(self) -> list[float]:
+        """Head minus base within each round, in the metric's own units."""
+        return [
+            self.head.by_round[number] - self.base.by_round[number]
+            for number in self.shared_rounds
+        ]
+
+    @property
     def per_round_changes(self) -> list[float]:
-        shared = sorted(set(self.base.by_round) & set(self.head.by_round))
+        """The same differences as a percentage of that round's base."""
         return [
             (self.head.by_round[number] - before) / before * 100
-            for number in shared
+            for number in self.shared_rounds
             if (before := self.base.by_round[number])
         ]
 
@@ -155,7 +167,10 @@ class Comparison:
 
     @property
     def change(self) -> float:
-        return self.head.median - self.base.median
+        """Taken from the same per-round pairs as change_pct. Comparing the two
+        builds' overall medians instead would let the two disagree in sign."""
+        diffs = self.per_round_diffs
+        return statistics.median(diffs) if diffs else 0.0
 
     @property
     def chance(self) -> float:

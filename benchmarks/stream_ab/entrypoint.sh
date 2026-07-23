@@ -43,7 +43,9 @@ main() {
   install_build base "$BASE_REF"
   install_build head "$HEAD_REF"
 
-  python /harness/experiment.py --rounds "$ROUNDS" --only "$ONLY" --out "$OUT_DIR"
+  python /harness/experiment.py \
+    --rounds "$ROUNDS" --only "$ONLY" --out "$OUT_DIR" \
+    --base-ref "$BASE_REF" --head-ref "$HEAD_REF"
 }
 
 main "$@"
