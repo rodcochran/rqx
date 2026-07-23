@@ -58,9 +58,9 @@ bench-stream-smoke: (bench-stream "1")
 
 # Drill into ONE config with many rounds. Power comes from rounds, and rounds are
 # cheapest spent on a single config. Config is "<mode> <payload> <concurrency>",
-# e.g. `just bench-stream-config "async 1mb 8" 40`. Keep rounds EVEN so the
+# e.g. `just bench-stream-specific "async 1mb 8" 40`. Keep rounds EVEN so the
 # alternating build order stays balanced.
-bench-stream-config config rounds="40" base_ref="5e3fe3e812ba595265d01e089af2ae96aa5e69d1" head_ref="6c83626a8afb882832121bcd6288782bcd6190e7":
+bench-stream-specific config rounds="40" base_ref="5e3fe3e812ba595265d01e089af2ae96aa5e69d1" head_ref="6c83626a8afb882832121bcd6288782bcd6190e7":
     docker build -t rqx-stream-ab benchmarks/stream_ab
     mkdir -p benchmarks/stream_ab/results
     docker run --rm \

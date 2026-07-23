@@ -59,7 +59,7 @@ If a single config looks odd, drill into it rather than repeating the whole
 sweep. Confidence comes from rounds, and rounds are cheapest on one config:
 
 ```bash
-just bench-stream-config "async 1mb 8" 40
+just bench-stream-specific "async 1mb 8" 40
 ```
 
 Results get their own file names, so a drill-down never overwrites the sweep you

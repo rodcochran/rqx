@@ -33,11 +33,8 @@ RUN mkdir -p /srv/payloads \
  && head -c 10485760 /dev/urandom > /srv/payloads/10mb.bin
 
 COPY nginx.conf /etc/nginx/nginx.conf
-# records.py is the shared schema; both scripts run from /harness, so the
-# script directory is already on sys.path for the import.
-COPY records.py      /harness/records.py
-COPY bench_stream.py /harness/bench_stream.py
-COPY compare.py      /harness/compare.py
+# Both scripts run from /harness, so the directory is already on sys.path.
+COPY *.py /harness/
 COPY run_ab.sh       /harness/run_ab.sh
 RUN chmod +x /harness/run_ab.sh
 
