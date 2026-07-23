@@ -24,20 +24,31 @@ from dataclasses import asdict, dataclass, field
 from records import Cell, RunRecord
 
 
-class PermutationTest:
-    """Two-sided permutation test on the difference of medians.
+class PairedPermutationTest:
+    """Two-sided sign-flip permutation test on per-round paired differences.
 
-    Replaces an earlier rule based on half-range overlap, which was wrong in a
-    way worth recording: half-range is an extreme-value statistic, so it only
-    grows as rounds are added, and overlapping ranges become MORE likely with
-    more data. That rule therefore became less able to detect an effect the
-    more evidence it was given. Doubling rounds from 5 to 10 turned every
-    verdict into "noise" while the measured deltas barely moved.
+    This is the third significance rule this script has had, and the reasons
+    the first two failed are worth keeping.
 
-    A permutation test has the property we actually want: it asks how often
-    label-shuffled data produces a gap this large, so more rounds tighten the
-    answer instead of loosening it. Nonparametric, no distribution assumed,
-    and it needs nothing outside the stdlib.
+    1. Range overlap. Half-range is an extreme-value statistic, so it only
+       grows as rounds are added and overlap becomes MORE likely with more
+       data. Going 5 -> 10 rounds turned every verdict into "noise" while the
+       deltas barely moved. A rule that weakens as evidence accumulates is
+       backwards.
+
+    2. Unpaired permutation. Correct for i.i.d. samples, but these are not
+       i.i.d.: the box degrades over a long session (thermal throttling, VM
+       state). Across one 15-round run the BASE arm's CPU/GB rose ~60% and its
+       throughput halved. Interleaving arms cancels the bias between them, but
+       each arm's samples still span the whole drift, so within-arm variance is
+       dominated by drift and the test loses nearly all power.
+
+    The harness already runs base and head adjacent inside each round, so the
+    measurements are naturally PAIRED: both arms in round k see almost the same
+    machine state. Differencing within a round cancels drift, and the residual
+    is what we actually want to test. Under the null the sign of each paired
+    difference is exchangeable, so shuffling signs gives the reference
+    distribution. Nonparametric, drift-immune, stdlib only.
     """
 
     ITERATIONS = 20_000
@@ -45,27 +56,22 @@ class PermutationTest:
     ALPHA = 0.05
 
     # The verdict, the table cell and the JSON all ask for the same p-value.
-    # Resampling it three times would triple the runtime for no new answer.
+    # Resampling three times would triple the runtime for no new answer.
     _cache: dict[tuple, float] = {}
 
     @classmethod
-    def p_value(cls, base: list[float], head: list[float]) -> float:
-        if len(base) < 2 or len(head) < 2:
+    def p_value(cls, diffs: list[float]) -> float:
+        if len(diffs) < 3:
             return 1.0
-        key = (tuple(base), tuple(head))
+        key = tuple(diffs)
         if key in cls._cache:
             return cls._cache[key]
-        observed = abs(statistics.median(head) - statistics.median(base))
-        pool = list(base) + list(head)
-        split = len(base)
+        observed = abs(statistics.median(diffs))
         rng = random.Random(cls.SEED)
         extreme = 0
         for _ in range(cls.ITERATIONS):
-            rng.shuffle(pool)
-            gap = abs(
-                statistics.median(pool[split:]) - statistics.median(pool[:split])
-            )
-            if gap >= observed - 1e-12:
+            flipped = [d if rng.random() < 0.5 else -d for d in diffs]
+            if abs(statistics.median(flipped)) >= observed - 1e-12:
                 extreme += 1
         # Add-one correction: a p-value of exactly zero is not a thing a
         # finite resampling can justify.
@@ -102,16 +108,37 @@ METRICS: tuple[Metric, ...] = (
 
 @dataclass
 class Samples:
-    """Repeated measurements of one metric, for one cell, for one arm."""
+    """Repeated measurements of one metric, for one cell, for one arm.
 
-    values: list[float] = field(default_factory=list)
+    Keyed by round rather than appended to a list, because the analysis is
+    paired: round k of base must be matched against round k of head.
+    """
 
-    def add(self, value: float) -> None:
-        self.values.append(value)
+    by_round: dict[int, float] = field(default_factory=dict)
+
+    def add(self, round_: int, value: float) -> None:
+        self.by_round[round_] = value
+
+    @property
+    def values(self) -> list[float]:
+        return [self.by_round[r] for r in sorted(self.by_round)]
 
     @property
     def rounds(self) -> int:
-        return len(self.values)
+        return len(self.by_round)
+
+    @property
+    def drift_pct(self) -> float:
+        """How much this arm moved from the first third of the session to the
+        last. Large values mean the box was not in a steady state, which is a
+        property of the machine, not of the code under test."""
+        ordered = self.values
+        third = len(ordered) // 3
+        if third < 1:
+            return 0.0
+        early, late = ordered[:third], ordered[-third:]
+        first = statistics.median(early)
+        return (statistics.median(late) - first) / first * 100 if first else 0.0
 
     @property
     def median(self) -> float:
@@ -177,21 +204,39 @@ class Comparison:
         return self.head_samples.stats()
 
     @property
+    def paired_deltas(self) -> list[float]:
+        """Per-round relative differences, head vs base.
+
+        Differencing inside a round is what makes this drift-immune: both arms
+        ran adjacent under the same machine conditions, so whatever the box was
+        doing that round cancels.
+        """
+        shared = sorted(
+            set(self.base_samples.by_round) & set(self.head_samples.by_round)
+        )
+        out = []
+        for r in shared:
+            base = self.base_samples.by_round[r]
+            if base:
+                out.append((self.head_samples.by_round[r] - base) / base * 100)
+        return out
+
+    @property
     def delta_pct(self) -> float:
-        base = self.base_samples.median
-        if not base:
-            return 0.0
-        return (self.head_samples.median - base) / base * 100
+        deltas = self.paired_deltas
+        return statistics.median(deltas) if deltas else 0.0
 
     @property
     def p_value(self) -> float:
-        return PermutationTest.p_value(
-            self.base_samples.values, self.head_samples.values
-        )
+        return PairedPermutationTest.p_value(self.paired_deltas)
+
+    @property
+    def drift_pct(self) -> float:
+        return self.base_samples.drift_pct
 
     @property
     def verdict(self) -> str:
-        if self.p_value >= PermutationTest.ALPHA:
+        if self.p_value >= PairedPermutationTest.ALPHA:
             return "noise"
         return "head better" if self.metric.improved(self.delta_pct) else "HEAD WORSE"
 
@@ -240,9 +285,9 @@ class Meta:
     toolchain: str
     primary_metric: str = "cpu_s_per_gb"
     significance_rule: str = (
-        "two-sided permutation test on the difference of medians, "
-        f"{PermutationTest.ITERATIONS} resamples, significant at "
-        f"p < {PermutationTest.ALPHA}"
+        "two-sided sign-flip permutation test on per-round PAIRED differences, "
+        f"{PairedPermutationTest.ITERATIONS} resamples, significant at "
+        f"p < {PairedPermutationTest.ALPHA}"
     )
 
 
@@ -268,10 +313,13 @@ class Report:
         "allocator work, so throughput and RSS are secondary — if they",
         "disagree with CPU time, believe CPU time.",
         "",
-        "'delta' is head vs base. 'p' is a two-sided permutation test on the",
-        "difference of medians (20k resamples); a verdict needs p < 0.05.",
-        "Unlike a range-overlap rule, this gets STRONGER with more rounds.",
+        "'delta' is the median PER-ROUND difference, head vs base. 'p' is a",
+        "two-sided sign-flip test on those paired differences; verdict needs",
+        "p < 0.05. Pairing within a round cancels machine drift, which an",
+        "unpaired test cannot do and which dominated earlier sessions.",
     )
+
+    DRIFT_THRESHOLD = 10.0
 
     @classmethod
     def load(cls, path: str, meta: Meta) -> Report:
@@ -289,7 +337,7 @@ class Report:
                     if value is None:
                         continue
                     key = (record.cell, record.arm, metric.key)
-                    samples.setdefault(key, Samples()).add(value)
+                    samples.setdefault(key, Samples()).add(record.round, value)
 
         tables = []
         for metric in METRICS:
@@ -305,8 +353,39 @@ class Report:
     def to_table(self) -> list[tuple[str, list[list[str]]]]:
         return [(t.metric.label, t.to_table()) for t in self.tables]
 
+    def drift_report(self) -> list[str]:
+        """Surface machine instability instead of letting it hide in the data.
+
+        Drift is a property of the box, not the change. Pairing removes its
+        effect on the verdicts, but a heavily drifting session still means the
+        absolute base/head numbers are not comparable to another session's.
+        """
+        primary = self.tables[0]
+        drifting = [
+            (c.cell, c.drift_pct)
+            for c in primary.comparisons
+            if abs(c.drift_pct) >= self.DRIFT_THRESHOLD
+        ]
+        if not drifting:
+            return [f"Machine drift: all cells under {self.DRIFT_THRESHOLD:.0f}%.", ""]
+        lines = [
+            f"MACHINE DRIFT (base arm, {primary.metric.label}, first third vs last):",
+            "  Verdicts are paired so this does not bias them, but absolute",
+            "  numbers are not comparable across sessions.",
+        ]
+        lines += [f"    {cell.render():<22}{pct:+.1f}%" for cell, pct in drifting]
+        return lines + [""]
+
     def render(self) -> str:
-        return "\n".join(("", *self.PREAMBLE, "", *(t.render() for t in self.tables)))
+        return "\n".join(
+            (
+                "",
+                *self.PREAMBLE,
+                "",
+                *(t.render() for t in self.tables),
+                *self.drift_report(),
+            )
+        )
 
     def cell_summaries(self) -> list[CellSummary]:
         by_cell: dict[Cell, dict[str, dict]] = {}
@@ -316,7 +395,8 @@ class Report:
                     "verdict": c.verdict,
                     "delta_pct": round(c.delta_pct, 2),
                     "p_value": round(c.p_value, 5),
-                    "significant_at": PermutationTest.ALPHA,
+                    "significant_at": PairedPermutationTest.ALPHA,
+                    "base_drift_pct": round(c.drift_pct, 2),
                     "base": asdict(c.base),
                     "head": asdict(c.head),
                 }

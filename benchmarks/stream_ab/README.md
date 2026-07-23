@@ -43,9 +43,18 @@ documents that Docker Desktop's virtio networking caps out around 100 KB
 payloads on macOS. Loopback within a single container never crosses the VM
 boundary, so large bodies are not bottlenecked by the hypervisor.
 
-**Why arms interleave within each round.** Running all of `base` then all of
-`head` lets session-long drift — thermal, VM scheduling, page cache — bias
-whichever arm ran second. Alternating spreads it across both.
+**Why arms interleave within each round, and why the order alternates.**
+Running all of `base` then all of `head` lets session-long drift — thermal, VM
+scheduling, page cache — bias whichever arm ran second. Interleaving spreads it
+across both.
+
+Interleaving alone is not enough. An earlier version ran `base` first in
+*every* round, which is an uncontrolled order effect: whatever advantages the
+second slot (CPU already ramped, caches and nginx workers warm from the
+preceding run) lands entirely in the delta. Because the analysis is paired
+within a round, pairing *bakes that in* instead of cancelling it. The order now
+flips on even rounds, turning it into symmetric noise. **Use an even `ROUNDS`**
+so the two orders are exactly balanced.
 
 ## Reading the results
 

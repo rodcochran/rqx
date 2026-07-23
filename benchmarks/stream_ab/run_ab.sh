@@ -74,7 +74,14 @@ main() {
   for round in $(seq 1 "$ROUNDS"); do
     for cfg in "${CONFIGS[@]}"; do
       read -r mode label path iters conc <<<"$cfg"
-      for arm in base head; do
+      # Alternate which arm goes first. Running base first EVERY round is an
+      # uncontrolled order effect, and because the analysis is paired within a
+      # round, such an effect lands entirely in the delta instead of cancelling
+      # — whatever advantages the second slot (CPU already ramped, caches and
+      # nginx workers warm from the preceding run) becomes a fake result.
+      # Alternating turns it into symmetric noise the test can account for.
+      if (( round % 2 == 0 )); then order="head base"; else order="base head"; fi
+      for arm in $order; do
         log "round ${round}/${ROUNDS} | ${arm} | ${mode} ${label} c=${conc}"
         "/venvs/${arm}/bin/python" /harness/bench_stream.py \
           --arm "$arm" --mode "$mode" --url "http://127.0.0.1:8080${path}" \
