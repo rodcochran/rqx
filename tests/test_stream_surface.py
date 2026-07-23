@@ -14,6 +14,7 @@ import pytest
 import rqx
 
 STREAMABLE_BODY = b'{"streamed": true}'
+BIGTEXT_BODY = ("aé€🙂" * 100_000).encode("utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -134,12 +135,25 @@ def test_iter_bytes_yields_plain_bytes(flaky_server):
     # The public API must still hand back plain `bytes` — not bytearray or a
     # memoryview — so `type(...) is bytes`, not isinstance (which a subclass
     # would satisfy). Joining the chunks must also reproduce the body exactly.
+    #
+    # Small single-chunk body: the other half of #108's target workload.
     client = rqx.Client()
     with client.stream("GET", f"{flaky_server}/streamable") as resp:
         chunks = list(resp.iter_bytes())
     assert chunks, "expected at least one chunk"
     assert all(type(c) is bytes for c in chunks)
     assert b"".join(chunks) == STREAMABLE_BODY
+
+
+def test_iter_bytes_yields_plain_bytes_across_chunks(flaky_server):
+    # Same guarantee over a real multi-chunk stream (~1 MB), so the conversion
+    # is exercised on every chunk rather than a single 18-byte one.
+    client = rqx.Client()
+    with client.stream("GET", f"{flaky_server}/bigtext") as resp:
+        chunks = list(resp.iter_bytes())
+    assert len(chunks) > 1, "expected a multi-chunk stream"
+    assert all(type(c) is bytes for c in chunks)
+    assert b"".join(chunks) == BIGTEXT_BODY
 
 
 # ---------------------------------------------------------------------------
