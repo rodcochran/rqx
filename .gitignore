@@ -84,6 +84,7 @@ docs/bench_results/
 # Bench result output (commit canonical runs explicitly with `git add -f`;
 # everything else stays local + S3).
 benchmarks/results/
+benchmarks/stream_ab/results/
 b1_results.jsonl
 
 # Pulumi state / stack secrets
