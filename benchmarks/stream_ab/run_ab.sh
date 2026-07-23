@@ -1,15 +1,10 @@
 #!/usr/bin/env bash
 #
-# A/B the streaming path across two commits of rqx.
+# Benchmarks two commits of rqx head to head.
 #
-# Clones the PUBLIC repo and builds each ref from source, rather than diffing
-# against a PyPI wheel. Two reasons: a released wheel contains every change
-# since the release (not just this PR), and it was built by CI with its own
-# profile — comparing against it would measure build configuration as much as
-# code. Here both arms are built by the same toolchain, same flags, same
-# container. The only variable is the source commit.
-#
-# Defaults are PR #139: base is the parent of the first PR commit.
+# Both are built from source in this container with one toolchain, so the only
+# variable is the source commit. Defaults are PR #139, with base as the parent
+# of its first commit.
 set -euo pipefail
 
 REPO="${REPO:-https://github.com/rodcochran/rqx.git}"
@@ -18,17 +13,14 @@ HEAD_REF="${HEAD_REF:-6c83626a8afb882832121bcd6288782bcd6190e7}"
 ROUNDS="${ROUNDS:-5}"
 OUT_DIR="${OUT_DIR:-/results}"
 
-# Restrict the sweep to one cell, as "<mode> <payload> <concurrency>", e.g.
-# FILTER="async 1mb 8". Lets a single suspicious cell get many rounds without
-# paying for the full matrix — the whole point being that statistical power
-# comes from rounds, and rounds are cheapest when spent on one config.
+# Restrict the sweep to one config, e.g. FILTER="async 1mb 8". Lets one config
+# get many rounds without paying for the full matrix.
 FILTER="${FILTER:-}"
 
-# A filtered run writes to its own files. Otherwise drilling into one cell
-# would clobber the full sweep's results, which is exactly the data you want
-# to compare the drill-down against.
+# Filtered runs write to their own files so a drill-down never clobbers the
+# sweep you are comparing it against.
 if [[ -n "$FILTER" ]]; then
-  SLUG="cell-$(printf '%s' "$FILTER" | tr ' /' '--')"
+  SLUG="config-$(printf '%s' "$FILTER" | tr ' /' '--')"
 else
   SLUG="sweep"
 fi
@@ -38,10 +30,8 @@ SUMMARY_TXT="${OUT_DIR}/summary-${SLUG}.txt"
 
 # mode | label | path | iterations | concurrency
 #
-# The first four rows are the optimization's target: large streams, where many
-# chunks per response means many saved allocs. The last row is the ticket's
-# no-regression check — small bodies at high concurrency, where the per-chunk
-# saving is swamped by async machinery and we only care that nothing got worse.
+# Large streams are where the saving should show. The 8kb rows are the
+# no-regression check: too small for the effect, so they should not move.
 CONFIGS=(
   "async 1mb  /1mb   120 1"
   "async 1mb  /1mb   240 8"
@@ -55,7 +45,7 @@ CONFIGS=(
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 
-build_arm() {
+install_build() {
   local name=$1 ref=$2
   log "building '${name}' @ ${ref}"
   git clone --quiet "$REPO" "/src/${name}"
@@ -100,29 +90,25 @@ main() {
   curl -sf -o /dev/null http://127.0.0.1:8080/8kb || { echo "nginx not serving"; exit 1; }
   log "nginx up on 127.0.0.1:8080"
 
-  build_arm base "$BASE_REF"
-  build_arm head "$HEAD_REF"
+  install_build base "$BASE_REF"
+  install_build head "$HEAD_REF"
 
-  # Interleave arms WITHIN each round rather than running all of base then all
-  # of head. Any drift over the session — thermal, VM scheduling, page cache —
-  # then lands on both arms equally instead of biasing whichever ran second.
+  # Interleave builds within each round so session drift lands on both equally
+  # instead of biasing whichever ran second.
   for round in $(seq 1 "$ROUNDS"); do
     for cfg in "${CONFIGS[@]}"; do
       read -r mode label path iters conc <<<"$cfg"
       if [[ -n "$FILTER" && "$mode $label $conc" != "$FILTER" ]]; then
         continue
       fi
-      # Alternate which arm goes first. Running base first EVERY round is an
-      # uncontrolled order effect, and because the analysis is paired within a
-      # round, such an effect lands entirely in the delta instead of cancelling
-      # — whatever advantages the second slot (CPU already ramped, caches and
-      # nginx workers warm from the preceding run) becomes a fake result.
-      # Alternating turns it into symmetric noise the test can account for.
+      # Alternate which build goes first. Always running base first would let
+      # whatever advantages the second slot (warm caches, ramped CPU) land in
+      # the delta as a fake result. Keep ROUNDS even so the two orders balance.
       if (( round % 2 == 0 )); then order="head base"; else order="base head"; fi
-      for arm in $order; do
-        log "round ${round}/${ROUNDS} | ${arm} | ${mode} ${label} c=${conc}"
-        "/venvs/${arm}/bin/python" /harness/bench_stream.py \
-          --arm "$arm" --mode "$mode" --url "http://127.0.0.1:8080${path}" \
+      for build in $order; do
+        log "round ${round}/${ROUNDS} | ${build} | ${mode} ${label} c=${conc}"
+        "/venvs/${build}/bin/python" /harness/bench_stream.py \
+          --build "$build" --mode "$mode" --url "http://127.0.0.1:8080${path}" \
           --label "$label" --iterations "$iters" --concurrency "$conc" \
           --round "$round" >>"$RESULTS"
       done
@@ -130,8 +116,7 @@ main() {
   done
 
   log "raw records: ${RESULTS}"
-  # --detail into the saved text file (the full working is worth keeping),
-  # plain verdict to the terminal (that is what people actually read).
+  # Full working to the saved file, plain verdict to the terminal.
   python /harness/compare.py "$RESULTS" --detail \
     --json "$SUMMARY_JSON" \
     --base-ref "$BASE_REF" --head-ref "$HEAD_REF" --rounds "$ROUNDS" \

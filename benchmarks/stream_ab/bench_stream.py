@@ -1,18 +1,10 @@
-"""Streaming benchmark for PR #139 / issue #108 — the per-chunk copy removal.
+"""Streams a payload with rqx and reports CPU time, wall time and peak RSS.
 
-Deliberately lives OUTSIDE the repo checkouts. The base commit predates this
-file, so it cannot be committed to either arm — the harness injects the same
-script into both venvs. That is what makes it an honest A/B: identical
-measurement code, only the installed wheel differs.
+Lives outside the repo checkouts because the base commit predates it. The
+harness injects this same file into both venvs, so the measurement code is
+identical and only the installed wheel differs.
 
-PRIMARY METRIC: CPU seconds per GB streamed.
-    The change removes one malloc + one memcpy per chunk. That is CPU and
-    allocator pressure, and CPU-time-per-byte measures it directly. Wall-clock
-    throughput is reported too, but it is the WRONG headline number here: the
-    workload is partly transfer-bound even over loopback, so a real CPU win
-    can hide inside wall-clock noise. If the two disagree, believe CPU time.
-
-Emits one JSON object per run on stdout for the comparison step to aggregate.
+Emits one JSON record per run on stdout.
 """
 
 import argparse
@@ -27,11 +19,8 @@ from records import RunRecord
 
 
 class Usage:
-    """Process-wide CPU and peak-RSS sampling.
-
-    RUSAGE_SELF aggregates across threads, so this is valid for both the
-    thread-pooled sync arm and the single-threaded asyncio arm.
-    """
+    """Process-wide CPU and peak-RSS sampling. RUSAGE_SELF covers all threads,
+    so it is valid for both the threaded and asyncio streamers."""
 
     @staticmethod
     def cpu_seconds() -> float:
@@ -40,17 +29,13 @@ class Usage:
 
     @staticmethod
     def max_rss_mb() -> float:
-        # Linux reports ru_maxrss in kilobytes (macOS uses bytes — this
-        # harness is Linux-only, see the Dockerfile rationale).
+        # Linux reports ru_maxrss in kilobytes; this harness is Linux-only.
         return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
 
 
 class SyncStreamer:
-    """Drives Client.iter_bytes() across a thread pool.
-
-    One shared Client so connection pooling is exercised the way real callers
-    use it, rather than paying a fresh handshake per stream.
-    """
+    """Drives Client.iter_bytes() across a thread pool. One shared Client, so
+    connection pooling is exercised the way real callers use it."""
 
     def __init__(self, url: str, iterations: int, concurrency: int):
         self.url = url
@@ -82,11 +67,7 @@ class SyncStreamer:
 
 
 class AsyncStreamer:
-    """Drives AsyncClient.aiter_bytes() across asyncio tasks.
-
-    This is the arm where PyBytesChunk actually does its work — the newtype
-    converts at future-resolve time under the GIL pyo3 already holds.
-    """
+    """Drives AsyncClient.aiter_bytes() across asyncio tasks."""
 
     def __init__(self, url: str, iterations: int, concurrency: int):
         self.url = url
@@ -114,11 +95,11 @@ class AsyncStreamer:
 
 @dataclass(frozen=True)
 class Measurement:
-    """One warmed, timed run, emitted as a single RunRecord."""
+    """One warmed, timed run."""
 
     GB = 1024**3
 
-    arm: str
+    build: str
     mode: str
     label: str
     concurrency: int
@@ -135,7 +116,7 @@ class Measurement:
 
         gb = total_bytes / self.GB
         return RunRecord(
-            arm=self.arm,
+            build=self.build,
             mode=self.mode,
             payload=self.label,
             concurrency=self.concurrency,
@@ -143,7 +124,6 @@ class Measurement:
             bytes=total_bytes,
             wall_s=round(wall, 6),
             cpu_s=round(cpu, 6),
-            # The headline: CPU cost to move a fixed amount of data.
             cpu_s_per_gb=round(cpu / gb, 4) if gb else None,
             mb_s=round((total_bytes / (1024**2)) / wall, 2) if wall else None,
             max_rss_mb=round(Usage.max_rss_mb(), 2),
@@ -158,7 +138,7 @@ class Cli:
     @classmethod
     def from_argv(cls) -> "Cli":
         p = argparse.ArgumentParser()
-        p.add_argument("--arm", required=True, help="base | head")
+        p.add_argument("--build", required=True, help="base | head")
         p.add_argument("--mode", required=True, choices=["sync", "async"])
         p.add_argument("--url", required=True)
         p.add_argument("--label", required=True, help="payload label, e.g. 1mb")
@@ -169,9 +149,7 @@ class Cli:
 
         streamer_cls = SyncStreamer if a.mode == "sync" else AsyncStreamer
         return cls(
-            measurement=Measurement(
-                a.arm, a.mode, a.label, a.concurrency, a.round
-            ),
+            measurement=Measurement(a.build, a.mode, a.label, a.concurrency, a.round),
             streamer=streamer_cls(a.url, a.iterations, a.concurrency),
         )
 

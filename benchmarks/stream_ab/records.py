@@ -1,9 +1,6 @@
-"""The record schema shared by the producer (bench_stream) and the consumer
-(compare).
+"""Record schema shared by bench_stream (writes) and compare (reads).
 
-One definition, imported by both, so a field rename cannot silently desync the
-two halves of the harness. Both run from /harness inside the container, so the
-script directory is already on sys.path.
+One definition imported by both, so a field rename cannot desync them.
 """
 
 from __future__ import annotations
@@ -13,8 +10,8 @@ from dataclasses import asdict, dataclass
 
 
 @dataclass(frozen=True, order=True)
-class Cell:
-    """A benchmark configuration, independent of which arm ran it."""
+class Config:
+    """A benchmark configuration, independent of which build ran it."""
 
     mode: str
     payload: str
@@ -26,9 +23,9 @@ class Cell:
 
 @dataclass(frozen=True)
 class RunRecord:
-    """One timed run of one arm. Serialized as a line of raw.jsonl."""
+    """One timed run of one build. Serialized as a line of raw.jsonl."""
 
-    arm: str
+    build: str
     mode: str
     payload: str
     concurrency: int
@@ -41,13 +38,15 @@ class RunRecord:
     max_rss_mb: float
 
     @property
-    def cell(self) -> Cell:
-        return Cell(self.mode, self.payload, self.concurrency)
+    def config(self) -> Config:
+        return Config(
+            mode=self.mode, payload=self.payload, concurrency=self.concurrency
+        )
 
     @classmethod
     def from_json(cls, line: str) -> RunRecord:
         raw = json.loads(line)
-        return cls(**{f: raw.get(f) for f in cls.__dataclass_fields__})
+        return cls(**{name: raw[name] for name in cls.__dataclass_fields__})
 
     def to_json(self) -> str:
         return json.dumps(asdict(self))

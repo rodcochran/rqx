@@ -56,19 +56,19 @@ bench-stream rounds="5" base_ref="5e3fe3e812ba595265d01e089af2ae96aa5e69d1" head
 # before committing to the full sweep. Not enough rounds to trust the verdicts.
 bench-stream-smoke: (bench-stream "1")
 
-# Drill into ONE cell with many rounds. Power comes from rounds, and rounds are
-# cheapest spent on a single config. Cell is "<mode> <payload> <concurrency>",
-# e.g. `just bench-stream-cell "async 1mb 8" 40`. Keep rounds EVEN so the
-# alternating arm order stays balanced.
-bench-stream-cell cell rounds="40" base_ref="5e3fe3e812ba595265d01e089af2ae96aa5e69d1" head_ref="6c83626a8afb882832121bcd6288782bcd6190e7":
+# Drill into ONE config with many rounds. Power comes from rounds, and rounds are
+# cheapest spent on a single config. Config is "<mode> <payload> <concurrency>",
+# e.g. `just bench-stream-config "async 1mb 8" 40`. Keep rounds EVEN so the
+# alternating build order stays balanced.
+bench-stream-config config rounds="40" base_ref="5e3fe3e812ba595265d01e089af2ae96aa5e69d1" head_ref="6c83626a8afb882832121bcd6288782bcd6190e7":
     docker build -t rqx-stream-ab benchmarks/stream_ab
     mkdir -p benchmarks/stream_ab/results
     docker run --rm \
-        -e ROUNDS={{rounds}} -e FILTER="{{cell}}" \
+        -e ROUNDS={{rounds}} -e FILTER="{{config}}" \
         -e BASE_REF={{base_ref}} -e HEAD_REF={{head_ref}} \
         -v "{{justfile_directory()}}/benchmarks/stream_ab/results:/results" \
         rqx-stream-ab
-    @echo "\nfull working -> benchmarks/stream_ab/results/summary-cell-*.txt"
+    @echo "\nfull working -> benchmarks/stream_ab/results/summary-config-*.txt"
 
 # Start test server
 httpbin-start:
