@@ -88,6 +88,9 @@ class Metric:
     label: str
     better: str  # "lower" | "higher"
     fmt: str
+    # Absolute deltas need their own precision: the CPU saving is ~0.03 s/GB
+    # and would round to nothing at the display precision of the level itself.
+    abs_fmt: str
 
     def improved(self, delta_pct: float) -> bool:
         return delta_pct < 0 if self.better == "lower" else delta_pct > 0
@@ -100,9 +103,9 @@ class Metric:
 
 
 METRICS: tuple[Metric, ...] = (
-    Metric("cpu_s_per_gb", "CPU seconds per GB streamed", "lower", "{:.3f}"),
-    Metric("mb_s", "Throughput MB/s", "higher", "{:.1f}"),
-    Metric("max_rss_mb", "Peak RSS MB", "lower", "{:.1f}"),
+    Metric("cpu_s_per_gb", "CPU seconds per GB streamed", "lower", "{:.3f}", "{:+.4f}"),
+    Metric("mb_s", "Throughput MB/s", "higher", "{:.1f}", "{:+.1f}"),
+    Metric("max_rss_mb", "Peak RSS MB", "lower", "{:.1f}", "{:+.2f}"),
 )
 
 
@@ -227,6 +230,18 @@ class Comparison:
         return statistics.median(deltas) if deltas else 0.0
 
     @property
+    def abs_delta(self) -> float:
+        """Signed absolute difference in the metric's own units.
+
+        For cpu_s_per_gb this is the number the MECHANISM predicts to be
+        CONSTANT: eliminating one copy of the payload costs the same seconds
+        per GB regardless of payload size or concurrency. The percentage moves
+        only because the denominator does, so the percentage is the derived
+        quantity and this is the primary one.
+        """
+        return self.head_samples.median - self.base_samples.median
+
+    @property
     def p_value(self) -> float:
         return PairedPermutationTest.p_value(self.paired_deltas)
 
@@ -248,6 +263,7 @@ class Comparison:
             str(self.cell.concurrency),
             self.metric.fmt.format(self.base.median),
             self.metric.fmt.format(self.head.median),
+            self.metric.abs_fmt.format(self.abs_delta),
             f"{self.delta_pct:.1f}%",
             f"{p:.4f}" if p < 0.999 else ">0.999",
             self.verdict,
@@ -261,8 +277,10 @@ class Comparison:
 class MetricTable:
     """One metric's table across every cell."""
 
-    HEADERS = ("mode", "payload", "conc", "base", "head", "delta", "p", "verdict")
-    LAYOUT = "{:<6}{:<9}{:>5}  {:>11}{:>11}{:>9}{:>9}  {:<12}"
+    HEADERS = (
+        "mode", "payload", "conc", "base", "head", "abs d", "delta", "p", "verdict"
+    )
+    LAYOUT = "{:<6}{:<9}{:>5}  {:>10}{:>10}{:>10}{:>8}{:>9}  {:<12}"
 
     metric: Metric
     comparisons: tuple[Comparison, ...]
@@ -275,6 +293,97 @@ class MetricTable:
         lines = [self.metric.render_heading(), header, "-" * len(header)]
         lines += [c.render() for c in self.comparisons]
         return "\n".join(lines) + "\n"
+
+
+@dataclass(frozen=True)
+class MechanismCheck:
+    """Cross-cell consistency of the absolute saving, for the primary metric.
+
+    Eliminating one copy of the payload costs a fixed number of seconds per GB.
+    So every cell should report the SAME absolute saving whatever its payload
+    size or concurrency, and the percentage should differ only because the
+    baseline differs. That makes the constant a falsifiable prediction rather
+    than a story fitted after the fact.
+
+    Two things this catches. A cell whose absolute saving is wildly off the
+    others is measuring something the mechanism cannot explain — a harness
+    problem, not a discovery. (An uncontrolled arm-order effect once produced
+    0.122 s/GB against a true value near 0.032; this check would have caught
+    it immediately.) And a cell reported as 'noise' is only reassuring if its
+    predicted effect was too small to resolve — which the implied column makes
+    checkable instead of assumed.
+    """
+
+    TOLERANCE = 3.0  # factor away from the constant before a cell is flagged
+
+    metric: Metric
+    comparisons: tuple[Comparison, ...]
+
+    @property
+    def resolved(self) -> tuple[Comparison, ...]:
+        return tuple(c for c in self.comparisons if c.verdict != "noise")
+
+    @property
+    def constant(self) -> float | None:
+        """Absolute saving implied by the cells that resolved."""
+        values = [c.abs_delta for c in self.resolved]
+        return statistics.median(values) if values else None
+
+    def outliers(self) -> list[tuple[Comparison, float]]:
+        k = self.constant
+        if not k:
+            return []
+        flagged = []
+        for c in self.resolved:
+            ratio = c.abs_delta / k
+            if ratio < 1 / self.TOLERANCE or ratio > self.TOLERANCE:
+                flagged.append((c, ratio))
+        return flagged
+
+    def render(self) -> str:
+        k = self.constant
+        head = [f"MECHANISM CHECK ({self.metric.key})"]
+        if k is None:
+            return "\n".join(
+                head + ["  No cell resolved; nothing to check a constant against.", ""]
+            )
+
+        us_per_mb = abs(k) / 1024 * 1e6
+        head += [
+            "  Removing one copy should save a CONSTANT amount per GB in every",
+            "  cell. 'implied' is what that constant predicts for this cell's",
+            "  baseline; 'observed' is what was measured. They should agree,",
+            "  including on cells too small for the effect to resolve.",
+            "",
+            f"  Implied constant (median over {len(self.resolved)} resolved cells): "
+            f"{k:+.4f} s/GB  (~{us_per_mb:.0f} us/MB)",
+            "",
+            f"  {'cell':<22}{'base':>10}{'implied':>10}{'observed':>10}  verdict",
+            f"  {'-' * 62}",
+        ]
+        for c in self.comparisons:
+            base = c.base.median
+            implied = (k / base * 100) if base else 0.0
+            head.append(
+                f"  {c.cell.render():<22}{base:>10.3f}"
+                f"{implied:>9.1f}%{c.delta_pct:>9.1f}%  {c.verdict}"
+            )
+
+        flagged = self.outliers()
+        if flagged:
+            head += ["", "  OUTLIERS — absolute saving inconsistent with the rest:"]
+            head += [
+                f"    {c.cell.render():<22}{c.abs_delta:+.4f} s/GB  ({ratio:.1f}x)"
+                for c, ratio in flagged
+            ]
+            head.append("  Distrust these cells before believing them.")
+        else:
+            head += [
+                "",
+                f"  All {len(self.resolved)} resolved cells agree within "
+                f"{self.TOLERANCE:.0f}x. Consistent with the stated mechanism.",
+            ]
+        return "\n".join(head + [""])
 
 
 @dataclass(frozen=True)
@@ -383,9 +492,14 @@ class Report:
                 *self.PREAMBLE,
                 "",
                 *(t.render() for t in self.tables),
+                self.mechanism_check().render(),
                 *self.drift_report(),
             )
         )
+
+    def mechanism_check(self) -> MechanismCheck:
+        primary = self.tables[0]
+        return MechanismCheck(primary.metric, primary.comparisons)
 
     def cell_summaries(self) -> list[CellSummary]:
         by_cell: dict[Cell, dict[str, dict]] = {}
@@ -394,6 +508,7 @@ class Report:
                 by_cell.setdefault(c.cell, {})[c.metric.key] = {
                     "verdict": c.verdict,
                     "delta_pct": round(c.delta_pct, 2),
+                    "abs_delta": round(c.abs_delta, 5),
                     "p_value": round(c.p_value, 5),
                     "significant_at": PairedPermutationTest.ALPHA,
                     "base_drift_pct": round(c.drift_pct, 2),
@@ -414,9 +529,28 @@ class Report:
         return counts
 
     def to_json(self) -> str:
+        check = self.mechanism_check()
+        constant = check.constant
         return json.dumps(
             {
                 "meta": asdict(self.meta),
+                "mechanism_check": {
+                    "metric": check.metric.key,
+                    "implied_constant": (
+                        round(constant, 5) if constant is not None else None
+                    ),
+                    "implied_us_per_mb": (
+                        round(abs(constant) / 1024 * 1e6, 1)
+                        if constant is not None
+                        else None
+                    ),
+                    "resolved_cells": len(check.resolved),
+                    "tolerance_factor": check.TOLERANCE,
+                    "outliers": [
+                        {"cell": c.cell.render(), "abs_delta": round(c.abs_delta, 5)}
+                        for c, _ in check.outliers()
+                    ],
+                },
                 "totals": self.totals(),
                 "cells": [asdict(c) for c in self.cell_summaries()],
             },

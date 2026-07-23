@@ -19,6 +19,12 @@ ROUNDS="${ROUNDS:-5}"
 OUT_DIR="${OUT_DIR:-/results}"
 RESULTS="${OUT_DIR}/raw.jsonl"
 
+# Restrict the sweep to one cell, as "<mode> <payload> <concurrency>", e.g.
+# FILTER="async 1mb 8". Lets a single suspicious cell get many rounds without
+# paying for the full matrix — the whole point being that statistical power
+# comes from rounds, and rounds are cheapest when spent on one config.
+FILTER="${FILTER:-}"
+
 # mode | label | path | iterations | concurrency
 #
 # The first four rows are the optimization's target: large streams, where many
@@ -59,6 +65,24 @@ main() {
   mkdir -p "$OUT_DIR" /src /venvs /wheels
   : >"$RESULTS"
 
+  # Fail loudly on a FILTER typo rather than silently producing an empty run.
+  if [[ -n "$FILTER" ]]; then
+    matched=0
+    for cfg in "${CONFIGS[@]}"; do
+      read -r mode label _path _iters conc <<<"$cfg"
+      [[ "$mode $label $conc" == "$FILTER" ]] && matched=1
+    done
+    if (( ! matched )); then
+      echo "FILTER '${FILTER}' matched no config. Available:" >&2
+      for cfg in "${CONFIGS[@]}"; do
+        read -r mode label _path _iters conc <<<"$cfg"
+        echo "  ${mode} ${label} ${conc}" >&2
+      done
+      exit 1
+    fi
+    log "FILTER active — only '${FILTER}'"
+  fi
+
   log "toolchain: $(rustc --version) | $(python --version)"
   nginx
   sleep 1
@@ -74,6 +98,9 @@ main() {
   for round in $(seq 1 "$ROUNDS"); do
     for cfg in "${CONFIGS[@]}"; do
       read -r mode label path iters conc <<<"$cfg"
+      if [[ -n "$FILTER" && "$mode $label $conc" != "$FILTER" ]]; then
+        continue
+      fi
       # Alternate which arm goes first. Running base first EVERY round is an
       # uncontrolled order effect, and because the analysis is paired within a
       # round, such an effect lands entirely in the delta instead of cancelling
