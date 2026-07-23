@@ -103,6 +103,19 @@ async def test_aclose_then_iter_raises(flaky_server):
 
 
 @pytest.mark.asyncio
+async def test_aiter_bytes_yields_plain_bytes(flaky_server):
+    # #108: the PyBytesChunk newtype defers the single Bytes->PyBytes copy to
+    # future-resolve time. The public API is unchanged — chunks are plain
+    # `bytes` (type check, not isinstance), and rejoin to the full body.
+    async with rqx.AsyncClient() as client:
+        resp = await client.stream("GET", f"{flaky_server}/streamable")
+        chunks = [chunk async for chunk in resp.aiter_bytes()]
+    assert chunks, "expected at least one chunk"
+    assert all(type(c) is bytes for c in chunks)
+    assert b"".join(chunks) == STREAMABLE_BODY
+
+
+@pytest.mark.asyncio
 async def test_aiter_text_reassembles_body(flaky_server):
     async with rqx.AsyncClient() as client:
         resp = await client.stream("GET", f"{flaky_server}/streamable")

@@ -125,6 +125,24 @@ def test_text_after_read_honors_charset(flaky_server):
 
 
 # ---------------------------------------------------------------------------
+# iter_bytes — chunks are exactly `bytes` (issue #108 public-API guarantee)
+# ---------------------------------------------------------------------------
+
+
+def test_iter_bytes_yields_plain_bytes(flaky_server):
+    # #108 builds PyBytes straight from reqwest's `Bytes` (no Vec middleman).
+    # The public API must still hand back plain `bytes` — not bytearray or a
+    # memoryview — so `type(...) is bytes`, not isinstance (which a subclass
+    # would satisfy). Joining the chunks must also reproduce the body exactly.
+    client = rqx.Client()
+    with client.stream("GET", f"{flaky_server}/streamable") as resp:
+        chunks = list(resp.iter_bytes())
+    assert chunks, "expected at least one chunk"
+    assert all(type(c) is bytes for c in chunks)
+    assert b"".join(chunks) == STREAMABLE_BODY
+
+
+# ---------------------------------------------------------------------------
 # Consume-once semantics — descriptive errors on re-consume
 # ---------------------------------------------------------------------------
 
