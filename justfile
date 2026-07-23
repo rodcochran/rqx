@@ -50,7 +50,7 @@ bench-stream rounds="5" base_ref="5e3fe3e812ba595265d01e089af2ae96aa5e69d1" head
         -e ROUNDS={{rounds}} -e BASE_REF={{base_ref}} -e HEAD_REF={{head_ref}} \
         -v "{{justfile_directory()}}/benchmarks/stream_ab/results:/results" \
         rqx-stream-ab
-    @echo "\nresults -> benchmarks/stream_ab/results/summary.json"
+    @echo "\nfull working -> benchmarks/stream_ab/results/summary-sweep.txt"
 
 # Fast smoke of the streaming A/B (1 round) — checks the harness runs at all
 # before committing to the full sweep. Not enough rounds to trust the verdicts.
@@ -68,7 +68,7 @@ bench-stream-cell cell rounds="40" base_ref="5e3fe3e812ba595265d01e089af2ae96aa5
         -e BASE_REF={{base_ref}} -e HEAD_REF={{head_ref}} \
         -v "{{justfile_directory()}}/benchmarks/stream_ab/results:/results" \
         rqx-stream-ab
-    @echo "\nresults -> benchmarks/stream_ab/results/summary.json"
+    @echo "\nfull working -> benchmarks/stream_ab/results/summary-cell-*.txt"
 
 # Start test server
 httpbin-start:

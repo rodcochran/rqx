@@ -17,13 +17,24 @@ BASE_REF="${BASE_REF:-5e3fe3e812ba595265d01e089af2ae96aa5e69d1}"
 HEAD_REF="${HEAD_REF:-6c83626a8afb882832121bcd6288782bcd6190e7}"
 ROUNDS="${ROUNDS:-5}"
 OUT_DIR="${OUT_DIR:-/results}"
-RESULTS="${OUT_DIR}/raw.jsonl"
 
 # Restrict the sweep to one cell, as "<mode> <payload> <concurrency>", e.g.
 # FILTER="async 1mb 8". Lets a single suspicious cell get many rounds without
 # paying for the full matrix — the whole point being that statistical power
 # comes from rounds, and rounds are cheapest when spent on one config.
 FILTER="${FILTER:-}"
+
+# A filtered run writes to its own files. Otherwise drilling into one cell
+# would clobber the full sweep's results, which is exactly the data you want
+# to compare the drill-down against.
+if [[ -n "$FILTER" ]]; then
+  SLUG="cell-$(printf '%s' "$FILTER" | tr ' /' '--')"
+else
+  SLUG="sweep"
+fi
+RESULTS="${OUT_DIR}/raw-${SLUG}.jsonl"
+SUMMARY_JSON="${OUT_DIR}/summary-${SLUG}.json"
+SUMMARY_TXT="${OUT_DIR}/summary-${SLUG}.txt"
 
 # mode | label | path | iterations | concurrency
 #
@@ -119,11 +130,13 @@ main() {
   done
 
   log "raw records: ${RESULTS}"
-  python /harness/compare.py "$RESULTS" \
-    --json "${OUT_DIR}/summary.json" \
+  # --detail into the saved text file (the full working is worth keeping),
+  # plain verdict to the terminal (that is what people actually read).
+  python /harness/compare.py "$RESULTS" --detail \
+    --json "$SUMMARY_JSON" \
     --base-ref "$BASE_REF" --head-ref "$HEAD_REF" --rounds "$ROUNDS" \
-    --toolchain "$(rustc --version)" \
-    | tee "${OUT_DIR}/summary.txt"
+    --toolchain "$(rustc --version)" >"$SUMMARY_TXT"
+  python /harness/compare.py "$RESULTS"
 }
 
 main "$@"

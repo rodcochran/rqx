@@ -1,91 +1,126 @@
 # Streaming A/B — issue #108 / PR #139
 
-Measures whether removing the per-chunk `Bytes -> Vec<u8> -> PyBytes` double
-copy actually makes streaming cheaper, by building **two commits from source**
-and running the identical benchmark against both.
+## What this answers
 
-| arm    | ref                                        | streaming path                          |
-| ------ | ------------------------------------------ | --------------------------------------- |
-| `base` | `5e3fe3e` (parent of the first PR commit)  | `bytes.to_vec()` on sync and async      |
-| `head` | `6c83626` (PR tip)                         | `PyBytes::new` / `PyBytesChunk` newtype |
+PR #139 removes one copy of every streamed byte. Chunks used to be copied
+twice — into a `Vec<u8>`, then into a Python `bytes` — and now they are copied
+once.
 
-## Run
+**Does that make streaming measurably cheaper?**
+
+## Run it
 
 ```bash
-cd benchmarks/stream_ab
-docker build -t rqx-stream-ab .
-docker run --rm -v "$PWD/results:/results" rqx-stream-ab
+just bench-stream 10
 ```
 
-Results land in `results/raw.jsonl` (one record per run) and
-`results/summary.txt`. Override `BASE_REF`, `HEAD_REF`, or `ROUNDS` with `-e`.
+That is the whole thing. It builds both commits from source in a Linux
+container, runs them head to head, and prints a verdict.
 
-## Design notes
+First run takes 10–20 minutes (rustup plus two release builds). Later runs
+reuse the Docker layer cache.
 
-**Why build both from source instead of diffing against the PyPI wheel.**
-A released wheel contains every change since that release, not just this PR, so
-the delta would be misattributed. It is also built by CI with its own profile —
-comparing against a locally built wheel would measure build configuration as
-much as code. Here both arms use one toolchain, one set of flags, one
-container; the only variable is the commit.
+## Read it
 
-**Why the benchmark script is not committed to either arm.** `base` predates
-this file. The harness injects `bench_stream.py` into both venvs, so the
+The output starts with the answer:
+
+```
+VERDICT  head is faster
+
+  CPU   -0.032 s/GB (~31 us/MB) in 3 of 8 configs
+        one constant explains the rest, including the configs
+        where the effect is too small to measure
+  RSS   -15% at async 1mb c=8 (4 of 8 configs improved)
+
+  Trustworthy: yes — 10 paired rounds, arms alternated, drift under 10%
+```
+
+**Check the `Trustworthy` line first.** If it says `NO`, it tells you what to
+fix — usually "use more rounds" or "quiet the box and rerun". Everything above
+it is meaningless until that line says yes.
+
+**Then read `CPU`.** That is the headline: how many CPU-seconds are saved per
+GB streamed. It is an absolute number rather than a percentage on purpose —
+see below.
+
+Add `--detail` (or open `results/summary-sweep.txt`, which always has it) for
+per-config tables, p-values, and the mechanism check.
+
+## Running one config
+
+If a single configuration looks odd, drill into it rather than repeating the
+whole sweep — statistical power comes from rounds, and rounds are cheapest
+spent on one config:
+
+```bash
+just bench-stream-cell "async 1mb 8" 40
+```
+
+Results are written under their own `raw-cell-*` / `summary-cell-*` names, so
+a drill-down never clobbers the sweep you are comparing it against.
+
+## Why the headline is absolute, not a percentage
+
+Removing one copy costs a fixed number of CPU-seconds per GB, no matter the
+payload size or concurrency. So the same absolute saving should appear in every
+config, and the percentage should differ only because the baselines differ.
+
+That makes the claim falsifiable: one constant has to explain all eight
+configs, including correctly predicting the ones where the effect is too small
+to see. The `MECHANISM CHECK` section in `--detail` shows implied vs observed
+per config. A cell that disagrees is a harness problem, not a discovery.
+
+Throughput is deliberately not analyzed. At this effect size it was noise and
+produced more confusion than signal. Raw records still contain `mb_s` if you
+want to look.
+
+---
+
+## Methodology notes
+
+Skip this unless you are changing the harness.
+
+**Both arms are built from source.** Not diffed against a PyPI wheel: a
+released wheel contains every change since the release, and was built by CI
+with its own profile, so that comparison would measure build configuration as
+much as code. Here one toolchain, one set of flags, one container.
+
+**The benchmark script is not committed to either arm.** `base` predates it.
+The harness injects `bench_stream.py` and `records.py` into both venvs so the
 measurement code is byte-identical across arms.
 
-**Why Linux, not the host.** The change removes a `malloc` per chunk, and
-glibc's allocator behaves differently from macOS libmalloc. Running on the host
-gives the right direction but a magnitude that does not transfer to the wheels
-we ship.
+**Linux, not the host.** The change removes a `malloc`, and glibc's allocator
+behaves differently from macOS libmalloc. The host gives the right direction
+but a magnitude that does not transfer to the wheels we ship.
 
-**Why nginx runs inside the same container.** `benchmarks/nginx/nginx-host.conf`
+**nginx runs inside the same container.** `benchmarks/nginx/nginx-host.conf`
 documents that Docker Desktop's virtio networking caps out around 100 KB
-payloads on macOS. Loopback within a single container never crosses the VM
-boundary, so large bodies are not bottlenecked by the hypervisor.
+payloads on macOS. Loopback within one container never crosses the VM boundary.
 
-**Why arms interleave within each round, and why the order alternates.**
-Running all of `base` then all of `head` lets session-long drift — thermal, VM
-scheduling, page cache — bias whichever arm ran second. Interleaving spreads it
-across both.
+**Arms interleave within a round, and the order alternates.** Running all of
+`base` then all of `head` lets session drift bias whichever went second.
+Interleaving fixes that, but running `base` first in *every* round is itself an
+uncontrolled order effect — and since the analysis is paired within a round,
+pairing bakes it in rather than cancelling it. The order flips on even rounds.
+**Use an even `ROUNDS`** so the two orders stay balanced.
 
-Interleaving alone is not enough. An earlier version ran `base` first in
-*every* round, which is an uncontrolled order effect: whatever advantages the
-second slot (CPU already ramped, caches and nginx workers warm from the
-preceding run) lands entirely in the delta. Because the analysis is paired
-within a round, pairing *bakes that in* instead of cancelling it. The order now
-flips on even rounds, turning it into symmetric noise. **Use an even `ROUNDS`**
-so the two orders are exactly balanced.
+**Analysis is paired, tested by sign-flip permutation.** Differences are taken
+within a round, so machine drift cancels. Significance is a two-sided sign-flip
+test on those paired differences (20k resamples, alpha 0.05).
 
-## Reading the results
+Two earlier rules failed and should not be reintroduced:
 
-**CPU seconds per GB is the headline, not MB/s.** The change removes CPU and
-allocator work. Even over loopback the workload is partly transfer-bound, so a
-real CPU win can vanish inside wall-clock noise. If the two metrics disagree,
-believe CPU time. Peak RSS is reported as a secondary signal — the eliminated
-`Vec<u8>` should show up there too.
+1. *Range overlap.* Half-range is an extreme-value statistic that only grows as
+   rounds are added, so going 5 → 10 rounds turned every verdict into noise
+   while the deltas barely moved. A rule that weakens as evidence accumulates
+   is backwards.
+2. *Unpaired permutation.* Correct for i.i.d. samples, but these are not: over
+   one 15-round session the base arm's CPU/GB rose ~60% and its throughput
+   halved. Interleaving cancels bias between arms, but each arm's samples still
+   span the drift, so the test loses nearly all power.
 
-**`noise` means p >= 0.05** on a two-sided permutation test (20k resamples) of
-the difference of medians. Raise `ROUNDS` if a cell you care about lands in
-`noise` — unlike a range-based rule, this test gets *stronger* with more data.
-
-An earlier version of this script judged significance by whether the arms'
-observed ranges overlapped. That was wrong, and wrong in an instructive
-direction: half-range is an extreme-value statistic that only grows as rounds
-are added, so going from 5 to 10 rounds turned every verdict into `noise` while
-the measured deltas barely moved. Do not reintroduce a range-based rule.
-
-**Mind the multiple comparisons.** The table runs 3 metrics x 8 cells = 24
-tests, so at p < 0.05 roughly one "significant" result is expected by chance
-alone. Weight the cells whose p-values are an order of magnitude below the
-threshold, and treat a lone marginal cell as a lead to investigate rather than
-a finding.
-
-## The result to be prepared for
-
-The saving is roughly one `malloc` plus one `memcpy` per chunk — order 100 µs
-per MB streamed. It is entirely possible this is **provable in principle but
-invisible end-to-end**, especially in the 8 KB high-concurrency rows where
-async machinery dominates. That is a legitimate outcome and worth reporting as
-such. "Removes a per-chunk allocation and copy; not resolvable above noise in
-end-to-end throughput" is a more honest note than rerunning until variance
-produces a favorable number.
+**Mind multiple comparisons.** Two metrics across eight configs is 16 tests, so
+at p < 0.05 roughly one "significant" result is expected by chance. Weight the
+configs whose p-values are well below the threshold, and treat a lone marginal
+cell as a lead rather than a finding. The mechanism check is the stronger
+evidence, because it is a prediction rather than a search.
