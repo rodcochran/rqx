@@ -39,36 +39,21 @@ typecheck:
 # Full pre-push verification
 check: lint typecheck test
 
-# A/B the streaming path across two commits (issue #108 / PR #139).
-# Builds BOTH refs from source in a Linux container so the toolchain is not a
-# variable; writes results/summary.json + summary.txt + raw.jsonl.
-# First run is slow (~10-20 min): rustup plus two --release builds.
-bench-stream rounds="5" base_ref="5e3fe3e812ba595265d01e089af2ae96aa5e69d1" head_ref="6c83626a8afb882832121bcd6288782bcd6190e7":
+# Compare two commits on the streaming path (issue #108 / PR #139).
+# Runs every config by default, or one of them:
+#     just bench-stream
+#     just bench-stream 20
+#     just bench-stream 40 "async 1mb 8"
+# Keep rounds even so the alternating build order stays balanced.
+# The first run takes 10-20 minutes: it installs Rust and does two release builds.
+bench-stream rounds="10" only="" base_ref="5e3fe3e812ba595265d01e089af2ae96aa5e69d1" head_ref="6c83626a8afb882832121bcd6288782bcd6190e7":
     docker build -t rqx-stream-ab benchmarks/stream_ab
     mkdir -p benchmarks/stream_ab/results
     docker run --rm \
-        -e ROUNDS={{rounds}} -e BASE_REF={{base_ref}} -e HEAD_REF={{head_ref}} \
-        -v "{{justfile_directory()}}/benchmarks/stream_ab/results:/results" \
-        rqx-stream-ab
-    @echo "\nfull working -> benchmarks/stream_ab/results/summary-sweep.txt"
-
-# Fast smoke of the streaming A/B (1 round) — checks the harness runs at all
-# before committing to the full sweep. Not enough rounds to trust the verdicts.
-bench-stream-smoke: (bench-stream "1")
-
-# Drill into ONE config with many rounds. Power comes from rounds, and rounds are
-# cheapest spent on a single config. Config is "<mode> <payload> <concurrency>",
-# e.g. `just bench-stream-specific "async 1mb 8" 40`. Keep rounds EVEN so the
-# alternating build order stays balanced.
-bench-stream-specific config rounds="40" base_ref="5e3fe3e812ba595265d01e089af2ae96aa5e69d1" head_ref="6c83626a8afb882832121bcd6288782bcd6190e7":
-    docker build -t rqx-stream-ab benchmarks/stream_ab
-    mkdir -p benchmarks/stream_ab/results
-    docker run --rm \
-        -e ROUNDS={{rounds}} -e FILTER="{{config}}" \
+        -e ROUNDS={{rounds}} -e ONLY="{{only}}" \
         -e BASE_REF={{base_ref}} -e HEAD_REF={{head_ref}} \
         -v "{{justfile_directory()}}/benchmarks/stream_ab/results:/results" \
         rqx-stream-ab
-    @echo "\nfull working -> benchmarks/stream_ab/results/summary-config-*.txt"
 
 # Start test server
 httpbin-start:
