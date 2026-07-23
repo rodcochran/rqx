@@ -17,10 +17,61 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import statistics
 from dataclasses import asdict, dataclass, field
 
 from records import Cell, RunRecord
+
+
+class PermutationTest:
+    """Two-sided permutation test on the difference of medians.
+
+    Replaces an earlier rule based on half-range overlap, which was wrong in a
+    way worth recording: half-range is an extreme-value statistic, so it only
+    grows as rounds are added, and overlapping ranges become MORE likely with
+    more data. That rule therefore became less able to detect an effect the
+    more evidence it was given. Doubling rounds from 5 to 10 turned every
+    verdict into "noise" while the measured deltas barely moved.
+
+    A permutation test has the property we actually want: it asks how often
+    label-shuffled data produces a gap this large, so more rounds tighten the
+    answer instead of loosening it. Nonparametric, no distribution assumed,
+    and it needs nothing outside the stdlib.
+    """
+
+    ITERATIONS = 20_000
+    SEED = 20260723  # fixed so a rerun on the same raw data is reproducible
+    ALPHA = 0.05
+
+    # The verdict, the table cell and the JSON all ask for the same p-value.
+    # Resampling it three times would triple the runtime for no new answer.
+    _cache: dict[tuple, float] = {}
+
+    @classmethod
+    def p_value(cls, base: list[float], head: list[float]) -> float:
+        if len(base) < 2 or len(head) < 2:
+            return 1.0
+        key = (tuple(base), tuple(head))
+        if key in cls._cache:
+            return cls._cache[key]
+        observed = abs(statistics.median(head) - statistics.median(base))
+        pool = list(base) + list(head)
+        split = len(base)
+        rng = random.Random(cls.SEED)
+        extreme = 0
+        for _ in range(cls.ITERATIONS):
+            rng.shuffle(pool)
+            gap = abs(
+                statistics.median(pool[split:]) - statistics.median(pool[:split])
+            )
+            if gap >= observed - 1e-12:
+                extreme += 1
+        # Add-one correction: a p-value of exactly zero is not a thing a
+        # finite resampling can justify.
+        p = (extreme + 1) / (cls.ITERATIONS + 1)
+        cls._cache[key] = p
+        return p
 
 
 @dataclass(frozen=True)
@@ -75,20 +126,24 @@ class Samples:
         return max(self.values) if self.values else 0.0
 
     @property
-    def spread_pct(self) -> float:
-        """Half-range as a percentage of the median — a blunt but honest
-        stand-in for variability at small round counts, where stdev is itself
-        poorly estimated."""
-        if self.rounds < 2 or not self.median:
+    def rel_iqr_pct(self) -> float:
+        """Interquartile range as a percentage of the median.
+
+        Reported for context, never for the verdict. Unlike half-range this is
+        stable as rounds are added rather than growing with every new outlier,
+        so it is comparable between a 5-round and a 20-round session.
+        """
+        if self.rounds < 4 or not self.median:
             return 0.0
-        return (self.maximum - self.minimum) / 2 / self.median * 100
+        quartiles = statistics.quantiles(self.values, n=4, method="inclusive")
+        return (quartiles[2] - quartiles[0]) / self.median * 100
 
     def stats(self) -> ArmStats:
         return ArmStats(
             median=round(self.median, 4),
             minimum=round(self.minimum, 4),
             maximum=round(self.maximum, 4),
-            spread_pct=round(self.spread_pct, 2),
+            rel_iqr_pct=round(self.rel_iqr_pct, 2),
             rounds=self.rounds,
         )
 
@@ -100,11 +155,8 @@ class ArmStats:
     median: float
     minimum: float
     maximum: float
-    spread_pct: float
+    rel_iqr_pct: float
     rounds: int
-
-    def overlaps(self, other: ArmStats) -> bool:
-        return self.minimum <= other.maximum and other.minimum <= self.maximum
 
 
 @dataclass(frozen=True)
@@ -113,36 +165,38 @@ class Comparison:
 
     metric: Metric
     cell: Cell
-    base: ArmStats
-    head: ArmStats
+    base_samples: Samples
+    head_samples: Samples
+
+    @property
+    def base(self) -> ArmStats:
+        return self.base_samples.stats()
+
+    @property
+    def head(self) -> ArmStats:
+        return self.head_samples.stats()
 
     @property
     def delta_pct(self) -> float:
-        if not self.base.median:
+        base = self.base_samples.median
+        if not base:
             return 0.0
-        return (self.head.median - self.base.median) / self.base.median * 100
+        return (self.head_samples.median - base) / base * 100
 
     @property
-    def noise_pct(self) -> float:
-        return max(self.base.spread_pct, self.head.spread_pct)
+    def p_value(self) -> float:
+        return PermutationTest.p_value(
+            self.base_samples.values, self.head_samples.values
+        )
 
     @property
     def verdict(self) -> str:
-        # A result must clear BOTH tests, because each alone is fooled:
-        #
-        #   1. Ranges must not overlap. Overlap means the rounds did not
-        #      separate the arms at all.
-        #   2. |delta| must exceed the spread. Non-overlap can happen by luck
-        #      when one arm's distribution is skewed (median sitting near an
-        #      extreme), which otherwise lets a ~1% delta pass as a finding.
-        #
-        # Requiring both costs the occasional real-but-marginal win. That is
-        # the right trade for a change whose whole claim is a few percent.
-        if self.base.overlaps(self.head) or abs(self.delta_pct) <= self.noise_pct:
+        if self.p_value >= PermutationTest.ALPHA:
             return "noise"
         return "head better" if self.metric.improved(self.delta_pct) else "HEAD WORSE"
 
     def to_table(self) -> list[str]:
+        p = self.p_value
         return [
             self.cell.mode,
             self.cell.payload,
@@ -150,7 +204,7 @@ class Comparison:
             self.metric.fmt.format(self.base.median),
             self.metric.fmt.format(self.head.median),
             f"{self.delta_pct:.1f}%",
-            f"{self.noise_pct:.1f}%",
+            f"{p:.4f}" if p < 0.999 else ">0.999",
             self.verdict,
         ]
 
@@ -162,8 +216,8 @@ class Comparison:
 class MetricTable:
     """One metric's table across every cell."""
 
-    HEADERS = ("mode", "payload", "conc", "base", "head", "delta", "noise", "verdict")
-    LAYOUT = "{:<6}{:<9}{:>5}  {:>11}{:>11}{:>9}{:>8}  {:<12}"
+    HEADERS = ("mode", "payload", "conc", "base", "head", "delta", "p", "verdict")
+    LAYOUT = "{:<6}{:<9}{:>5}  {:>11}{:>11}{:>9}{:>9}  {:<12}"
 
     metric: Metric
     comparisons: tuple[Comparison, ...]
@@ -185,8 +239,10 @@ class Meta:
     rounds: int
     toolchain: str
     primary_metric: str = "cpu_s_per_gb"
-    noise_rule: str = (
-        "verdict requires non-overlapping ranges AND |delta| greater than spread"
+    significance_rule: str = (
+        "two-sided permutation test on the difference of medians, "
+        f"{PermutationTest.ITERATIONS} resamples, significant at "
+        f"p < {PermutationTest.ALPHA}"
     )
 
 
@@ -212,8 +268,9 @@ class Report:
         "allocator work, so throughput and RSS are secondary — if they",
         "disagree with CPU time, believe CPU time.",
         "",
-        "'delta' is head vs base. A verdict requires the arms' observed ranges",
-        "to not overlap AND the delta to exceed the spread; otherwise 'noise'.",
+        "'delta' is head vs base. 'p' is a two-sided permutation test on the",
+        "difference of medians (20k resamples); a verdict needs p < 0.05.",
+        "Unlike a range-overlap rule, this gets STRONGER with more rounds.",
     )
 
     @classmethod
@@ -241,9 +298,7 @@ class Report:
                 base = samples.get((cell, "base", metric.key))
                 head = samples.get((cell, "head", metric.key))
                 if base and head:
-                    comparisons.append(
-                        Comparison(metric, cell, base.stats(), head.stats())
-                    )
+                    comparisons.append(Comparison(metric, cell, base, head))
             tables.append(MetricTable(metric, tuple(comparisons)))
         return cls(meta, tuple(tables))
 
@@ -260,7 +315,8 @@ class Report:
                 by_cell.setdefault(c.cell, {})[c.metric.key] = {
                     "verdict": c.verdict,
                     "delta_pct": round(c.delta_pct, 2),
-                    "noise_pct": round(c.noise_pct, 2),
+                    "p_value": round(c.p_value, 5),
+                    "significant_at": PermutationTest.ALPHA,
                     "base": asdict(c.base),
                     "head": asdict(c.head),
                 }

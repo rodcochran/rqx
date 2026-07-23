@@ -55,10 +55,21 @@ real CPU win can vanish inside wall-clock noise. If the two metrics disagree,
 believe CPU time. Peak RSS is reported as a secondary signal — the eliminated
 `Vec<u8>` should show up there too.
 
-**`noise` means the arms' observed ranges overlapped**, so the rounds did not
-separate them. This is deliberately conservative: at 5 rounds, judging a delta
-against a spread estimate too easily promotes a lucky draw into a "regression".
-Raise `ROUNDS` if a cell you care about keeps landing in `noise`.
+**`noise` means p >= 0.05** on a two-sided permutation test (20k resamples) of
+the difference of medians. Raise `ROUNDS` if a cell you care about lands in
+`noise` — unlike a range-based rule, this test gets *stronger* with more data.
+
+An earlier version of this script judged significance by whether the arms'
+observed ranges overlapped. That was wrong, and wrong in an instructive
+direction: half-range is an extreme-value statistic that only grows as rounds
+are added, so going from 5 to 10 rounds turned every verdict into `noise` while
+the measured deltas barely moved. Do not reintroduce a range-based rule.
+
+**Mind the multiple comparisons.** The table runs 3 metrics x 8 cells = 24
+tests, so at p < 0.05 roughly one "significant" result is expected by chance
+alone. Weight the cells whose p-values are an order of magnitude below the
+threshold, and treat a lone marginal cell as a lead to investigate rather than
+a finding.
 
 ## The result to be prepared for
 
