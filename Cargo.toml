@@ -8,6 +8,17 @@ edition = "2024"
 name = "_rqx"
 crate-type = ["cdylib"]
 
+# Release wheels statically link reqwest/hyper/serde_json/encoding_rs into the
+# cdylib; thin LTO + a single codegen unit let the optimizer inline across those
+# crate boundaries on the build/send/decode path. `strip` shrinks the wheel (no
+# perf effect). Do NOT add `panic = "abort"` — PyO3 unwinds Rust panics across
+# the FFI boundary into Python exceptions; abort would turn reachable panics into
+# process SIGABRT. See issue #119.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
 [features]
 # pyo3's `extension-module` tells it NOT to link libpython (correct for the
 # built wheel, where the host interpreter provides the symbols). Enabled for
