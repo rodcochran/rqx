@@ -5,10 +5,10 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use encoding_rs::{Decoder, Encoding};
 use futures::{Stream, StreamExt};
-use pyo3::Bound;
 use pyo3::prelude::{Py, PyAny, PyRef, PyRefMut, PyResult, Python, pyclass, pymethods};
 use pyo3::sync::PyOnceLock;
 use pyo3::types::PyBytes;
+use pyo3::{Bound, IntoPyObject, PyErr};
 use reqwest::Response;
 use tokio::sync::Mutex as TokioMutex;
 
@@ -175,7 +175,7 @@ impl PyByteIterator {
         slf
     }
 
-    fn __next__(slf: PyRef<'_, Self>) -> PyResult<Option<Vec<u8>>> {
+    fn __next__(slf: PyRef<'_, Self>) -> PyResult<Option<Py<PyBytes>>> {
         let py = slf.py();
         let stream = Arc::clone(&slf.stream);
 
@@ -194,7 +194,7 @@ impl PyByteIterator {
         });
 
         match chunk {
-            Some(Ok(bytes)) => Ok(Some(bytes.to_vec())),
+            Some(Ok(bytes)) => Ok(Some(PyBytes::new(py, &bytes).unbind())),
             Some(Err(e)) => Err(RqxError::new_err(format!("stream error: {e}"))),
             None => Ok(None),
         }
@@ -342,6 +342,18 @@ impl PyLineIterator {
 Async Support
 */
 
+struct PyBytesChunk(Bytes);
+
+impl<'py> IntoPyObject<'py> for PyBytesChunk {
+    type Target = PyBytes;
+    type Output = Bound<'py, Self::Target>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        Ok(PyBytes::new(py, &self.0))
+    }
+}
+
 #[pyclass]
 struct PyAsyncByteIterator {
     stream: Arc<TokioMutex<ChunkStream>>,
@@ -362,7 +374,7 @@ impl PyAsyncByteIterator {
         pyo3_async_runtimes::tokio::future_into_py(slf.py(), async move {
             let mut guard = stream.lock().await;
             match guard.as_mut().next().await {
-                Some(Ok(bytes)) => Ok(Some(bytes.to_vec())),
+                Some(Ok(bytes)) => Ok(Some(PyBytesChunk(bytes))),
                 Some(Err(e)) => Err(RqxError::new_err(format!("stream error: {e}"))),
                 None => Err(pyo3::exceptions::PyStopAsyncIteration::new_err(())),
             }
