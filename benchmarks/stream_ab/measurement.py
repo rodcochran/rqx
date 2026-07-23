@@ -1,4 +1,4 @@
-"""Streams one config with rqx and prints a RunRecord.
+"""One timed measurement: streams a config with rqx and prints a RunRecord.
 
 Runs inside a build's virtualenv, so this is the only file that imports rqx.
 """
@@ -13,7 +13,8 @@ import time
 from dataclasses import dataclass
 
 import rqx
-from records import RunConfig, Configs, RunRecord
+from configs import Configs, RunConfig
+from records import RunRecord
 
 GB = 1024**3
 

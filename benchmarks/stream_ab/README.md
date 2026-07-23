@@ -39,8 +39,8 @@ anything until that line says yes.
 Then read `CPU`. That is the headline: how many CPU-seconds are saved for every
 GB streamed.
 
-Add `--detail` for the per-config tables, or open `results/summary-sweep.txt`,
-which always has them.
+The per-config tables print underneath. They are also saved to
+`results/answer-sweep.txt`, with the same numbers as JSON alongside.
 
 ## Terms
 
@@ -59,7 +59,7 @@ If a single config looks odd, drill into it rather than repeating the whole
 sweep. Confidence comes from rounds, and rounds are cheapest on one config:
 
 ```bash
-just bench-stream-specific "async 1mb 8" 40
+just bench-stream 40 "async 1mb 8"
 ```
 
 Results get their own file names, so a drill-down never overwrites the sweep you
@@ -74,12 +74,11 @@ the percentage depends on how much CPU that config used to begin with.
 
 That makes the claim checkable: one number has to explain all the configs,
 including correctly predicting the ones where the saving is too small to
-notice. `IS THE SAVING CONSISTENT?` in `--detail` shows expected against
-measured for each. A config that disagrees means the benchmark is measuring
-something else.
+notice. The `expected` column shows what the single saving predicts for each
+config, next to what was measured. A config that disagrees means the benchmark
+is measuring something else.
 
-Throughput is not analyzed. At this size of difference it was pure noise. Raw
-records still contain `mb_s` if you want to look.
+Throughput is not analyzed. At this size of difference it was pure noise.
 
 ---
 
@@ -90,8 +89,8 @@ wheel contains every change since that release, and CI built it with its own
 settings, so that comparison would measure the build setup as much as the code.
 
 **The benchmark script is not committed to either build.** The base commit
-predates it, so the harness copies `bench_stream.py` and `records.py` into both
-environments. Same measurement code, only the wheel differs.
+predates it, so the harness copies the measurement code into both
+environments. Same code either side, only the wheel differs.
 
 **Linux, not macOS.** The change removes a `malloc`, and Linux and macOS
 allocate memory differently. Running on the host gives the right direction but a
@@ -115,3 +114,16 @@ loses almost all ability to detect a difference this small.
 roughly one will look real by chance. Trust the configs whose `chance` is well
 under the threshold, and treat a single borderline one as something to
 investigate rather than a result.
+
+## The files
+
+| file | what it is |
+| ---- | ---------- |
+| `configs.py` | the test items: mode, payload, iterations, concurrency |
+| `records.py` | one measurement, written and read as JSON |
+| `measurement.py` | streams one config once and prints a record |
+| `experiment.py` | runs every config against both builds |
+| `comparison.py` | compares one config between the builds |
+| `report.py` | the printed answer and the JSON beside it |
+| `tables.py` | text table layout |
+| `entrypoint.sh` | clones both commits, builds two venvs, hands off |

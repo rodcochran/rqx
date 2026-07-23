@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Builds two commits of rqx from source, then hands off to run.py.
+# Builds two commits of rqx from source, then hands off to experiment.py.
 #
 # Both are built in this container with one toolchain, so the only variable is
 # the source commit. Defaults are PR #139, with base as the parent of its first
@@ -43,7 +43,7 @@ main() {
   install_build base "$BASE_REF"
   install_build head "$HEAD_REF"
 
-  python /harness/run.py --rounds "$ROUNDS" --only "$ONLY" --out "$OUT_DIR"
+  python /harness/experiment.py --rounds "$ROUNDS" --only "$ONLY" --out "$OUT_DIR"
 }
 
 main "$@"

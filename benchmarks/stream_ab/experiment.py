@@ -1,6 +1,6 @@
 """Runs every config against both builds, then prints the answer.
 
-Called by run_ab.sh once the two virtualenvs exist. Each measurement is a
+Called by entrypoint.sh once the two virtualenvs exist. Each measurement is a
 separate process so it uses that build's installed wheel.
 """
 
@@ -11,8 +11,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from analyze import Report
-from records import Configs, RunConfig
+from configs import Configs, RunConfig
+from report import Report
 
 BUILDS = ["base", "head"]
 
@@ -36,7 +36,7 @@ class Experiment:
         result = subprocess.run(
             [
                 str(self.venvs / build / "bin" / "python"),
-                str(Path(__file__).parent / "measure.py"),
+                str(Path(__file__).parent / "measurement.py"),
                 "--build", build,
                 "--config", config.name,
                 "--round", str(round_number),

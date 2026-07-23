@@ -35,7 +35,7 @@ RUN mkdir -p /srv/payloads \
 COPY nginx.conf /etc/nginx/nginx.conf
 # Both scripts run from /harness, so the directory is already on sys.path.
 COPY *.py /harness/
-COPY run_ab.sh       /harness/run_ab.sh
-RUN chmod +x /harness/run_ab.sh
+COPY entrypoint.sh /harness/entrypoint.sh
+RUN chmod +x /harness/entrypoint.sh
 
-ENTRYPOINT ["/harness/run_ab.sh"]
+ENTRYPOINT ["/harness/entrypoint.sh"]
