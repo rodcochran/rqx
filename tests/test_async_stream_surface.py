@@ -10,6 +10,7 @@ import pytest
 import rqx
 
 STREAMABLE_BODY = b'{"streamed": true}'
+BIGTEXT_BODY = ("aé€🙂" * 100_000).encode("utf-8")
 
 
 @pytest.mark.asyncio
@@ -100,6 +101,33 @@ async def test_aclose_then_iter_raises(flaky_server):
 # ---------------------------------------------------------------------------
 # aiter_text / aiter_lines
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_aiter_bytes_yields_plain_bytes(flaky_server):
+    # #108: the PyBytesChunk newtype defers the single Bytes->PyBytes copy to
+    # future-resolve time. The public API is unchanged — chunks are plain
+    # `bytes` (type check, not isinstance), and rejoin to the full body.
+    #
+    # Small single-chunk body: the other half of #108's target workload.
+    async with rqx.AsyncClient() as client:
+        resp = await client.stream("GET", f"{flaky_server}/streamable")
+        chunks = [chunk async for chunk in resp.aiter_bytes()]
+    assert chunks, "expected at least one chunk"
+    assert all(type(c) is bytes for c in chunks)
+    assert b"".join(chunks) == STREAMABLE_BODY
+
+
+@pytest.mark.asyncio
+async def test_aiter_bytes_yields_plain_bytes_across_chunks(flaky_server):
+    # Same guarantee over a real multi-chunk stream (~1 MB), so the newtype
+    # conversion is exercised on every chunk rather than a single small one.
+    async with rqx.AsyncClient() as client:
+        resp = await client.stream("GET", f"{flaky_server}/bigtext")
+        chunks = [chunk async for chunk in resp.aiter_bytes()]
+    assert len(chunks) > 1, "expected a multi-chunk stream"
+    assert all(type(c) is bytes for c in chunks)
+    assert b"".join(chunks) == BIGTEXT_BODY
 
 
 @pytest.mark.asyncio
