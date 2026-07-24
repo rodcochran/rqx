@@ -167,7 +167,10 @@ def test_dual_specification_raises_error():
         cert=f"{script_dir}/ssl/certs/client-combined.pem",
         verify=f"{script_dir}/ssl/certs/ca-cert.pem",
     )
-    with pytest.raises(rqx.RqxError):
+    # match= is load-bearing: a bare RqxError here would also be satisfied by a
+    # cert-read failure, so the test could pass without ever reaching the
+    # dual-specification check it exists to cover.
+    with pytest.raises(rqx.RqxError, match="Cannot specify both transport="):
         rqx.Client(
             transport=transport,
             cert=f"{script_dir}/ssl/certs/client-combined.pem",
@@ -247,7 +250,7 @@ async def test_dual_specification_raises_error_async():
         cert=f"{script_dir}/ssl/certs/client-combined.pem",
         verify=f"{script_dir}/ssl/certs/ca-cert.pem",
     )
-    with pytest.raises(rqx.RqxError):
+    with pytest.raises(rqx.RqxError, match="Cannot specify both transport="):
         rqx.AsyncClient(
             transport=transport,
             cert=f"{script_dir}/ssl/certs/client-combined.pem",
