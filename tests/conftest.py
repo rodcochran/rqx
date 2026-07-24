@@ -54,6 +54,13 @@ class CertSet:
     # expiring takes down every test that verifies against it.
     CHAIN = ("ca-cert.pem", "server-cert.pem", "client-cert.pem")
 
+    # The private keys the fixtures and tests open directly: server-key.pem for
+    # both HTTPS servers, client-key.pem for the (cert, key) tuple tests. Only
+    # their presence matters — a key has no expiry of its own — but a set
+    # missing one is not usable, and without this the check calls it fine and
+    # the failure lands later as a fixture error instead of a regeneration.
+    KEYS = ("server-key.pem", "client-key.pem")
+
     # generate_certs.sh issues 365-day certs. Regenerating a day early keeps a
     # run that starts just under the wire from having one expire mid-suite.
     EXPIRY_GRACE_SECONDS = 24 * 60 * 60
@@ -80,6 +87,8 @@ class CertSet:
 
     def is_usable(self):
         if not (self.directory / self.SENTINEL).exists():
+            return False
+        if not all((self.directory / name).exists() for name in self.KEYS):
             return False
         return all(self.is_in_date(name) for name in self.CHAIN)
 
