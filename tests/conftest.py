@@ -28,9 +28,118 @@ COMPRESSION_HEADER_VALUE = {
 script_dir = Path(__file__).resolve().parent
 
 CERTS_DIR = script_dir / "ssl" / "certs"
-LOCK_PATH = script_dir / "ssl" / ".cert-gen.lock"
 
 DEFAULT_ERRORS_BEFORE_SUCCESS = 3
+
+
+class CertSet:
+    """The TLS cert set the test suite runs against.
+
+    Owns the two questions worth asking before a run starts: is the set there,
+    and is it still in date. Certs are gitignored, so answering "no" is the
+    normal state of a fresh checkout, not an error.
+    """
+
+    # generate_certs.sh writes client-combined.pem last, so its presence means
+    # the whole set is on disk. Checking an earlier-written file (client-cert.pem,
+    # server-cert.pem) would report "certs exist" mid-generation.
+    SENTINEL = "client-combined.pem"
+
+    # Every link in the chain — one stale cert fails the handshake, and the CA
+    # expiring takes down every test that verifies against it.
+    CHAIN = ("ca-cert.pem", "server-cert.pem", "client-cert.pem")
+
+    # generate_certs.sh issues 365-day certs. Regenerating a day early keeps a
+    # run that starts just under the wire from having one expire mid-suite.
+    EXPIRY_GRACE_SECONDS = 24 * 60 * 60
+
+    def __init__(self, directory, script, lock_path):
+        self.directory = directory
+        self.script = script
+        self.lock_path = lock_path
+
+    def ensure(self):
+        if self.is_usable():
+            return
+        # The check above is deliberately unlocked — it's the common case and
+        # costs three openssl calls. The lock covers generation, which is not
+        # safe to run twice at once: independent pytest processes sharing a
+        # checkout (two terminals, CI jobs on one workspace) interleave their
+        # writes to the same files and hand each other a mismatched key pair.
+        with filelock.FileLock(str(self.lock_path)):
+            # Re-check under the lock. Another process may have generated while
+            # we waited, and regenerating now would swap the certs out from
+            # under a run that has already loaded them.
+            if not self.is_usable():
+                self.generate()
+
+    def is_usable(self):
+        if not (self.directory / self.SENTINEL).exists():
+            return False
+        return all(self.is_in_date(name) for name in self.CHAIN)
+
+    def is_in_date(self, name):
+        """`openssl x509 -checkend N` exits 0 if the cert is still valid N
+        seconds from now, 1 if it has expired or will within that window.
+
+        Without this, an existence-only check hands a year-old checkout its
+        stale certs and the suite fails at handshake time with an error that
+        says nothing about expiry.
+        """
+        path = self.directory / name
+        if not path.exists():
+            return False
+        checked = subprocess.run(
+            [
+                "openssl",
+                "x509",
+                "-checkend",
+                str(self.EXPIRY_GRACE_SECONDS),
+                "-noout",
+                "-in",
+                str(path),
+            ],
+            capture_output=True,
+        )
+        return checked.returncode == 0
+
+    def generate(self):
+        subprocess.run(["bash", str(self.script)], check=True)
+
+
+CERTS = CertSet(
+    directory=CERTS_DIR,
+    script=script_dir / "ssl" / "generate_certs.sh",
+    # Lives beside certs/ rather than inside it: on a cold checkout the certs
+    # directory doesn't exist yet, and the lock has to be creatable before the
+    # script that creates the directory runs.
+    lock_path=script_dir / "ssl" / ".cert-gen.lock",
+)
+
+
+def pytest_configure(config):
+    """Generate TLS certs once, before any test process can look for them.
+
+    The certs are gitignored, so a fresh checkout (and every CI run) starts with
+    an empty tests/ssl/certs/. Generating them lazily from the server fixtures
+    made the timing depend on which worker happened to draw a TLS test first:
+    under `-n 8`, a test reading a cert path without requesting one of those
+    fixtures could run before any cert existed and fail with "failed to read
+    client cert: No such file or directory" (#112).
+
+    Doing it here removes the race rather than guarding it. Under xdist this
+    hook runs in the controller and again in each worker, but the controller's
+    call completes before xdist spawns any worker, so the `workerinput` guard
+    leaves exactly one process generating within a run, and no window where a
+    cert is half-written when someone reads it.
+
+    That guard says nothing about *other* pytest runs, though, so CertSet.ensure
+    still takes a file lock to serialize against a second invocation sharing the
+    checkout.
+    """
+    if hasattr(config, "workerinput"):  # xdist sets this on workers only
+        return
+    CERTS.ensure()
 
 
 class FlakyServerHandler(BaseHTTPRequestHandler):
@@ -363,14 +472,6 @@ def http2_server():
     from hypercorn.asyncio import serve
     from hypercorn.config import Config
 
-    # Ensure certs exist (mtls_server uses the same script).
-    with filelock.FileLock(str(LOCK_PATH)):
-        if not (CERTS_DIR / "server-cert.pem").exists():
-            subprocess.run(
-                ["bash", f"{script_dir}/ssl/generate_certs.sh"],
-                check=True,
-            )
-
     port = _free_port()
     config = Config()
     config.bind = [f"127.0.0.1:{port}"]
@@ -428,15 +529,7 @@ def http2_server():
 
 @pytest.fixture(scope="session")
 def mtls_server():
-
-    # generate certs
-    with filelock.FileLock(str(LOCK_PATH)):
-        if not (CERTS_DIR / "client-cert.pem").exists():
-            subprocess.run(
-                ["bash", f"{script_dir}/ssl/generate_certs.sh"],
-                check=True,
-            )
-
+    # Certs are generated up front in pytest_configure.
     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ssl_context.load_cert_chain(
         certfile=f"{script_dir}/ssl/certs/server-cert.pem",
