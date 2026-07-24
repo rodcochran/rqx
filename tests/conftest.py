@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import brotli
+import filelock
 import pytest
 import zstandard
 
@@ -52,13 +53,25 @@ class CertSet:
     # run that starts just under the wire from having one expire mid-suite.
     EXPIRY_GRACE_SECONDS = 24 * 60 * 60
 
-    def __init__(self, directory, script):
+    def __init__(self, directory, script, lock_path):
         self.directory = directory
         self.script = script
+        self.lock_path = lock_path
 
     def ensure(self):
-        if not self.is_usable():
-            self.generate()
+        if self.is_usable():
+            return
+        # The check above is deliberately unlocked — it's the common case and
+        # costs three openssl calls. The lock covers generation, which is not
+        # safe to run twice at once: independent pytest processes sharing a
+        # checkout (two terminals, CI jobs on one workspace) interleave their
+        # writes to the same files and hand each other a mismatched key pair.
+        with filelock.FileLock(str(self.lock_path)):
+            # Re-check under the lock. Another process may have generated while
+            # we waited, and regenerating now would swap the certs out from
+            # under a run that has already loaded them.
+            if not self.is_usable():
+                self.generate()
 
     def is_usable(self):
         if not (self.directory / self.SENTINEL).exists():
@@ -94,7 +107,14 @@ class CertSet:
         subprocess.run(["bash", str(self.script)], check=True)
 
 
-CERTS = CertSet(directory=CERTS_DIR, script=script_dir / "ssl" / "generate_certs.sh")
+CERTS = CertSet(
+    directory=CERTS_DIR,
+    script=script_dir / "ssl" / "generate_certs.sh",
+    # Lives beside certs/ rather than inside it: on a cold checkout the certs
+    # directory doesn't exist yet, and the lock has to be creatable before the
+    # script that creates the directory runs.
+    lock_path=script_dir / "ssl" / ".cert-gen.lock",
+)
 
 
 def pytest_configure(config):
@@ -110,8 +130,12 @@ def pytest_configure(config):
     Doing it here removes the race rather than guarding it. Under xdist this
     hook runs in the controller and again in each worker, but the controller's
     call completes before xdist spawns any worker, so the `workerinput` guard
-    leaves exactly one process generating and zero contention — no file lock
-    needed, and no window where a cert is half-written when someone reads it.
+    leaves exactly one process generating within a run, and no window where a
+    cert is half-written when someone reads it.
+
+    That guard says nothing about *other* pytest runs, though, so CertSet.ensure
+    still takes a file lock to serialize against a second invocation sharing the
+    checkout.
     """
     if hasattr(config, "workerinput"):  # xdist sets this on workers only
         return
