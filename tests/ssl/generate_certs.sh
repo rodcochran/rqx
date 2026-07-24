@@ -1,5 +1,12 @@
+#!/usr/bin/env bash
+#
 # Test-suite certificate generation
-# 
+#
+# Without `set -e` a failed openssl call leaves a partial cert set behind and
+# still exits 0, so the caller's check=True passes and the real failure surfaces
+# much later as a confusing handshake error.
+set -euo pipefail
+
 
 # Terminology:
 #   CSR (Certificate Signing Request) 

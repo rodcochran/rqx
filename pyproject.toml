@@ -36,7 +36,6 @@ dev = [
     "rich",
     "ty",
     "ruff",
-    "filelock",
     "maturin>=1.12,<2.0",
     "brotli",
     "zstandard",

@@ -96,4 +96,3 @@ benchmarks/infra/.pulumi/
 *.pem
 *.csr
 *.srl
-*.cert-gen.lock
