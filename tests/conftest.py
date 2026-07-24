@@ -43,6 +43,11 @@ class CertSet:
     # generate_certs.sh writes client-combined.pem last, so its presence means
     # the whole set is on disk. Checking an earlier-written file (client-cert.pem,
     # server-cert.pem) would report "certs exist" mid-generation.
+    #
+    # Note the limit of that reasoning: "written last" only implies "complete"
+    # when generating into an empty directory. Regenerating over an existing set
+    # leaves the previous sentinel in place until the final write, so this check
+    # is only trustworthy under the lock — see ensure().
     SENTINEL = "client-combined.pem"
 
     # Every link in the chain — one stale cert fails the handshake, and the CA
@@ -59,17 +64,17 @@ class CertSet:
         self.lock_path = lock_path
 
     def ensure(self):
-        if self.is_usable():
-            return
-        # The check above is deliberately unlocked — it's the common case and
-        # costs three openssl calls. The lock covers generation, which is not
-        # safe to run twice at once: independent pytest processes sharing a
-        # checkout (two terminals, CI jobs on one workspace) interleave their
-        # writes to the same files and hand each other a mismatched key pair.
+        # The check is inside the lock, not in front of it. Checking first would
+        # be cheaper, but it can read a set that is halfway through being
+        # replaced: regeneration overwrites the chain files before rewriting the
+        # sentinel, so there is a moment when all three certs are new and in
+        # date while client-combined.pem is still the previous one, signed by a
+        # CA that no longer exists on disk. That set passes is_usable() and then
+        # fails every handshake.
         with filelock.FileLock(str(self.lock_path)):
-            # Re-check under the lock. Another process may have generated while
-            # we waited, and regenerating now would swap the certs out from
-            # under a run that has already loaded them.
+            # Another process may have generated while we waited, so re-check
+            # rather than generating unconditionally — regenerating here would
+            # swap the certs out from under a run that already loaded them.
             if not self.is_usable():
                 self.generate()
 
@@ -104,6 +109,15 @@ class CertSet:
         return checked.returncode == 0
 
     def generate(self):
+        # Drop the sentinel before starting. If generation dies partway — Ctrl-C,
+        # a CI timeout, any openssl failure now that the script runs under
+        # `set -e` — the chain files have already been replaced while
+        # client-combined.pem still belongs to the previous set. is_usable()
+        # can't see that mismatch, since it only asks whether files exist and
+        # are in date, so the broken set would be inherited by every later run.
+        # Removing the sentinel first makes an interrupted generation look
+        # exactly like no generation at all.
+        (self.directory / self.SENTINEL).unlink(missing_ok=True)
         subprocess.run(["bash", str(self.script)], check=True)
 
 
