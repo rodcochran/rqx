@@ -43,6 +43,8 @@ __all__ = [
 VerifyTypes = bool | str
 CertTypes = str | bytes | tuple[str, str]
 TimeoutTypes = float | int | Timeout
+QueryParamValue = str | int | float | bool | None
+QueryParamTypes = Mapping[str, QueryParamValue]
 
 
 def request(
@@ -52,7 +54,7 @@ def request(
     content: bytes | None = None,
     data: Mapping[str, str] | None = None,
     json: Any | None = None,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -91,7 +93,7 @@ def stream(
     content: bytes | None = None,
     data: Mapping[str, str] | None = None,
     json: Any | None = None,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -132,7 +134,7 @@ def stream(
 def get(
     url: str,
     *,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -159,7 +161,7 @@ def get(
 def options(
     url: str,
     *,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -186,7 +188,7 @@ def options(
 def head(
     url: str,
     *,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -216,7 +218,7 @@ def post(
     content: bytes | None = None,
     data: Mapping[str, str] | None = None,
     json: Any | None = None,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -249,7 +251,7 @@ def put(
     content: bytes | None = None,
     data: Mapping[str, str] | None = None,
     json: Any | None = None,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -282,7 +284,7 @@ def patch(
     content: bytes | None = None,
     data: Mapping[str, str] | None = None,
     json: Any | None = None,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -312,7 +314,7 @@ def patch(
 def delete(
     url: str,
     *,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
