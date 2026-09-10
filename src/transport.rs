@@ -14,7 +14,7 @@ use crate::http::proxy::parse_proxies;
 use crate::http::tls::{VerifyConfig, parse_identity};
 use crate::request::RequestSpec;
 use crate::response::PendingResponse;
-use crate::retry::PyRetry;
+use crate::retry::{FailureKind, PyRetry, RetryCounts};
 use crate::timeout::PyTimeout;
 
 // ────────────────────────────────────────────────────────────────────────
@@ -57,20 +57,21 @@ impl Transport {
 
     /// Single attempt, no retries.
     async fn send_raw(&self, request: Request) -> PyResult<Response> {
+        self.execute(request).await.map_err(map_reqwest_error)
+    }
+
+    /// Error left unmapped so the retry loop can classify it.
+    async fn execute(&self, request: Request) -> Result<Response, reqwest::Error> {
         let _permit = match self.semaphore.as_ref() {
+            // acquire only fails on a closed semaphore; ours is never closed.
             Some(sem) => Some(
                 sem.acquire()
                     .await
-                    .map_err(|_| RqxError::new_err("connection pool closed"))?,
+                    .expect("connection semaphore is never closed"),
             ),
             None => None,
         };
-        let response = self
-            .client
-            .execute(request)
-            .await
-            .map_err(map_reqwest_error)?;
-        Ok(response)
+        self.client.execute(request).await
     }
 
     /// The retry state machine.
@@ -84,23 +85,23 @@ impl Transport {
         let respect_retry = r.respect_retry_after_header;
         let total_timeout: f64 = r.total_timeout.unwrap_or(f64::INFINITY);
 
-        let mut num_retries: u32 = 0;
+        let mut used = RetryCounts::default();
         let mut retry_history: Vec<(String, f64)> = Vec::new();
         let mut current_response: Option<Response> = None;
 
         let start_time = Instant::now();
 
-        for attempt in 0..=r.total {
+        loop {
+            let attempt = used.total;
+
             if start_time.elapsed().as_secs_f64() > total_timeout {
                 return Err(MaxRetriesExceeded::new_err(format!(
                     "total timeout of {}s exceeded after {} retries",
-                    total_timeout, num_retries,
+                    total_timeout, attempt,
                 )));
             }
 
             if attempt > 0 {
-                num_retries += 1;
-
                 let retry_after: f32 = if respect_retry {
                     current_response
                         .as_ref()
@@ -139,7 +140,7 @@ impl Transport {
             }
 
             let attempt_start = Instant::now();
-            match self.send_raw(spec.build()?).await {
+            let failure = match self.execute(spec.build()?).await {
                 Ok(resp) => {
                     if !is_retryable_method {
                         return Ok(PendingResponse::new(resp));
@@ -152,26 +153,38 @@ impl Transport {
                     }
 
                     if !r.status_forcelist.contains(&status) {
-                        return Ok(
-                            PendingResponse::new(resp).with_retries(num_retries, retry_history)
-                        );
+                        return Ok(PendingResponse::new(resp)
+                            .with_retries(used.total as u32, retry_history));
                     }
 
                     current_response = Some(resp);
+                    FailureKind::Status
                 }
                 Err(e) => {
+                    let kind = FailureKind::from_request_error(&e);
+                    let err = map_reqwest_error(e);
                     if !is_retryable_method {
-                        return Err(e);
+                        return Err(err);
                     }
                     let attempt_elapsed = attempt_start.elapsed().as_millis() as f64;
                     if attempt > 0 {
-                        retry_history.push((format!("{}", e), attempt_elapsed));
+                        retry_history.push((format!("{}", err), attempt_elapsed));
                     }
                     current_response = None;
+                    kind
                 }
+            };
+
+            if !r.allows_another(failure, &used) {
+                break;
             }
+            used.record(failure);
         }
 
+        let exhausted = format!(
+            "max retries exceeded after {} retries ({} connect, {} read, {} status)",
+            used.total, used.connect, used.read, used.status
+        );
         match current_response {
             Some(cr) => {
                 // When status_forcelist matched and retries were exhausted:
@@ -180,17 +193,11 @@ impl Transport {
                 //   caller can inspect status_code / headers / body.
                 let status = cr.status().as_u16();
                 if r.status_forcelist.contains(&status) && r.raise_on_status {
-                    return Err(MaxRetriesExceeded::new_err(format!(
-                        "max retries exceeded: {}",
-                        r.total
-                    )));
+                    return Err(MaxRetriesExceeded::new_err(exhausted));
                 }
-                Ok(PendingResponse::new(cr).with_retries(num_retries, retry_history))
+                Ok(PendingResponse::new(cr).with_retries(used.total as u32, retry_history))
             }
-            None => Err(MaxRetriesExceeded::new_err(format!(
-                "max retries exceeded: {}",
-                r.total
-            ))),
+            None => Err(MaxRetriesExceeded::new_err(exhausted)),
         }
     }
 

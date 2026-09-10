@@ -11,6 +11,7 @@ import time
 import pytest
 
 import rqx
+from conftest import FlakyServerHandler, _free_port
 
 
 # ----- backoff_jitter -----
@@ -142,7 +143,7 @@ async def test_raise_on_redirect_false_returns_3xx_async(flaky_server):
 # ----- retries under follow_redirects -----
 #
 # Every send goes through Transport::send, so retries apply to redirect hops
-# and streaming too (https://github.com/rodcochran/rqx/issues/148). Budget is per hop; telemetry adds up across the
+# and streaming too (https://github.com/rodcochran/rqx/issues/148). Caps apply per hop; telemetry adds up across the
 # chain. The control test is identical except for follow_redirects.
 
 
@@ -231,32 +232,98 @@ async def test_retries_fire_on_stream_under_follow_redirects_async(flaky_server)
         assert resp.num_retries == 2
 
 
-# ----- retry budget is per hop -----
+# ----- retry caps apply per hop -----
 #
 # /flaky-redirect: 503, 503, 302 -> destination: 503, 503, 200. Four retries
 # over two hops. total=3 passes per hop and would fail if shared across the chain.
 
 
-def test_retry_budget_is_per_redirect_hop(flaky_server):
+def test_retry_caps_apply_per_redirect_hop(flaky_server):
     retries = rqx.Retry(total=3, backoff_factor=0.0, status_forcelist={503})
     transport = rqx.HTTPTransport(retries=retries)
     client = rqx.Client(transport=transport, follow_redirects=True)
 
-    resp = client.get(f"{flaky_server}/flaky-redirect?request_id=budget_per_hop_sync")
+    resp = client.get(f"{flaky_server}/flaky-redirect?request_id=caps_per_hop_sync")
     assert resp.status_code == 200
     assert resp.num_retries == 4
     assert [status for status, _ in resp.retry_history] == ["503", "302", "503", "200"]
 
 
 @pytest.mark.asyncio
-async def test_retry_budget_is_per_redirect_hop_async(flaky_server):
+async def test_retry_caps_apply_per_redirect_hop_async(flaky_server):
     retries = rqx.Retry(total=3, backoff_factor=0.0, status_forcelist={503})
     transport = rqx.AsyncHTTPTransport(retries=retries)
     client = rqx.AsyncClient(transport=transport, follow_redirects=True)
 
     resp = await client.get(
-        f"{flaky_server}/flaky-redirect?request_id=budget_per_hop_async"
+        f"{flaky_server}/flaky-redirect?request_id=caps_per_hop_async"
     )
     assert resp.status_code == 200
     assert resp.num_retries == 4
     assert [status for status, _ in resp.retry_history] == ["503", "302", "503", "200"]
+
+
+# ----- per-kind caps (https://github.com/rodcochran/rqx/issues/54) -----
+# flaky endpoint: 503 twice then 200; /reset: closes after accept; free port: refused.
+
+
+def test_status_cap_stops_before_total(flaky_server):
+    retries = rqx.Retry(
+        total=5, status=1, backoff_factor=0.0, status_forcelist={503}, raise_on_status=False
+    )
+    client = rqx.Client(transport=rqx.HTTPTransport(retries=retries))
+    resp = client.get(f"{flaky_server}/?request_id=status_cap_sync")
+    assert resp.status_code == 503
+    assert resp.num_retries == 1
+
+
+def test_total_still_caps_a_generous_status_cap(flaky_server):
+    retries = rqx.Retry(
+        total=1, status=5, backoff_factor=0.0, status_forcelist={503}, raise_on_status=False
+    )
+    client = rqx.Client(transport=rqx.HTTPTransport(retries=retries))
+    resp = client.get(f"{flaky_server}/?request_id=total_caps_status_sync")
+    assert resp.status_code == 503
+    assert resp.num_retries == 1
+
+
+def test_status_cap_exhaustion_message_reports_breakdown(flaky_server):
+    retries = rqx.Retry(total=5, status=1, backoff_factor=0.0, status_forcelist={503})
+    client = rqx.Client(transport=rqx.HTTPTransport(retries=retries))
+    with pytest.raises(rqx.MaxRetriesExceeded, match=r"1 retries \(0 connect, 0 read, 1 status\)"):
+        client.get(f"{flaky_server}/?request_id=status_cap_message")
+
+
+def test_connect_cap_stops_before_total():
+    retries = rqx.Retry(total=5, connect=1, backoff_factor=0.0)
+    client = rqx.Client(transport=rqx.HTTPTransport(retries=retries))
+    with pytest.raises(rqx.MaxRetriesExceeded, match=r"\(1 connect, 0 read, 0 status\)"):
+        client.get(f"http://127.0.0.1:{_free_port()}/")
+
+
+def test_read_cap_stops_before_total(flaky_server):
+    retries = rqx.Retry(total=5, read=1, backoff_factor=0.0)
+    client = rqx.Client(transport=rqx.HTTPTransport(retries=retries))
+    with pytest.raises(rqx.MaxRetriesExceeded, match=r"\(0 connect, 1 read, 0 status\)"):
+        client.get(f"{flaky_server}/reset?request_id=read_cap_sync")
+    assert FlakyServerHandler.counters["read_cap_sync"] == 2  # 1 attempt + 1 retry
+
+
+def test_caps_default_to_total(flaky_server):
+    retries = rqx.Retry(total=3, backoff_factor=0.0, status_forcelist={503})
+    assert (retries.connect, retries.read, retries.status) == (3, 3, 3)
+    client = rqx.Client(transport=rqx.HTTPTransport(retries=retries))
+    resp = client.get(f"{flaky_server}/?request_id=caps_default_sync")
+    assert resp.status_code == 200
+    assert resp.num_retries == 2
+
+
+@pytest.mark.asyncio
+async def test_status_cap_stops_before_total_async(flaky_server):
+    retries = rqx.Retry(
+        total=5, status=1, backoff_factor=0.0, status_forcelist={503}, raise_on_status=False
+    )
+    client = rqx.AsyncClient(transport=rqx.AsyncHTTPTransport(retries=retries))
+    resp = await client.get(f"{flaky_server}/?request_id=status_cap_async")
+    assert resp.status_code == 503
+    assert resp.num_retries == 1

@@ -126,7 +126,7 @@ class Timeout:
 
 class PyRetry:
     """total counts retries, not attempts: total=3 allows four attempts. Under
-    follow_redirects the budget is per hop; num_retries and retry_history on
+    follow_redirects the caps apply per hop; num_retries and retry_history on
     the final response add up across the chain."""
 
     def __init__(
