@@ -34,7 +34,7 @@ class Run:
 
 
 def run_script(source: str, *args: str, timeout: float = SUBPROCESS_TIMEOUT) -> Run:
-    proc = subprocess.run(
+    proc = subprocess.run(  # noqa: S603 - fixed interpreter, test-owned script source
         [sys.executable, "-X", "faulthandler", "-c", textwrap.dedent(source), *args],
         capture_output=True,
         text=True,

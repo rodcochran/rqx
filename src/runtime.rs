@@ -157,9 +157,15 @@ impl Runtime {
     /// client. Building one throwaway client in the parent right before it
     /// forks initializes those classes on the parent's side. CPython moved
     /// `multiprocessing` to `spawn` on macOS for the same class of problem.
+    ///
+    /// Runs once per process: the classes stay initialized after the first
+    /// build, and a prefork master forks many times.
     #[cfg(target_os = "macos")]
     pub fn prepare_fork(&self) {
-        let _ = reqwest::Client::builder().build();
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let _ = reqwest::Client::builder().build();
+        });
     }
 
     /// The slot behind `current` if it exists and belongs to `pid`.
@@ -172,40 +178,44 @@ impl Runtime {
 
     /// Build a runtime for `pid` and install it, unless another thread won
     /// the race, in which case use theirs.
-    fn build(&self, seen: *mut Slot, pid: u32) -> PyResult<Handle> {
-        // Default worker count (= num_cpus). H3 tried worker_threads(1) but
-        // regressed throughput at c>=500 by ~20%; see docs/improvements.md.
-        let runtime = Builder::new_multi_thread()
-            .enable_all()
-            .thread_name("rqx-tokio-worker")
-            .build()
-            .map_err(|e| {
-                PyRuntimeError::new_err(format!("Error initializing Tokio Runtime: {e}"))
-            })?;
-        let handle = runtime.handle().clone();
-        let slot = Box::into_raw(Box::new(Slot {
-            pid,
-            handle: handle.clone(),
-            runtime: Mutex::new(Some(runtime)),
-        }));
-        match self
-            .current
-            .compare_exchange(seen, slot, Ordering::AcqRel, Ordering::Acquire)
-        {
-            Ok(_) => Ok(handle),
-            Err(winner) => {
-                // Another thread installed a slot first. Ours was never
-                // published, so nobody else can observe it and it can be
-                // freed outright.
-                // SAFETY: `slot` came from Box::into_raw above and was never
-                // shared.
-                drop(unsafe { Box::from_raw(slot) });
-                match Self::slot_for(winner, pid) {
-                    Some(theirs) => Ok(theirs.handle.clone()),
-                    // The winner is stale (a fork happened in between). Try again.
-                    None => self.build(winner, pid),
-                }
+    fn build(&self, mut seen: *mut Slot, pid: u32) -> PyResult<Handle> {
+        loop {
+            // Default worker count (= num_cpus). H3 tried worker_threads(1)
+            // but regressed throughput at c>=500 by ~20%; see
+            // docs/improvements.md.
+            let runtime = Builder::new_multi_thread()
+                .enable_all()
+                .thread_name("rqx-tokio-worker")
+                .build()
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!("Error initializing Tokio Runtime: {e}"))
+                })?;
+            let handle = runtime.handle().clone();
+            let slot = Box::into_raw(Box::new(Slot {
+                pid,
+                handle: handle.clone(),
+                runtime: Mutex::new(Some(runtime)),
+            }));
+            let winner =
+                match self
+                    .current
+                    .compare_exchange(seen, slot, Ordering::AcqRel, Ordering::Acquire)
+                {
+                    Ok(_) => return Ok(handle),
+                    Err(winner) => winner,
+                };
+            // Another thread installed a slot first. Ours was never
+            // published, so nobody else can observe it and it can be freed
+            // outright.
+            // SAFETY: `slot` came from Box::into_raw above and was never
+            // shared.
+            drop(unsafe { Box::from_raw(slot) });
+            if let Some(theirs) = Self::slot_for(winner, pid) {
+                return Ok(theirs.handle.clone());
             }
+            // The winner is stale (a fork happened in between): retry
+            // against it.
+            seen = winner;
         }
     }
 }
@@ -226,11 +236,17 @@ tokio::task_local! {
 
 impl Bridge {
     fn handle() -> Handle {
-        // `Runtime::future_into_py` resolves the handle (and surfaces any
-        // build error) before delegating to pyo3-async-runtimes, so by the
-        // time spawn is reached the slot for this PID exists and this is the
-        // fast path. `spawn_blocking` is called from tokio workers that the
-        // runtime itself owns.
+        // Result delivery (`spawn_blocking`) runs on a tokio worker, where the
+        // ambient handle is the runtime the task already belongs to. Using it
+        // keeps delivery working during `shutdown` — after `closed` is set
+        // but before the runtime is dropped — and skips a `getpid` per
+        // completion. The initial `spawn` comes from a Python thread with no
+        // ambient runtime; `Runtime::future_into_py` resolved (and, on error,
+        // reported) the slot for this PID just before, so that path cannot
+        // fail here.
+        if let Ok(ambient) = Handle::try_current() {
+            return ambient;
+        }
         RUNTIME
             .handle()
             .expect("rqx runtime resolved by Runtime::future_into_py before spawn")
