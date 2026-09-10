@@ -12,6 +12,7 @@ use crate::exceptions::*;
 use crate::http::protocol::HttpVersionConfig;
 use crate::http::proxy::parse_proxies;
 use crate::http::tls::{VerifyConfig, parse_identity};
+use crate::request::RequestSpec;
 use crate::response::PendingResponse;
 use crate::retry::PyRetry;
 use crate::timeout::PyTimeout;
@@ -46,11 +47,11 @@ impl Transport {
 
     /// Send with retries, body unread. Every path — buffered, redirect hops,
     /// streaming — goes through here so retries can't be skipped (https://github.com/rodcochran/rqx/issues/148).
-    pub async fn send(&self, request: Request) -> PyResult<PendingResponse> {
+    pub async fn send(&self, spec: &RequestSpec) -> PyResult<PendingResponse> {
         if self.retries.is_some() {
-            self.send_with_retries(request).await
+            self.send_with_retries(spec).await
         } else {
-            Ok(PendingResponse::new(self.send_raw(request).await?))
+            Ok(PendingResponse::new(self.send_raw(spec.build()?).await?))
         }
     }
 
@@ -73,13 +74,12 @@ impl Transport {
     }
 
     /// The retry state machine.
-    async fn send_with_retries(&self, request: Request) -> PyResult<PendingResponse> {
+    async fn send_with_retries(&self, spec: &RequestSpec) -> PyResult<PendingResponse> {
         // Operates on raw reqwest::Response throughout — reading status and
         // retry-after directly from response headers without acquiring the GIL.
         // The body stays unread for the caller. Mirrors the redirect-loop fix from https://github.com/rodcochran/rqx/issues/93.
         let r = self.retries.as_ref().unwrap();
-        let method = request.method().to_string();
-        let is_retryable_method = r.allowed_methods.contains(&method);
+        let is_retryable_method = r.allowed_methods.contains(spec.method().as_str());
         let backoff_max: f32 = r.backoff_max;
         let respect_retry = r.respect_retry_after_header;
         let total_timeout: f64 = r.total_timeout.unwrap_or(f64::INFINITY);
@@ -87,7 +87,6 @@ impl Transport {
         let mut num_retries: u32 = 0;
         let mut retry_history: Vec<(String, f64)> = Vec::new();
         let mut current_response: Option<Response> = None;
-        let mut request_copy: Request;
 
         let start_time = Instant::now();
 
@@ -139,12 +138,8 @@ impl Transport {
                 let _ = old.bytes().await;
             }
 
-            request_copy = request
-                .try_clone()
-                .ok_or_else(|| RqxError::new_err("Streaming request bodies cannot be retried"))?;
-
             let attempt_start = Instant::now();
-            match self.send_raw(request_copy).await {
+            match self.send_raw(spec.build()?).await {
                 Ok(resp) => {
                     if !is_retryable_method {
                         return Ok(PendingResponse::new(resp));
