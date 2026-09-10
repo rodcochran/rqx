@@ -15,30 +15,46 @@ use super::exceptions::{HTTPStatusError, RqxError, map_reqwest_error};
 use super::headers::PyHeaders;
 use super::py_json::value_to_py;
 
-/// Wire response with the body unread, plus the retries it took to get it.
-/// Seed of the deferred-body model in https://github.com/rodcochran/rqx/issues/55
+/// Headers received, body unread. Everything known before the body — status,
+/// headers, cookies, retry telemetry, elapsed — lives in `parts`. `read` buffers
+/// the body into a `PyResponse`; stream responses take the live body as-is.
 pub struct PendingResponse {
-    pub response: Response,
-    pub num_retries: u32,
-    pub retry_history: Vec<(String, f64)>,
+    pub parts: ResponseParts,
+    response: Response,
 }
 
 impl PendingResponse {
-    /// One attempt, no retries.
-    pub(crate) fn once(response: Response) -> Self {
+    pub fn new(response: Response) -> Self {
         Self {
+            parts: ResponseParts::from_reqwest(&response),
             response,
-            num_retries: 0,
-            retry_history: Vec::new(),
         }
     }
 
-    /// Reads the body into a PyResponse, keeping the retry telemetry.
-    pub async fn into_py_response(self) -> PyResult<PyResponse> {
-        let mut response = PyResponse::from_response(self.response).await?;
-        response.parts.num_retries = self.num_retries;
-        response.parts.retry_history = self.retry_history;
-        Ok(response)
+    pub fn with_retries(mut self, num_retries: u32, retry_history: Vec<(String, f64)>) -> Self {
+        self.parts.num_retries = num_retries;
+        self.parts.retry_history = retry_history;
+        self
+    }
+
+    /// Buffer the body. The one place a `PyResponse` is built from the wire.
+    pub async fn read(self) -> PyResult<PyResponse> {
+        Ok(PyResponse {
+            parts: self.parts,
+            body: self.response.bytes().await.map_err(map_reqwest_error)?,
+            content_cache: PyOnceLock::new(),
+            headers_cache: PyOnceLock::new(),
+        })
+    }
+
+    /// Consume the body without keeping it, so the connection goes back to the pool.
+    pub async fn drain(self) {
+        let _ = self.response.bytes().await;
+    }
+
+    /// Parts plus the live body, for stream responses.
+    pub fn into_parts(self) -> (ResponseParts, Response) {
+        (self.parts, self.response)
     }
 }
 
@@ -311,16 +327,5 @@ impl PyResponse {
     #[getter]
     fn is_error(&self) -> bool {
         self.parts.is_error()
-    }
-}
-
-impl PyResponse {
-    pub async fn from_response(response: Response) -> PyResult<PyResponse> {
-        Ok(PyResponse {
-            parts: ResponseParts::from_reqwest(&response),
-            body: response.bytes().await.map_err(map_reqwest_error)?,
-            content_cache: PyOnceLock::<Py<PyBytes>>::new(),
-            headers_cache: PyOnceLock::<Py<PyHeaders>>::new(),
-        })
     }
 }

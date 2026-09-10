@@ -3,13 +3,13 @@
 //! The runtime used to be built eagerly in `#[pymodule]` and stored in a
 //! `OnceLock` for the life of the process. That shape had two failure modes:
 //!
-//! * **fork() (#159).** `import rqx` spawned the worker threads in the parent.
+//! * **fork() (https://github.com/rodcochran/rqx/issues/159).** `import rqx` spawned the worker threads in the parent.
 //!   A forked child inherits the `Runtime` struct but none of its threads or
 //!   its I/O driver, so the first request in the child hangs (Linux) or aborts
 //!   (macOS). Prefork servers — gunicorn, `uvicorn --workers` — import the app
 //!   in the master and fork, which is exactly that sequence.
 //!
-//! * **Interpreter shutdown (#99).** Async results are delivered to Python by
+//! * **Interpreter shutdown (https://github.com/rodcochran/rqx/issues/99).** Async results are delivered to Python by
 //!   attaching to the interpreter from a tokio blocking thread. A future still
 //!   in flight when the interpreter finalizes attaches after finalization has
 //!   begun; depending on timing that thread is killed mid-write to `sys.stderr`

@@ -15,8 +15,8 @@ use url::Url;
 /// resolves to `<base>/users` rather than dropping the last path segment.
 /// This mirrors how httpx normalizes its base_url at construction time.
 pub fn parse_base_url(s: &str) -> PyResult<Url> {
-    let mut url = Url::parse(s)
-        .map_err(|e| PyValueError::new_err(format!("invalid base_url {s:?}: {e}")))?;
+    let mut url =
+        Url::parse(s).map_err(|e| PyValueError::new_err(format!("invalid base_url {s:?}: {e}")))?;
     if !url.path().ends_with('/') {
         let new_path = format!("{}/", url.path());
         url.set_path(&new_path);
@@ -47,13 +47,9 @@ pub fn resolve_url(base: Option<&Url>, input: &str) -> PyResult<String> {
         None => Ok(input.to_string()),
         Some(b) => {
             let stripped = input.trim_start_matches('/');
-            b.join(stripped)
-                .map(|u| u.to_string())
-                .map_err(|e| {
-                    PyValueError::new_err(format!(
-                        "could not join base_url with {input:?}: {e}"
-                    ))
-                })
+            b.join(stripped).map(|u| u.to_string()).map_err(|e| {
+                PyValueError::new_err(format!("could not join base_url with {input:?}: {e}"))
+            })
         }
     }
 }

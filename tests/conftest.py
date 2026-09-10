@@ -148,7 +148,7 @@ def pytest_configure(config):
     made the timing depend on which worker happened to draw a TLS test first:
     under `-n 8`, a test reading a cert path without requesting one of those
     fixtures could run before any cert existed and fail with "failed to read
-    client cert: No such file or directory" (#112).
+    client cert: No such file or directory" (https://github.com/rodcochran/rqx/issues/112).
 
     Doing it here removes the race rather than guarding it. Under xdist this
     hook runs in the controller and again in each worker, but the controller's

@@ -1,7 +1,7 @@
 """Runtime lifecycle: lazy construction, survival across fork(), clean interpreter exit.
 
-Regression coverage for #159 (tokio runtime built at import did not survive fork)
-and #99 (SIGABRT at interpreter shutdown under async load).
+Regression coverage for https://github.com/rodcochran/rqx/issues/159 (tokio runtime built at import did not survive fork)
+and https://github.com/rodcochran/rqx/issues/99 (SIGABRT at interpreter shutdown under async load).
 
 Every scenario runs in a fresh subprocess: the behaviors under test are process
 lifecycle events (import, fork, exit), which cannot be observed from inside the
@@ -72,7 +72,7 @@ OS_THREAD_COUNT = """
 
 
 def test_import_does_not_start_runtime_threads():
-    """#159: the runtime must not exist until first use, so `import rqx` alone
+    """https://github.com/rodcochran/rqx/issues/159: the runtime must not exist until first use, so `import rqx` alone
     leaves nothing behind for fork() to break."""
     run = run_script(OS_THREAD_COUNT)
     assert_clean_exit(run)
@@ -126,7 +126,7 @@ FORK_SCRIPT = """
 @pytest.mark.parametrize("warm", ["cold", "warm"])
 @pytest.mark.parametrize("mode", ["sync", "async"])
 def test_fork_child_can_make_requests(flaky_server, warm, mode):
-    """#159: a child forked after `import rqx` (and optionally after the parent
+    """https://github.com/rodcochran/rqx/issues/159: a child forked after `import rqx` (and optionally after the parent
     already made a request) must be able to make its own requests."""
     run = run_script(FORK_SCRIPT, f"{flaky_server}/sleep/0", warm, mode)
     assert_clean_exit(run)
@@ -163,7 +163,7 @@ INFLIGHT_AT_EXIT = """
 
 
 def test_exit_with_future_in_flight_is_clean(flaky_server):
-    """#99: a Rust future still running when asyncio.run() returns must not be
+    """https://github.com/rodcochran/rqx/issues/99: a Rust future still running when asyncio.run() returns must not be
     allowed to reach into a finalizing interpreter. Before the fix this
     aborted (macOS, `_enter_buffered_busy`) or segfaulted (Linux)."""
     run = run_script(INFLIGHT_AT_EXIT, f"{flaky_server}/sleep/0")
@@ -197,7 +197,7 @@ ASYNC_LOAD_THEN_EXIT = """
 
 
 def test_exit_after_sustained_async_load_is_clean(flaky_server):
-    """#99, bench-shaped: sustained concurrent async load, then a normal exit."""
+    """https://github.com/rodcochran/rqx/issues/99, bench-shaped: sustained concurrent async load, then a normal exit."""
     # Modest load: the fixture server is single-threaded, and this test is about
     # what happens after the load, not the server's capacity.
     run = run_script(ASYNC_LOAD_THEN_EXIT, f"{flaky_server}/sleep/0", "4", "0.5")
@@ -223,7 +223,7 @@ CANCELLED_LOAD_THEN_EXIT = """
 
 
 def test_exit_with_cancelled_requests_is_clean(flaky_server):
-    """#99: requests cancelled from Python while their Rust side is still
+    """https://github.com/rodcochran/rqx/issues/99: requests cancelled from Python while their Rust side is still
     running must not disturb interpreter exit."""
     run = run_script(CANCELLED_LOAD_THEN_EXIT, f"{flaky_server}/sleep/0.3")
     assert_clean_exit(run)
