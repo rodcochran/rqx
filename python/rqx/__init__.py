@@ -1,4 +1,16 @@
 # import from the compiled Rust extension module
+# module-level convenience functions — mirrors httpx.{get,post,...,stream}
+from ._api import (
+    delete,
+    get,
+    head,
+    options,
+    patch,
+    post,
+    put,
+    request,
+    stream,
+)
 from ._rqx import (
     AsyncHTTPTransport,
     ConnectError,
@@ -23,19 +35,6 @@ from ._rqx import (
     TransportError,
     WriteError,
     WriteTimeout,
-)
-
-# module-level convenience functions — mirrors httpx.{get,post,...,stream}
-from ._api import (
-    delete,
-    get,
-    head,
-    options,
-    patch,
-    post,
-    put,
-    request,
-    stream,
 )
 
 # optional: nicer names (drop Py prefix)
