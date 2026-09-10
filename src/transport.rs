@@ -455,26 +455,18 @@ impl HTTPTransport {
     }
 
     pub fn handle_request(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
-        py.detach(|| {
-            RUNTIME
-                .get()
-                .ok_or_else(|| RqxError::new_err("runtime not initialized"))?
-                // NOTE: block_on panics if called from within an existing tokio runtime
-                // context. Safe here because Python is the caller and py.detach releases
-                // the GIL without entering a runtime. Callers embedding this in an async
-                // Python framework (or invoking from inside another tokio task) will
-                // panic — they should use the async variant instead.
-                .block_on(self.inner.handle_request(request))
-        })
+        // NOTE: block_on panics if called from within an existing tokio runtime
+        // context. Safe here because Python is the caller and py.detach releases
+        // the GIL without entering a runtime. Callers embedding this in an async
+        // Python framework (or invoking from inside another tokio task) will
+        // panic — they should use the async variant instead.
+        py.detach(|| RUNTIME.block_on(self.inner.handle_request(request)))
+            .and_then(|result| result)
     }
 
     pub fn send_raw(&self, py: Python<'_>, request: Request) -> PyResult<Response> {
-        py.detach(|| {
-            RUNTIME
-                .get()
-                .ok_or_else(|| RqxError::new_err("runtime not initialized"))?
-                .block_on(self.inner.send_raw(request))
-        })
+        py.detach(|| RUNTIME.block_on(self.inner.send_raw(request)))
+            .and_then(|result| result)
     }
 
     pub fn client(&self) -> &Client {

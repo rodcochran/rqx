@@ -893,7 +893,7 @@ impl PyAsyncClient {
         let url = url.to_string();
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        RUNTIME.future_into_py(py, async move {
             inner
                 .request(
                     &method,
@@ -927,7 +927,7 @@ impl PyAsyncClient {
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
         let url = url.to_string();
         let inner = self.inner.clone();
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        RUNTIME.future_into_py(py, async move {
             inner
                 .get(
                     &url,
@@ -957,7 +957,7 @@ impl PyAsyncClient {
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
         let url = url.to_string();
         let inner = self.inner.clone();
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        RUNTIME.future_into_py(py, async move {
             inner
                 .options(
                     &url,
@@ -987,7 +987,7 @@ impl PyAsyncClient {
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
         let url = url.to_string();
         let inner = self.inner.clone();
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        RUNTIME.future_into_py(py, async move {
             inner
                 .head(
                     &url,
@@ -1017,7 +1017,7 @@ impl PyAsyncClient {
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
         let url = url.to_string();
         let inner = self.inner.clone();
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        RUNTIME.future_into_py(py, async move {
             inner
                 .delete(
                     &url,
@@ -1052,7 +1052,7 @@ impl PyAsyncClient {
         let url = url.to_string();
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        RUNTIME.future_into_py(py, async move {
             inner
                 .post(
                     &url,
@@ -1090,7 +1090,7 @@ impl PyAsyncClient {
         let url = url.to_string();
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        RUNTIME.future_into_py(py, async move {
             inner
                 .put(
                     &url,
@@ -1128,7 +1128,7 @@ impl PyAsyncClient {
         let url = url.to_string();
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        RUNTIME.future_into_py(py, async move {
             inner
                 .patch(
                     &url,
@@ -1168,7 +1168,7 @@ impl PyAsyncClient {
         let url = url.to_string();
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        RUNTIME.future_into_py(py, async move {
             let (response, elapsed) = inner
                 .stream(
                     &method,
@@ -1191,7 +1191,7 @@ impl PyAsyncClient {
     }
 
     fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        pyo3_async_runtimes::tokio::future_into_py(py, async move { Ok(slf) })
+        RUNTIME.future_into_py(py, async move { Ok(slf) })
     }
 
     fn __aexit__<'py>(
@@ -1201,7 +1201,7 @@ impl PyAsyncClient {
         _exc_value: Option<&Bound<'_, PyAny>>,
         _traceback: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        pyo3_async_runtimes::tokio::future_into_py(py, async move { Ok(false) })
+        RUNTIME.future_into_py(py, async move { Ok(false) })
     }
 }
 
@@ -1214,10 +1214,6 @@ where
     F: std::future::Future<Output = PyResult<T>> + Send,
     T: Send,
 {
-    py.detach(|| {
-        RUNTIME
-            .get()
-            .ok_or_else(|| RqxError::new_err("runtime not initialized"))?
-            .block_on(fut)
-    })
+    py.detach(|| RUNTIME.block_on(fut))
+        .and_then(|result| result)
 }
