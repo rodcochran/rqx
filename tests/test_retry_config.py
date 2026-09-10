@@ -142,7 +142,7 @@ async def test_raise_on_redirect_false_returns_3xx_async(flaky_server):
 # ----- retries under follow_redirects -----
 #
 # Every send goes through Transport::send, so retries apply to redirect hops
-# and streaming too (#148). Budget is per hop; telemetry adds up across the
+# and streaming too (https://github.com/rodcochran/rqx/issues/148). Budget is per hop; telemetry adds up across the
 # chain. The control test is identical except for follow_redirects.
 
 

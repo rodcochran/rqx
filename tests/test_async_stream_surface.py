@@ -163,3 +163,14 @@ async def test_aiter_lines_splits_and_strips_terminators(flaky_server):
         resp = await client.stream("GET", f"{flaky_server}/lines")
         lines = [line async for line in resp.aiter_lines()]
     assert lines == ["first", "second", "third"]
+
+
+@pytest.mark.asyncio
+async def test_elapsed_is_set_before_body_is_read(flaky_server):
+    client = rqx.AsyncClient()
+    resp = await client.stream("GET", f"{flaky_server}/sleep/0.2")
+    async with resp:
+        assert resp.elapsed >= 0.2
+        elapsed_at_headers = resp.elapsed
+        await resp.aread()
+        assert resp.elapsed == elapsed_at_headers

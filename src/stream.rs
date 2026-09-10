@@ -9,13 +9,12 @@ use pyo3::prelude::{Py, PyAny, PyRef, PyRefMut, PyResult, Python, pyclass, pymet
 use pyo3::sync::PyOnceLock;
 use pyo3::types::PyBytes;
 use pyo3::{Bound, IntoPyObject, PyErr};
-use reqwest::Response;
 use tokio::sync::Mutex as TokioMutex;
 
 use super::exceptions::*;
 use super::headers::PyHeaders;
 use super::py_json::value_to_py;
-use super::response::ResponseParts;
+use super::response::{PendingResponse, ResponseParts};
 use super::runtime::RUNTIME;
 
 /// Streaming HTTP body source. `Pin<Box<dyn ...>>` is standard practice for
@@ -753,13 +752,14 @@ impl PyStreamResponse {
 }
 
 impl PyStreamResponse {
-    pub fn from_response(response: Response) -> PyResult<PyStreamResponse> {
-        Ok(PyStreamResponse {
-            parts: ResponseParts::from_reqwest(&response),
+    pub fn from_pending(pending: PendingResponse) -> PyStreamResponse {
+        let (parts, response) = pending.into_parts();
+        PyStreamResponse {
+            parts,
             body: Some(Body::Live(response)),
             content_cache: PyOnceLock::new(),
             headers_cache: PyOnceLock::new(),
-        })
+        }
     }
 }
 
@@ -1047,13 +1047,14 @@ impl PyAsyncStreamResponse {
         }
     }
 
-    pub fn from_response(response: Response) -> PyResult<PyAsyncStreamResponse> {
-        Ok(PyAsyncStreamResponse {
-            parts: ResponseParts::from_reqwest(&response),
+    pub fn from_pending(pending: PendingResponse) -> PyAsyncStreamResponse {
+        let (parts, response) = pending.into_parts();
+        PyAsyncStreamResponse {
+            parts,
             body: Arc::new(Mutex::new(Some(Body::Live(response)))),
             content_cache: PyOnceLock::new(),
             headers_cache: PyOnceLock::new(),
-        })
+        }
     }
 }
 

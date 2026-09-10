@@ -1,6 +1,5 @@
 use pyo3::Bound;
 use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python, pyclass, pymethods};
-use reqwest::Request;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -9,9 +8,7 @@ use url::Url;
 
 use crate::exceptions::*;
 use crate::py_json::py_to_value;
-use crate::request::{
-    build_client_request, build_redirect_request, determine_redirect_method, determine_redirect_url,
-};
+use crate::request::{RequestSpec, build_client_request, determine_redirect_url};
 use crate::response::{PendingResponse, PyResponse};
 use crate::retry::DEFAULT_RAISE_ON_REDIRECT;
 use crate::runtime::RUNTIME;
@@ -84,6 +81,7 @@ impl Client {
         self.cookies.blocking_lock().clone()
     }
 
+    /// Build and send a request, then buffer the body.
     pub async fn request(
         &self,
         method: &str,
@@ -99,7 +97,71 @@ impl Client {
         timeout: f64,
     ) -> PyResult<PyResponse> {
         let start_time = Instant::now();
+        let request = self.build(
+            method,
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            timeout,
+        )?;
+        let mut resp = self.send(request, follow_redirects).await?.read().await?;
+        // For a buffered response, elapsed covers the body read too.
+        resp.parts.elapsed = start_time.elapsed().as_secs_f64();
+        Ok(resp)
+    }
 
+    /// Build and send a request, leaving the body unread for the stream
+    /// response to consume.
+    pub async fn stream(
+        &self,
+        method: &str,
+        url: &str,
+        content: Option<&[u8]>,
+        data: Option<HashMap<String, String>>,
+        json: Option<serde_json::Value>,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
+        follow_redirects: Option<bool>,
+        timeout: f64,
+    ) -> PyResult<PendingResponse> {
+        let start_time = Instant::now();
+        let request = self.build(
+            method,
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            timeout,
+        )?;
+        let mut pending = self.send(request, follow_redirects).await?;
+        pending.parts.elapsed = start_time.elapsed().as_secs_f64();
+        Ok(pending)
+    }
+
+    fn build(
+        &self,
+        method: &str,
+        url: &str,
+        content: Option<&[u8]>,
+        data: Option<HashMap<String, String>>,
+        json: Option<serde_json::Value>,
+        params: Option<HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
+        auth: Option<(String, String)>,
+        auth_bearer: Option<String>,
+        timeout: f64,
+    ) -> PyResult<RequestSpec> {
         // Resolve bearer: per-request override wins; otherwise fall back to
         // the client-level default. Then enforce the basic-vs-bearer collision
         // rule against the effective values that would actually be applied.
@@ -124,80 +186,24 @@ impl Client {
             bearer.as_deref(),
             timeout,
         )?;
-
-        let follow = follow_redirects.unwrap_or(self.follow_redirects);
-        let sent = if follow {
-            self.follow_redirects(request).await?
-        } else {
-            self.transport.send(request).await?
-        };
-        let mut resp = sent.into_py_response().await?;
-
-        self.accumulate_cookies(&resp.parts.cookies).await;
-
-        resp.parts.elapsed = (Instant::now() - start_time).as_secs_f64();
-        Ok(resp)
+        Ok(RequestSpec::from_request(request))
     }
 
-    pub async fn stream(
+    /// Send a built request — following redirects when asked — and accumulate
+    /// the final response's cookies. Shared by `request` and `stream`.
+    async fn send(
         &self,
-        method: &str,
-        url: &str,
-        content: Option<&[u8]>,
-        data: Option<HashMap<String, String>>,
-        json: Option<serde_json::Value>,
-        params: Option<HashMap<String, String>>,
-        headers: Option<HashMap<String, String>>,
-        auth: Option<(String, String)>,
-        auth_bearer: Option<String>,
+        spec: RequestSpec,
         follow_redirects: Option<bool>,
-        timeout: f64,
-    ) -> PyResult<(PendingResponse, f64)> {
-        // Returns (pending, elapsed_secs) — the pyclass wraps it into
-        // PyStreamResponse / PyAsyncStreamResponse and sets elapsed + retry telemetry.
-        let start_time = Instant::now();
-
-        let bearer = auth_bearer.or_else(|| self.auth_bearer.clone());
-        if auth.is_some() && bearer.is_some() {
-            return Err(RqxError::new_err(
-                "Cannot specify both auth= (basic) and auth_bearer= on the same request",
-            ));
-        }
-
-        let resolved_url = resolve_url(self.base_url.as_ref(), url)?;
-        let request = build_client_request(
-            self.transport.client(),
-            method,
-            &resolved_url,
-            content,
-            data,
-            json.as_ref(),
-            params,
-            headers,
-            auth,
-            bearer.as_deref(),
-            timeout,
-        )?;
-
+    ) -> PyResult<PendingResponse> {
         let follow = follow_redirects.unwrap_or(self.follow_redirects);
-        let sent = if follow {
-            self.follow_redirects(request).await?
+        let pending = if follow {
+            self.follow_redirects(spec).await?
         } else {
-            self.transport.send(request).await?
+            self.transport.send(&spec).await?
         };
-
-        // Accumulate cookies from the final response. (Intermediate-hop
-        // cookies were already accumulated by follow_redirects.)
-        // .cookies() iterates Set-Cookie headers without consuming the body.
-        let final_cookies: HashMap<String, String> = sent
-            .response
-            .cookies()
-            .map(|c| (c.name().to_string(), c.value().to_string()))
-            .collect();
-        self.accumulate_cookies(&final_cookies).await;
-
-        let elapsed = (Instant::now() - start_time).as_secs_f64();
-        Ok((sent, elapsed))
+        self.accumulate_cookies(&pending.parts.cookies).await;
+        Ok(pending)
     }
 
     pub async fn get(
@@ -404,22 +410,16 @@ impl Client {
             .extend(resp_cookies.iter().map(|(k, v)| (k.clone(), v.clone())));
     }
 
-    /// Follow the HTTP redirect chain. Returns the final wire response —
-    /// intermediate-hop `Set-Cookie` headers are accumulated into
-    /// `self.cookies` as a side effect. The caller decides whether to read
-    /// the body into a `PyResponse` (for `request`) or keep it unread (for
-    /// `stream`).
+    /// Follow the HTTP redirect chain. Returns the final hop with its body
+    /// unread — intermediate-hop `Set-Cookie` headers are accumulated into
+    /// `self.cookies` as a side effect.
     ///
     /// Each hop goes through `Transport::send`, so retries apply per hop and
     /// the telemetry on the final response adds up across the chain (https://github.com/rodcochran/rqx/issues/148).
     ///
-    /// Operates on `reqwest::Response` end-to-end so reading the Location
-    /// header and Set-Cookie values requires no GIL acquisition (see https://github.com/rodcochran/rqx/issues/93).
-    async fn follow_redirects(&self, request: Request) -> PyResult<PendingResponse> {
-        let original_method = request.method().clone();
-        let original_url = request.url().clone();
-        let original_headers = request.headers().clone();
-
+    /// Reads status, Location, and Set-Cookie off `parts`, so no GIL
+    /// acquisition per hop (see https://github.com/rodcochran/rqx/issues/93).
+    async fn follow_redirects(&self, spec: RequestSpec) -> PyResult<PendingResponse> {
         let raise_on_redirect = self
             .transport
             .retries
@@ -427,32 +427,21 @@ impl Client {
             .map(|r| r.raise_on_redirect)
             .unwrap_or(DEFAULT_RAISE_ON_REDIRECT);
 
-        let mut current_request = request;
+        let mut current = spec;
         let mut redirects_used: u32 = 0;
         let mut num_retries: u32 = 0;
         let mut retry_history: Vec<(String, f64)> = Vec::new();
         loop {
-            let hop = self.transport.send(current_request).await?;
-            num_retries += hop.num_retries;
-            retry_history.extend(hop.retry_history);
-            let response = hop.response;
-            let status = response.status().as_u16();
+            let mut hop = self.transport.send(&current).await?;
+            num_retries += hop.parts.num_retries;
+            retry_history.append(&mut hop.parts.retry_history);
+            let status = hop.parts.status_code;
 
             if !(300..400).contains(&status) {
-                return Ok(PendingResponse {
-                    response,
-                    num_retries,
-                    retry_history,
-                });
+                return Ok(hop.with_retries(num_retries, retry_history));
             }
 
-            // Accumulate cookies from this 3xx hop. .cookies() iterates
-            // Set-Cookie headers without consuming the body.
-            let cookies_map: HashMap<String, String> = response
-                .cookies()
-                .map(|c| (c.name().to_string(), c.value().to_string()))
-                .collect();
-            self.accumulate_cookies(&cookies_map).await;
+            self.accumulate_cookies(&hop.parts.cookies).await;
 
             if redirects_used + 1 >= self.max_redirects {
                 if raise_on_redirect {
@@ -461,32 +450,24 @@ impl Client {
                         self.max_redirects
                     )));
                 }
-                return Ok(PendingResponse {
-                    response,
-                    num_retries,
-                    retry_history,
-                });
+                return Ok(hop.with_retries(num_retries, retry_history));
             }
 
-            let location = response
-                .headers()
+            let location = hop
+                .parts
+                .headers
                 .get("location")
                 .and_then(|v| v.to_str().ok())
                 .map(String::from)
                 .ok_or_else(|| RqxError::new_err("3xx response missing Location header"))?;
 
             // Drain the 3xx body to release the connection back to the pool.
-            let _ = response.bytes().await;
+            hop.drain().await;
 
-            let new_url = determine_redirect_url(&original_url, &location)
+            // Resolve against the hop that sent the Location, not the original URL.
+            let new_url = determine_redirect_url(current.url(), &location)
                 .map_err(|e| RqxError::new_err(format!("Error parsing url from redirect: {e}")))?;
-            let new_method = determine_redirect_method(&original_method, status);
-            current_request = build_redirect_request(
-                self.transport.client(),
-                new_method,
-                new_url,
-                &original_headers,
-            );
+            current = current.redirected(status, new_url)?;
 
             redirects_used += 1;
         }
@@ -791,7 +772,7 @@ impl PyClient {
     ) -> PyResult<PyStreamResponse> {
         let json_value = json.map(py_to_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let (sent, elapsed) = block_on_inner(
+        let pending = block_on_inner(
             py,
             self.inner.stream(
                 method,
@@ -807,11 +788,7 @@ impl PyClient {
                 t,
             ),
         )?;
-        let mut resp = PyStreamResponse::from_response(sent.response)?;
-        resp.parts.elapsed = elapsed;
-        resp.parts.num_retries = sent.num_retries;
-        resp.parts.retry_history = sent.retry_history;
-        Ok(resp)
+        Ok(PyStreamResponse::from_pending(pending))
     }
 
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
@@ -1188,7 +1165,7 @@ impl PyAsyncClient {
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
         RUNTIME.future_into_py(py, async move {
-            let (sent, elapsed) = inner
+            let pending = inner
                 .stream(
                     &method,
                     &url,
@@ -1203,11 +1180,7 @@ impl PyAsyncClient {
                     t,
                 )
                 .await?;
-            let mut resp = PyAsyncStreamResponse::from_response(sent.response)?;
-            resp.parts.elapsed = elapsed;
-            resp.parts.num_retries = sent.num_retries;
-            resp.parts.retry_history = sent.retry_history;
-            Ok(resp)
+            Ok(PyAsyncStreamResponse::from_pending(pending))
         })
     }
 

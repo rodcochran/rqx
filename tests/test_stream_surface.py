@@ -291,3 +291,17 @@ def test_stream_headers_are_cached(flaky_server):
     client = rqx.Client()
     with client.stream("GET", f"{flaky_server}/streamable") as resp:
         assert resp.headers is resp.headers
+
+
+# ---------------------------------------------------------------------------
+# elapsed — set when headers arrive, before the body is read
+# ---------------------------------------------------------------------------
+
+
+def test_elapsed_is_set_before_body_is_read(flaky_server):
+    client = rqx.Client()
+    with client.stream("GET", f"{flaky_server}/sleep/0.2") as resp:
+        assert resp.elapsed >= 0.2
+        elapsed_at_headers = resp.elapsed
+        resp.read()
+        assert resp.elapsed == elapsed_at_headers
