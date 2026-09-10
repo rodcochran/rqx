@@ -15,8 +15,44 @@ const DEFAULT_RAISE_ON_STATUS: bool = true;
 pub(crate) const DEFAULT_RAISE_ON_REDIRECT: bool = true;
 const DEFAULT_TOTAL_TIMEOUT: Option<f64> = None;
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FailureKind {
+    Connect,
+    Read,
+    Status,
+}
+
+impl FailureKind {
+    pub fn from_request_error(e: &reqwest::Error) -> Self {
+        if e.is_connect() {
+            Self::Connect
+        } else {
+            Self::Read
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct RetryCounts {
+    pub total: i32,
+    pub connect: i32,
+    pub read: i32,
+    pub status: i32,
+}
+
+impl RetryCounts {
+    pub fn record(&mut self, kind: FailureKind) {
+        self.total += 1;
+        match kind {
+            FailureKind::Connect => self.connect += 1,
+            FailureKind::Read => self.read += 1,
+            FailureKind::Status => self.status += 1,
+        }
+    }
+}
+
 /// `total` counts retries, not attempts: total=3 allows four attempts. Under
-/// follow_redirects the budget is per hop; num_retries and retry_history on
+/// follow_redirects the caps apply per hop; num_retries and retry_history on
 /// the final response add up across the chain.
 #[pyclass(from_py_object)]
 #[derive(Clone)]
@@ -153,6 +189,17 @@ impl PyRetry {
             raise_on_status: DEFAULT_RAISE_ON_STATUS,
             raise_on_redirect: DEFAULT_RAISE_ON_REDIRECT,
             total_timeout: DEFAULT_TOTAL_TIMEOUT,
+        }
+    }
+
+    pub fn allows_another(&self, kind: FailureKind, used: &RetryCounts) -> bool {
+        if used.total >= self.total {
+            return false;
+        }
+        match kind {
+            FailureKind::Connect => used.connect < self.connect,
+            FailureKind::Read => used.read < self.read,
+            FailureKind::Status => used.status < self.status,
         }
     }
 }
