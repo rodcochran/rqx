@@ -31,6 +31,8 @@ cd "$HOME/rqx"
     echo "python_version: $(python --version)"
     echo "rustc_version: $(rustc --version 2>/dev/null || echo 'rustc not on PATH')"
     echo "runs_per_bench: $RUNS_PER_BENCH"
+    # Comparison clients are installed unpinned; record what this run measured against.
+    echo "comparators: $(python -c 'import importlib.metadata as m; print(", ".join(f"{p} {m.version(p)}" for p in ["httpr", "aiohttp", "httpx"]))')"
 } > "$RESULTS_DIR/metadata.txt"
 
 run_one() {

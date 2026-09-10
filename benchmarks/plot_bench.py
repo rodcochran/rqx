@@ -186,7 +186,7 @@ def main():
         title="HTTP requests per second at concurrency=100 — median of 5 runs, AWS c7i.large client.",
         out_path=out_dir / "throughput.png",
         label_overrides={"httpx": "httpx*"},
-        footnote="* httpx number is anomalously low on this hardware; cause undiagnosed. See launch_report.md.",
+        footnote="* httpx is bound by its default connection pool at this concurrency; see report.md, Limitations.",
     )
     render_bar_chart(
         medians_at(runs, 100, "peak_rss_mb"),

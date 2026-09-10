@@ -43,6 +43,7 @@ dev = [
     "hypercorn",
 ]
 benchmarks = [
+    "matplotlib",
     "numpy",
 ]
 
