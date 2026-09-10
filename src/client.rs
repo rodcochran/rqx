@@ -1,6 +1,5 @@
 use pyo3::Bound;
 use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python, pyclass, pymethods};
-use reqwest::Request;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -9,9 +8,7 @@ use url::Url;
 
 use crate::exceptions::*;
 use crate::py_json::py_to_value;
-use crate::request::{
-    build_client_request, build_redirect_request, determine_redirect_method, determine_redirect_url,
-};
+use crate::request::{RequestSpec, build_client_request, determine_redirect_url};
 use crate::response::{PendingResponse, PyResponse};
 use crate::retry::DEFAULT_RAISE_ON_REDIRECT;
 use crate::runtime::RUNTIME;
@@ -164,7 +161,7 @@ impl Client {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         timeout: f64,
-    ) -> PyResult<Request> {
+    ) -> PyResult<RequestSpec> {
         // Resolve bearer: per-request override wins; otherwise fall back to
         // the client-level default. Then enforce the basic-vs-bearer collision
         // rule against the effective values that would actually be applied.
@@ -176,7 +173,7 @@ impl Client {
         }
 
         let resolved_url = resolve_url(self.base_url.as_ref(), url)?;
-        build_client_request(
+        let request = build_client_request(
             self.transport.client(),
             method,
             &resolved_url,
@@ -188,21 +185,22 @@ impl Client {
             auth,
             bearer.as_deref(),
             timeout,
-        )
+        )?;
+        Ok(RequestSpec::from_request(request))
     }
 
     /// Send a built request — following redirects when asked — and accumulate
     /// the final response's cookies. Shared by `request` and `stream`.
     async fn send(
         &self,
-        request: Request,
+        spec: RequestSpec,
         follow_redirects: Option<bool>,
     ) -> PyResult<PendingResponse> {
         let follow = follow_redirects.unwrap_or(self.follow_redirects);
         let pending = if follow {
-            self.follow_redirects(request).await?
+            self.follow_redirects(spec).await?
         } else {
-            self.transport.send(request).await?
+            self.transport.send(&spec).await?
         };
         self.accumulate_cookies(&pending.parts.cookies).await;
         Ok(pending)
@@ -421,11 +419,7 @@ impl Client {
     ///
     /// Reads status, Location, and Set-Cookie off `parts`, so no GIL
     /// acquisition per hop (see https://github.com/rodcochran/rqx/issues/93).
-    async fn follow_redirects(&self, request: Request) -> PyResult<PendingResponse> {
-        let original_method = request.method().clone();
-        let original_url = request.url().clone();
-        let original_headers = request.headers().clone();
-
+    async fn follow_redirects(&self, spec: RequestSpec) -> PyResult<PendingResponse> {
         let raise_on_redirect = self
             .transport
             .retries
@@ -433,12 +427,12 @@ impl Client {
             .map(|r| r.raise_on_redirect)
             .unwrap_or(DEFAULT_RAISE_ON_REDIRECT);
 
-        let mut current_request = request;
+        let mut current = spec;
         let mut redirects_used: u32 = 0;
         let mut num_retries: u32 = 0;
         let mut retry_history: Vec<(String, f64)> = Vec::new();
         loop {
-            let mut hop = self.transport.send(current_request).await?;
+            let mut hop = self.transport.send(&current).await?;
             num_retries += hop.parts.num_retries;
             retry_history.append(&mut hop.parts.retry_history);
             let status = hop.parts.status_code;
@@ -470,15 +464,10 @@ impl Client {
             // Drain the 3xx body to release the connection back to the pool.
             hop.drain().await;
 
-            let new_url = determine_redirect_url(&original_url, &location)
+            // Resolve against the hop that sent the Location, not the original URL.
+            let new_url = determine_redirect_url(current.url(), &location)
                 .map_err(|e| RqxError::new_err(format!("Error parsing url from redirect: {e}")))?;
-            let new_method = determine_redirect_method(&original_method, status);
-            current_request = build_redirect_request(
-                self.transport.client(),
-                new_method,
-                new_url,
-                &original_headers,
-            );
+            current = current.redirected(status, new_url)?;
 
             redirects_used += 1;
         }

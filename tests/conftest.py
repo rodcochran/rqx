@@ -196,6 +196,30 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self._sleep_then_respond(seconds)
             return
 
+        if path == "/echo-body":
+            self._echo_body()
+            return
+
+        # /redirect/<status> — redirect with that status to /echo-body.
+        if path.startswith("/redirect/") and path.removeprefix("/redirect/").isdigit():
+            self._redirect(int(path.removeprefix("/redirect/")), "/echo-body")
+            return
+
+        # relative Locations on each hop; only correct if resolved against that hop.
+        if path == "/nested/hop1":
+            self._redirect(302, "hop2")
+            return
+        if path == "/nested/hop2":
+            self._redirect(302, "final")
+            return
+        if path == "/nested/final":
+            body = b"final"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         # /redirect-loop — Location header points back to itself. Used to test TooManyRedirects.
         if path == "/redirect-loop":
             self.send_response(302)
@@ -332,26 +356,45 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self._echo_auth()
             return
 
-        request_id = params["request_id"][0]
+        if path == "/echo-body":
+            self._echo_body()
+            return
 
-        if path == "/reset":
+        if path.startswith("/redirect/") and path.removeprefix("/redirect/").isdigit():
+            self._read_body()
+            self._redirect(int(path.removeprefix("/redirect/")), "/echo-body")
+            return
+
+        request_id = params.get("request_id", [None])[0]
+
+        # /flaky-echo-body — 503 twice, then echoes the body (retries must resend it).
+        if path == "/flaky-echo-body" and request_id is not None:
+            body = self._read_body()
+            self.counters[request_id] += 1
+            if self.counters[request_id] < DEFAULT_ERRORS_BEFORE_SUCCESS:
+                self.send_response(503)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self._echo_body(body)
+            return
+
+        if path == "/reset" and request_id is not None:
             self._reset_connection(request_id)
             return
 
-        content_length = int(self.headers.get("Content-Length", 0))
-        if content_length > 0:
-            self.rfile.read(content_length)
-
+        self._read_body()
         self.send_response(404)
+        self.send_header("Content-Length", "0")
         self.end_headers()
 
     # PUT/PATCH/DELETE/HEAD/OPTIONS aren't auto-handled by BaseHTTPRequestHandler.
-    # We only need them for /echo-auth coverage in test_auth_bearer.py.
+    # Body verbs share the POST routes; the rest only need /echo-auth.
     def do_PUT(self):
-        self._handle_body_verb_for_echo_auth()
+        self.do_POST()
 
     def do_PATCH(self):
-        self._handle_body_verb_for_echo_auth()
+        self.do_POST()
 
     def do_DELETE(self):
         self._handle_simple_verb_for_echo_auth()
@@ -380,6 +423,33 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         self._echo_auth()
+
+    def _read_body(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        return self.rfile.read(content_length) if content_length > 0 else b""
+
+    def _echo_body(self, body=None):
+        """Echo method, Content-Type, and body as JSON."""
+        if body is None:
+            body = self._read_body()
+        echo = json.dumps(
+            {
+                "method": self.command,
+                "content_type": self.headers.get("Content-Type"),
+                "body": body.decode("utf-8", "replace"),
+            }
+        ).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(echo)))
+        self.end_headers()
+        self.wfile.write(echo)
+
+    def _redirect(self, status, location):
+        self.send_response(status)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _echo_auth(self):
         auth_header = self.headers.get("Authorization", "")
