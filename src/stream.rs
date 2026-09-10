@@ -180,18 +180,15 @@ impl PyByteIterator {
         let stream = Arc::clone(&slf.stream);
 
         let chunk = py.detach(|| {
-            RUNTIME
-                .get()
-                .expect("runtime not initialized")
-                .block_on(async {
-                    // .lock().await on TokioMutex — yields on contention
-                    // instead of blocking the OS thread. Guard is still held
-                    // across the next await, but now it's an async-aware
-                    // guard, which is what clippy wants.
-                    let mut guard = stream.lock().await;
-                    guard.as_mut().next().await
-                })
-        });
+            RUNTIME.block_on(async {
+                // .lock().await on TokioMutex — yields on contention
+                // instead of blocking the OS thread. Guard is still held
+                // across the next await, but now it's an async-aware
+                // guard, which is what clippy wants.
+                let mut guard = stream.lock().await;
+                guard.as_mut().next().await
+            })
+        })?;
 
         match chunk {
             Some(Ok(bytes)) => Ok(Some(PyBytes::new(py, &bytes).unbind())),
@@ -232,16 +229,13 @@ impl PyTextIterator {
 
         loop {
             let chunk = py.detach(|| {
-                RUNTIME
-                    .get()
-                    .expect("runtime not initialized")
-                    .block_on(async {
-                        // .lock().await on TokioMutex yields on contention
-                        // instead of blocking the OS thread.
-                        let mut guard = stream.lock().await;
-                        guard.as_mut().next().await.transpose()
-                    })
-            });
+                RUNTIME.block_on(async {
+                    // .lock().await on TokioMutex yields on contention
+                    // instead of blocking the OS thread.
+                    let mut guard = stream.lock().await;
+                    guard.as_mut().next().await.transpose()
+                })
+            })?;
 
             let chunk = match chunk {
                 Ok(c) => c,
@@ -301,14 +295,11 @@ impl PyLineIterator {
             }
 
             let chunk = py.detach(|| {
-                RUNTIME
-                    .get()
-                    .expect("runtime not initialized")
-                    .block_on(async {
-                        let mut guard = stream.lock().await;
-                        guard.as_mut().next().await.transpose()
-                    })
-            });
+                RUNTIME.block_on(async {
+                    let mut guard = stream.lock().await;
+                    guard.as_mut().next().await.transpose()
+                })
+            })?;
 
             let chunk = match chunk {
                 Ok(c) => c,
@@ -371,7 +362,7 @@ impl PyAsyncByteIterator {
     fn __anext__<'py>(slf: PyRef<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
         let stream = Arc::clone(&slf.stream);
 
-        pyo3_async_runtimes::tokio::future_into_py(slf.py(), async move {
+        RUNTIME.future_into_py(slf.py(), async move {
             let mut guard = stream.lock().await;
             match guard.as_mut().next().await {
                 Some(Ok(bytes)) => Ok(Some(PyBytesChunk(bytes))),
@@ -403,7 +394,7 @@ impl PyAsyncTextIterator {
 
     fn __anext__<'py>(slf: PyRef<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
         let state = Arc::clone(&slf.state);
-        pyo3_async_runtimes::tokio::future_into_py(slf.py(), async move {
+        RUNTIME.future_into_py(slf.py(), async move {
             // Held across the chunk-pull await, so a tokio mutex (not std).
             let mut s = state.lock().await;
             if s.finished {
@@ -458,7 +449,7 @@ impl PyAsyncLineIterator {
 
     fn __anext__<'py>(slf: PyRef<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
         let state = Arc::clone(&slf.state);
-        pyo3_async_runtimes::tokio::future_into_py(slf.py(), async move {
+        RUNTIME.future_into_py(slf.py(), async move {
             let mut s = state.lock().await;
             loop {
                 if let Some(line) = s.pending.pop_front() {
@@ -597,12 +588,7 @@ impl PyStreamResponse {
         match self.body.take() {
             Some(Body::Live(response)) => {
                 let bytes = py
-                    .detach(|| {
-                        RUNTIME
-                            .get()
-                            .expect("runtime not initialized")
-                            .block_on(async { response.bytes().await })
-                    })
+                    .detach(|| RUNTIME.block_on(async { response.bytes().await }))?
                     .map_err(map_reqwest_error)?;
                 self.body = Some(Body::Buffered(bytes));
             }
@@ -838,7 +824,7 @@ impl PyAsyncStreamResponse {
     /// Buffers in place, so `.content`/`.text`/`.json()` work afterward.
     fn aread<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let body = Arc::clone(&self.body);
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        RUNTIME.future_into_py(py, async move {
             // Take the live handle under the lock, but never hold the lock
             // across the await or a GIL acquisition.
             let live = {
@@ -865,7 +851,7 @@ impl PyAsyncStreamResponse {
     /// Release the connection (or drop the buffer) early.
     fn aclose<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let body = Arc::clone(&self.body);
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        RUNTIME.future_into_py(py, async move {
             *body.lock().unwrap() = None;
             Ok(())
         })
@@ -924,7 +910,7 @@ impl PyAsyncStreamResponse {
     }
 
     fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        pyo3_async_runtimes::tokio::future_into_py(py, async move { Ok(slf) })
+        RUNTIME.future_into_py(py, async move { Ok(slf) })
     }
 
     fn __aexit__<'py>(
@@ -935,7 +921,7 @@ impl PyAsyncStreamResponse {
         _traceback: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let body = Arc::clone(&self.body);
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        RUNTIME.future_into_py(py, async move {
             *body.lock().unwrap() = None;
             Ok(false)
         })

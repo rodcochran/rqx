@@ -6,8 +6,8 @@
 )]
 
 use pyo3::prelude::*;
-use pyo3::exceptions::{PyRuntimeError};
-use tokio::runtime::Builder as RtBuilder;
+#[cfg(target_os = "macos")]
+use pyo3::types::IntoPyDict;
 
 mod client;
 mod headers;
@@ -34,26 +34,40 @@ use timeout::PyTimeout;
 use transport::{HTTPTransport, AsyncHTTPTransport};
 
 
+/// `atexit` hook: shut the tokio runtime down before the interpreter starts
+/// finalizing, so no tokio thread tries to attach to Python after that point
+/// (#99). Runs with the GIL released because in-flight result deliveries may
+/// need it to finish. See `runtime.rs` for the lifecycle as a whole.
+#[pyfunction]
+fn _shutdown_runtime(py: Python<'_>) {
+    py.detach(|| RUNTIME.shutdown());
+}
+
+/// `os.register_at_fork(before=...)` hook: initialize the Apple frameworks a
+/// client build touches while still in the parent, so the forked child does
+/// not trip the Objective-C fork guard (#159). See `Runtime::prepare_fork`.
+#[cfg(target_os = "macos")]
+#[pyfunction]
+fn _prepare_fork(py: Python<'_>) {
+    py.detach(|| RUNTIME.prepare_fork());
+}
+
 #[pymodule]
 fn _rqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // Multi-threaded tokio runtime (default worker count = num_cpus). H3 tried
-    // worker_threads(1) but regressed throughput at c>=500 by ~20%; see
-    // docs/improvements.md for the H3 experiment outcome.
-    RUNTIME.set(
-        RtBuilder::new_multi_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| PyRuntimeError::new_err(format!("Error initializing Tokio Runtime: {e}")))
-            ?
-    ).expect("Runtime already initialized");
-    // Share our runtime with pyo3-async-runtimes so the async path doesn't
-    // silently build its own second default runtime alongside ours. We ignore
-    // the Err case — it only fires if another imported PyO3 package already
-    // initialized pyo3-async-runtimes' global runtime, in which case we share
-    // that one instead. Still correct, just not the extra-threads win.
-    let _ = pyo3_async_runtimes::tokio::init_with_runtime(
-        RUNTIME.get().expect("RUNTIME just set"),
-    );
+    // The tokio runtime is deliberately NOT built here. It is created on first
+    // use so that a process which only imports rqx (a prefork server's master)
+    // never owns runtime threads to lose across fork() (#159).
+    let py = m.py();
+    m.add_function(wrap_pyfunction!(_shutdown_runtime, m)?)?;
+    py.import("atexit")?
+        .call_method1("register", (m.getattr("_shutdown_runtime")?,))?;
+    #[cfg(target_os = "macos")]
+    {
+        m.add_function(wrap_pyfunction!(_prepare_fork, m)?)?;
+        let kwargs = [("before", m.getattr("_prepare_fork")?)].into_py_dict(py)?;
+        py.import("os")?
+            .call_method("register_at_fork", (), Some(&kwargs))?;
+    }
     m.add_class::<PyClient>()?;
     m.add_class::<PyAsyncClient>()?;
     m.add_class::<PyRetry>()?;
