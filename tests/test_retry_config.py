@@ -141,10 +141,10 @@ async def test_raise_on_redirect_false_returns_3xx_async(flaky_server):
 
 # ----- retries under follow_redirects -----
 #
-# The retry state machine lives in Transport::send_with_retries, but
-# Client::follow_redirects reaches past it and calls Transport::send_raw per
-# hop (src/client.rs:429). So when follow_redirects=True the retry config is
-# silently ignored.
+# Every send — buffered, each redirect hop, and streaming — goes through
+# Transport::send, so the retry policy applies uniformly (#148). The budget is
+# per hop (each hop may use up to Retry.total attempts); num_retries and
+# retry_history on the final response are cumulative across the chain.
 #
 # The control test below is identical except for follow_redirects, which
 # isolates the variable: same server, same Retry, same endpoint behavior.
@@ -160,16 +160,13 @@ def test_retries_fire_without_redirect_control(flaky_server):
     assert resp.status_code == 200
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="follow_redirects bypasses the retry loop (src/client.rs:429 calls send_raw)",
-)
 def test_retries_fire_under_follow_redirects(flaky_server):
     """Retry config must still apply while following a redirect chain.
 
     /redirect-to-flaky 302s to the flaky endpoint, which returns 503 for its
-    first two hits and 200 on the third. With total=5 the retry loop should
-    ride through to the 200.
+    first two hits and 200 on the third. With total=5 the retry loop rides
+    through to the 200, and the telemetry on the final response reflects the
+    two retries spent on the second hop.
     """
     retries = rqx.Retry(total=5, backoff_factor=0.0, status_forcelist={503})
     transport = rqx.HTTPTransport(retries=retries)
@@ -179,15 +176,13 @@ def test_retries_fire_under_follow_redirects(flaky_server):
         f"{flaky_server}/redirect-to-flaky?request_id=retry_under_redirect_sync"
     )
     assert resp.status_code == 200
+    assert resp.num_retries == 2
+    assert [status for status, _ in resp.retry_history] == ["503", "200"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="follow_redirects bypasses the retry loop (src/client.rs:429 calls send_raw)",
-)
 @pytest.mark.asyncio
 async def test_retries_fire_under_follow_redirects_async(flaky_server):
-    """Async path shares Client::request, so it has the same gap."""
+    """Async path shares Client::request, so it takes the same route."""
     retries = rqx.Retry(total=5, backoff_factor=0.0, status_forcelist={503})
     transport = rqx.AsyncHTTPTransport(retries=retries)
     client = rqx.AsyncClient(transport=transport, follow_redirects=True)
@@ -196,3 +191,45 @@ async def test_retries_fire_under_follow_redirects_async(flaky_server):
         f"{flaky_server}/redirect-to-flaky?request_id=retry_under_redirect_async"
     )
     assert resp.status_code == 200
+    assert resp.num_retries == 2
+
+
+def test_retries_fire_on_stream_without_redirect(flaky_server):
+    """Streaming used to bypass the retry loop entirely, redirects or not."""
+    retries = rqx.Retry(total=5, backoff_factor=0.0, status_forcelist={503})
+    transport = rqx.HTTPTransport(retries=retries)
+    client = rqx.Client(transport=transport, follow_redirects=False)
+
+    with client.stream(
+        "GET", f"{flaky_server}/?request_id=retry_stream_no_redirect"
+    ) as resp:
+        assert resp.status_code == 200
+        assert resp.num_retries == 2
+        assert b"".join(resp.iter_bytes())
+
+
+def test_retries_fire_on_stream_under_follow_redirects(flaky_server):
+    retries = rqx.Retry(total=5, backoff_factor=0.0, status_forcelist={503})
+    transport = rqx.HTTPTransport(retries=retries)
+    client = rqx.Client(transport=transport, follow_redirects=True)
+
+    with client.stream(
+        "GET", f"{flaky_server}/redirect-to-flaky?request_id=retry_stream_redirect_sync"
+    ) as resp:
+        assert resp.status_code == 200
+        assert resp.num_retries == 2
+
+
+@pytest.mark.asyncio
+async def test_retries_fire_on_stream_under_follow_redirects_async(flaky_server):
+    retries = rqx.Retry(total=5, backoff_factor=0.0, status_forcelist={503})
+    transport = rqx.AsyncHTTPTransport(retries=retries)
+    client = rqx.AsyncClient(transport=transport, follow_redirects=True)
+
+    resp = await client.stream(
+        "GET",
+        f"{flaky_server}/redirect-to-flaky?request_id=retry_stream_redirect_async",
+    )
+    async with resp:
+        assert resp.status_code == 200
+        assert resp.num_retries == 2

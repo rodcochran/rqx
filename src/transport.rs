@@ -12,7 +12,7 @@ use crate::exceptions::*;
 use crate::http::protocol::HttpVersionConfig;
 use crate::http::proxy::parse_proxies;
 use crate::http::tls::{VerifyConfig, parse_identity};
-use crate::response::PyResponse;
+use crate::response::{PendingResponse, PyResponse};
 use crate::retry::PyRetry;
 use crate::runtime::RUNTIME;
 use crate::timeout::PyTimeout;
@@ -45,23 +45,27 @@ impl Transport {
         }
     }
 
-    /// Picks retry vs. no-retry path.
+    /// Send, honoring the retry config, and read the body into a Python
+    /// response. For callers that only need the final buffered response.
     pub async fn handle_request(&self, request: Request) -> PyResult<PyResponse> {
+        self.send(request).await?.into_py_response().await
+    }
+
+    /// Send, honoring the retry config, and hand back the wire response with
+    /// its body unread. This is the entry point every request path shares —
+    /// buffered, redirect hops, and streaming — so retry behavior cannot
+    /// diverge between them (#148).
+    pub async fn send(&self, request: Request) -> PyResult<PendingResponse> {
         if self.retries.is_some() {
             self.send_with_retries(request).await
         } else {
-            self.send(request).await
+            Ok(PendingResponse::once(self.send_raw(request).await?))
         }
     }
 
-    /// Single-attempt — returns the deserialized Python response.
-    async fn send(&self, request: Request) -> PyResult<PyResponse> {
-        let response = self.send_raw(request).await?;
-        PyResponse::from_response(response).await
-    }
-
-    /// Single-attempt — returns the raw reqwest Response (escape hatch / streaming).
-    pub async fn send_raw(&self, request: Request) -> PyResult<Response> {
+    /// Single attempt, no retry policy applied. Only the retry loop and the
+    /// no-retry branch of `send` should call this directly.
+    async fn send_raw(&self, request: Request) -> PyResult<Response> {
         let _permit = match self.semaphore.as_ref() {
             Some(sem) => Some(
                 sem.acquire()
@@ -79,11 +83,11 @@ impl Transport {
     }
 
     /// The retry state machine.
-    async fn send_with_retries(&self, request: Request) -> PyResult<PyResponse> {
+    async fn send_with_retries(&self, request: Request) -> PyResult<PendingResponse> {
         // Operates on raw reqwest::Response throughout — reading status and
         // retry-after directly from response headers without acquiring the GIL.
-        // PyResponse construction happens only at the final return points.
-        // Mirrors the redirect-loop fix from #93.
+        // The body stays unread; the caller decides when (or whether) to read
+        // it. Mirrors the redirect-loop fix from #93.
         let r = self.retries.as_ref().unwrap();
         let method = request.method().to_string();
         let is_retryable_method = r.allowed_methods.contains(&method);
@@ -154,7 +158,7 @@ impl Transport {
             match self.send_raw(request_copy).await {
                 Ok(resp) => {
                     if !is_retryable_method {
-                        return PyResponse::from_response(resp).await;
+                        return Ok(PendingResponse::once(resp));
                     }
 
                     let status = resp.status().as_u16();
@@ -164,10 +168,11 @@ impl Transport {
                     }
 
                     if !r.status_forcelist.contains(&status) {
-                        let mut response = PyResponse::from_response(resp).await?;
-                        response.parts.num_retries = num_retries;
-                        response.parts.retry_history = retry_history;
-                        return Ok(response);
+                        return Ok(PendingResponse {
+                            response: resp,
+                            num_retries,
+                            retry_history,
+                        });
                     }
 
                     current_response = Some(resp);
@@ -198,10 +203,11 @@ impl Transport {
                         r.total
                     )));
                 }
-                let mut response = PyResponse::from_response(cr).await?;
-                response.parts.num_retries = num_retries;
-                response.parts.retry_history = retry_history;
-                Ok(response)
+                Ok(PendingResponse {
+                    response: cr,
+                    num_retries,
+                    retry_history,
+                })
             }
             None => Err(MaxRetriesExceeded::new_err(format!(
                 "max retries exceeded: {}",
@@ -464,8 +470,8 @@ impl HTTPTransport {
             .and_then(|result| result)
     }
 
-    pub fn send_raw(&self, py: Python<'_>, request: Request) -> PyResult<Response> {
-        py.detach(|| RUNTIME.block_on(self.inner.send_raw(request)))
+    pub fn send(&self, py: Python<'_>, request: Request) -> PyResult<PendingResponse> {
+        py.detach(|| RUNTIME.block_on(self.inner.send(request)))
             .and_then(|result| result)
     }
 
@@ -553,8 +559,8 @@ impl AsyncHTTPTransport {
         self.inner.handle_request(request).await
     }
 
-    pub async fn send_raw(&self, request: Request) -> PyResult<Response> {
-        self.inner.send_raw(request).await
+    pub async fn send(&self, request: Request) -> PyResult<PendingResponse> {
+        self.inner.send(request).await
     }
 
     pub fn client(&self) -> &Client {
