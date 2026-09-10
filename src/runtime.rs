@@ -33,7 +33,7 @@
 //! than `pyo3_async_runtimes::tokio`, because that module's runtime is a
 //! set-once global with no reset, which cannot follow a PID change.
 
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
 use std::future::Future;
 use std::pin::Pin;
 use std::ptr;
@@ -57,6 +57,13 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 /// The process-wide runtime. Cheap to touch on the hot path: one atomic load,
 /// one PID read, one `Handle` clone.
 pub static RUNTIME: Runtime = Runtime::new();
+
+thread_local! {
+    /// The handle `Runtime::future_into_py` resolved, handed to `Bridge::spawn`
+    /// for the duration of the synchronous call into pyo3-async-runtimes. The
+    /// generic bridge gives `spawn` no way to receive it as an argument.
+    static SPAWN_HANDLE: RefCell<Option<Handle>> = const { RefCell::new(None) };
+}
 
 /// One built tokio runtime and the PID it belongs to.
 ///
@@ -89,9 +96,7 @@ impl Runtime {
     /// use and rebuilding it after `fork()`.
     pub fn handle(&self) -> PyResult<Handle> {
         if self.closed.load(Ordering::Acquire) {
-            return Err(RqxError::new_err(
-                "rqx runtime has been shut down (interpreter is exiting)",
-            ));
+            return Err(Self::closed_error());
         }
         let pid = std::process::id();
         let current = self.current.load(Ordering::Acquire);
@@ -116,9 +121,17 @@ impl Runtime {
         T: for<'a> IntoPyObject<'a> + Send + 'static,
     {
         // Build (or rebuild after fork) here, where an error can be returned
-        // as a Python exception, so that Bridge::spawn never has to.
-        self.handle()?;
-        generic::future_into_py::<Bridge, F, T>(py, fut)
+        // as a Python exception, and hand the result to `Bridge::spawn`
+        // through the thread-local so the initial spawn lands on exactly
+        // this runtime: never on a foreign tokio runtime the caller happens
+        // to be inside, and never on one that `shutdown` closed in between.
+        // `generic::future_into_py` calls `spawn` synchronously on this
+        // thread before returning.
+        let handle = self.handle()?;
+        SPAWN_HANDLE.with(|slot| *slot.borrow_mut() = Some(handle));
+        let result = generic::future_into_py::<Bridge, F, T>(py, fut);
+        SPAWN_HANDLE.with(|slot| slot.borrow_mut().take());
+        result
     }
 
     /// Shut the runtime down ahead of interpreter finalization. Called from
@@ -168,6 +181,33 @@ impl Runtime {
         });
     }
 
+    /// Undo an install that raced `shutdown`: unpublish `slot` if it is
+    /// still current and shut its runtime down. The runtime is brand new and
+    /// owns no tasks, so a non-blocking shutdown is complete, and it must be
+    /// non-blocking because the caller may hold the GIL.
+    fn retract(&self, slot: *mut Slot) {
+        let _ = self.current.compare_exchange(
+            slot,
+            ptr::null_mut(),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+        // SAFETY: `slot` was published by `build` and, like every slot, is
+        // never freed.
+        let runtime = unsafe { &*slot }
+            .runtime
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some(runtime) = runtime {
+            runtime.shutdown_background();
+        }
+    }
+
+    fn closed_error() -> PyErr {
+        RqxError::new_err("rqx runtime has been shut down (interpreter is exiting)")
+    }
+
     /// The slot behind `current` if it exists and belongs to `pid`.
     fn slot_for<'a>(current: *mut Slot, pid: u32) -> Option<&'a Slot> {
         // SAFETY: slots are only ever created by `Box::leak` in `build` and
@@ -201,7 +241,17 @@ impl Runtime {
                     .current
                     .compare_exchange(seen, slot, Ordering::AcqRel, Ordering::Acquire)
                 {
-                    Ok(_) => return Ok(handle),
+                    Ok(_) => {
+                        // `shutdown` may have run between the `closed` check
+                        // in `handle` and this install, in which case it has
+                        // already swapped `current` out and will not see this
+                        // slot. Retract it so no runtime outlives shutdown.
+                        if self.closed.load(Ordering::Acquire) {
+                            self.retract(slot);
+                            return Err(Self::closed_error());
+                        }
+                        return Ok(handle);
+                    }
                     Err(winner) => winner,
                 };
             // Another thread installed a slot first. Ours was never
@@ -235,21 +285,23 @@ tokio::task_local! {
 }
 
 impl Bridge {
-    fn handle() -> Handle {
-        // Result delivery (`spawn_blocking`) runs on a tokio worker, where the
-        // ambient handle is the runtime the task already belongs to. Using it
-        // keeps delivery working during `shutdown` — after `closed` is set
-        // but before the runtime is dropped — and skips a `getpid` per
-        // completion. The initial `spawn` comes from a Python thread with no
-        // ambient runtime; `Runtime::future_into_py` resolved (and, on error,
-        // reported) the slot for this PID just before, so that path cannot
-        // fail here.
-        if let Ok(ambient) = Handle::try_current() {
-            return ambient;
-        }
+    /// The runtime a task already running on one of our workers belongs to.
+    /// Valid for anything spawned from inside a task — the nested spawn and
+    /// the result delivery in `generic::future_into_py` — and still valid
+    /// during `shutdown`, after `closed` is set but before the runtime is
+    /// dropped.
+    fn ambient() -> Option<Handle> {
+        Handle::try_current().ok()
+    }
+
+    /// Last resort, reached only if a spawn arrives with neither a handed-in
+    /// handle nor an ambient one, which the call structure of
+    /// `generic::future_into_py` rules out. Surfaces as a `PanicException`
+    /// rather than silently spawning onto the wrong runtime.
+    fn fallback() -> Handle {
         RUNTIME
             .handle()
-            .expect("rqx runtime resolved by Runtime::future_into_py before spawn")
+            .unwrap_or_else(|e| panic!("rqx runtime unavailable for spawn: {e}"))
     }
 }
 
@@ -261,14 +313,27 @@ impl generic::Runtime for Bridge {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        Self::handle().spawn(fut)
+        // The outer spawn comes synchronously from `Runtime::future_into_py`
+        // on a Python thread, which handed us the handle it resolved. The
+        // nested spawn comes from inside that task, on one of our workers.
+        // The ambient handle is checked second on purpose: a caller sitting
+        // inside some other tokio runtime must not have its work scheduled
+        // there, where `shutdown` could never reach it.
+        let handle = SPAWN_HANDLE
+            .with(|slot| slot.borrow().clone())
+            .or_else(Self::ambient)
+            .unwrap_or_else(Self::fallback);
+        handle.spawn(fut)
     }
 
     fn spawn_blocking<F>(f: F) -> Self::JoinHandle
     where
         F: FnOnce() + Send + 'static,
     {
-        Self::handle().spawn_blocking(f)
+        // Result delivery: always called from inside the task, on a worker.
+        Self::ambient()
+            .unwrap_or_else(Self::fallback)
+            .spawn_blocking(f)
     }
 }
 
