@@ -45,16 +45,13 @@ impl Transport {
         }
     }
 
-    /// Send, honoring the retry config, and read the body into a Python
-    /// response. For callers that only need the final buffered response.
+    /// Send with retries and buffer the body.
     pub async fn handle_request(&self, request: Request) -> PyResult<PyResponse> {
         self.send(request).await?.into_py_response().await
     }
 
-    /// Send, honoring the retry config, and hand back the wire response with
-    /// its body unread. This is the entry point every request path shares —
-    /// buffered, redirect hops, and streaming — so retry behavior cannot
-    /// diverge between them (#148).
+    /// Send with retries, body unread. Every path — buffered, redirect hops,
+    /// streaming — goes through here so retries can't be skipped (#148).
     pub async fn send(&self, request: Request) -> PyResult<PendingResponse> {
         if self.retries.is_some() {
             self.send_with_retries(request).await
@@ -63,8 +60,7 @@ impl Transport {
         }
     }
 
-    /// Single attempt, no retry policy applied. Only the retry loop and the
-    /// no-retry branch of `send` should call this directly.
+    /// Single attempt, no retries.
     async fn send_raw(&self, request: Request) -> PyResult<Response> {
         let _permit = match self.semaphore.as_ref() {
             Some(sem) => Some(
@@ -86,8 +82,7 @@ impl Transport {
     async fn send_with_retries(&self, request: Request) -> PyResult<PendingResponse> {
         // Operates on raw reqwest::Response throughout — reading status and
         // retry-after directly from response headers without acquiring the GIL.
-        // The body stays unread; the caller decides when (or whether) to read
-        // it. Mirrors the redirect-loop fix from #93.
+        // The body stays unread for the caller. Mirrors the redirect-loop fix from #93.
         let r = self.retries.as_ref().unwrap();
         let method = request.method().to_string();
         let is_retryable_method = r.allowed_methods.contains(&method);

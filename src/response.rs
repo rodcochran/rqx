@@ -15,13 +15,8 @@ use super::exceptions::{HTTPStatusError, RqxError, map_reqwest_error};
 use super::headers::PyHeaders;
 use super::py_json::value_to_py;
 
-/// A response as it came off the wire, body unread, together with the retry
-/// work it took to get it. Callers that need to look at the wire response
-/// first — the redirect loop, streaming — do so without paying for a body
-/// read or a GIL acquisition; `into_py_response` is the single place a
-/// `PyResponse` is built from a sent request. This is the seed of the
-/// deferred-body model in #55: the type grows response behavior there
-/// rather than being replaced.
+/// Wire response with the body unread, plus the retries it took to get it.
+/// Seed of the deferred-body model in https://github.com/rodcochran/rqx/issues/55
 pub struct PendingResponse {
     pub response: Response,
     pub num_retries: u32,
@@ -29,7 +24,7 @@ pub struct PendingResponse {
 }
 
 impl PendingResponse {
-    /// A response that took exactly one attempt.
+    /// One attempt, no retries.
     pub(crate) fn once(response: Response) -> Self {
         Self {
             response,
@@ -38,8 +33,7 @@ impl PendingResponse {
         }
     }
 
-    /// Read the body and produce the Python-facing response, carrying the
-    /// retry telemetry across.
+    /// Reads the body into a PyResponse, keeping the retry telemetry.
     pub async fn into_py_response(self) -> PyResult<PyResponse> {
         let mut response = PyResponse::from_response(self.response).await?;
         response.parts.num_retries = self.num_retries;

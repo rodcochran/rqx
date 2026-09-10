@@ -153,9 +153,8 @@ impl Client {
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<(PendingResponse, f64)> {
-        // Returns (sent, elapsed_secs) — the pyclass wraps the wire response
-        // into PyStreamResponse / PyAsyncStreamResponse and sets elapsed and
-        // the retry telemetry.
+        // Returns (pending, elapsed_secs) — the pyclass wraps it into
+        // PyStreamResponse / PyAsyncStreamResponse and sets elapsed + retry telemetry.
         let start_time = Instant::now();
 
         let bearer = auth_bearer.or_else(|| self.auth_bearer.clone());
@@ -411,16 +410,11 @@ impl Client {
     /// the body into a `PyResponse` (for `request`) or keep it unread (for
     /// `stream`).
     ///
-    /// Every hop goes through `Transport::send`, so the retry policy applies
-    /// to each hop: a 503 on hop three retries hop three, not the whole
-    /// chain (#148). The retry budget is per hop — each hop may use up to
-    /// `Retry.total` retries, i.e. `Retry.total + 1` attempts — while the
-    /// telemetry on the final response is cumulative: `num_retries` and
-    /// `retry_history` cover every hop in the chain. `max_redirects` bounds
-    /// the number of requests in the chain, counting the initial URL.
+    /// Each hop goes through `Transport::send`, so retries apply per hop and
+    /// the telemetry on the final response adds up across the chain (https://github.com/rodcochran/rqx/issues/148).
     ///
     /// Operates on `reqwest::Response` end-to-end so reading the Location
-    /// header and Set-Cookie values requires no GIL acquisition (see #93).
+    /// header and Set-Cookie values requires no GIL acquisition (see https://github.com/rodcochran/rqx/issues/93).
     async fn follow_redirects(&self, request: Request) -> PyResult<PendingResponse> {
         let original_method = request.method().clone();
         let original_url = request.url().clone();

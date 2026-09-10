@@ -141,14 +141,9 @@ async def test_raise_on_redirect_false_returns_3xx_async(flaky_server):
 
 # ----- retries under follow_redirects -----
 #
-# Every send — buffered, each redirect hop, and streaming — goes through
-# Transport::send, so the retry policy applies uniformly (#148). The budget is
-# per hop (each hop may use up to Retry.total retries, i.e. Retry.total + 1
-# attempts); num_retries and retry_history on the final response are
-# cumulative across the chain.
-#
-# The control test below is identical except for follow_redirects, which
-# isolates the variable: same server, same Retry, same endpoint behavior.
+# Every send goes through Transport::send, so retries apply to redirect hops
+# and streaming too (#148). Budget is per hop; telemetry adds up across the
+# chain. The control test is identical except for follow_redirects.
 
 
 def test_retries_fire_without_redirect_control(flaky_server):
@@ -236,12 +231,10 @@ async def test_retries_fire_on_stream_under_follow_redirects_async(flaky_server)
         assert resp.num_retries == 2
 
 
-# ----- retry budget scope across a redirect chain -----
+# ----- retry budget is per hop -----
 #
-# /flaky-redirect is 503 twice then 302; its destination is 503 twice then 200.
-# That is four retries over two hops. With total=3 this only succeeds if the
-# budget is per hop (2 <= 3 on each), never if it were shared across the chain
-# (4 > 3). The telemetry on the final response is cumulative either way.
+# /flaky-redirect: 503, 503, 302 -> destination: 503, 503, 200. Four retries
+# over two hops. total=3 passes per hop and would fail if shared across the chain.
 
 
 def test_retry_budget_is_per_redirect_hop(flaky_server):

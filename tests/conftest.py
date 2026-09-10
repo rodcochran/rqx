@@ -215,11 +215,8 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        # /flaky-redirect — a hop that is itself flaky: 503 for its first two
-        # hits, then a 302 to the flaky endpoint under a derived request_id
-        # (which is 503 for its first two hits, then 200). Two hops, two
-        # retries each. Used to pin down the retry budget scope: per hop, a
-        # small total suffices; across the chain, the same total would not.
+        # /flaky-redirect — 503 for its first two hits, then a 302 to the flaky
+        # endpoint under "<request_id>-dest". Two hops, two retries each.
         if path == "/flaky-redirect":
             request_id = params["request_id"][0]
             self.counters[request_id] += 1
