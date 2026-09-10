@@ -20,6 +20,17 @@ pub(crate) const DEFAULT_RAISE_ON_REDIRECT: bool = true;
 const DEFAULT_TOTAL_TIMEOUT: Option<f64> = None;
 
 
+/// Retry policy for a transport.
+///
+/// `total` is the number of retries allowed for one request to one URL.
+/// When a redirect chain is followed, every hop is its own request with its
+/// own `total`: a 503 on the third hop retries the third hop, and does not
+/// consume budget that an earlier hop used. The chain as a whole is bounded
+/// by the client's `max_redirects`, so the worst case is
+/// `max_redirects * total` attempts. `num_retries` and `retry_history` on
+/// the final response are cumulative across every hop.
+///
+/// The same policy applies to streaming requests.
 #[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct PyRetry {

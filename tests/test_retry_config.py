@@ -233,3 +233,36 @@ async def test_retries_fire_on_stream_under_follow_redirects_async(flaky_server)
     async with resp:
         assert resp.status_code == 200
         assert resp.num_retries == 2
+
+
+# ----- retry budget scope across a redirect chain -----
+#
+# /flaky-redirect is 503 twice then 302; its destination is 503 twice then 200.
+# That is four retries over two hops. With total=3 this only succeeds if the
+# budget is per hop (2 <= 3 on each), never if it were shared across the chain
+# (4 > 3). The telemetry on the final response is cumulative either way.
+
+
+def test_retry_budget_is_per_redirect_hop(flaky_server):
+    retries = rqx.Retry(total=3, backoff_factor=0.0, status_forcelist={503})
+    transport = rqx.HTTPTransport(retries=retries)
+    client = rqx.Client(transport=transport, follow_redirects=True)
+
+    resp = client.get(f"{flaky_server}/flaky-redirect?request_id=budget_per_hop_sync")
+    assert resp.status_code == 200
+    assert resp.num_retries == 4
+    assert [status for status, _ in resp.retry_history] == ["503", "302", "503", "200"]
+
+
+@pytest.mark.asyncio
+async def test_retry_budget_is_per_redirect_hop_async(flaky_server):
+    retries = rqx.Retry(total=3, backoff_factor=0.0, status_forcelist={503})
+    transport = rqx.AsyncHTTPTransport(retries=retries)
+    client = rqx.AsyncClient(transport=transport, follow_redirects=True)
+
+    resp = await client.get(
+        f"{flaky_server}/flaky-redirect?request_id=budget_per_hop_async"
+    )
+    assert resp.status_code == 200
+    assert resp.num_retries == 4
+    assert [status for status, _ in resp.retry_history] == ["503", "302", "503", "200"]
