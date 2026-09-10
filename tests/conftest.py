@@ -365,10 +365,10 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self._redirect(int(path.removeprefix("/redirect/")), "/echo-body")
             return
 
-        request_id = params["request_id"][0]
+        request_id = params.get("request_id", [None])[0]
 
         # /flaky-echo-body — 503 twice, then echoes the body (retries must resend it).
-        if path == "/flaky-echo-body":
+        if path == "/flaky-echo-body" and request_id is not None:
             body = self._read_body()
             self.counters[request_id] += 1
             if self.counters[request_id] < DEFAULT_ERRORS_BEFORE_SUCCESS:
@@ -379,15 +379,13 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self._echo_body(body)
             return
 
-        if path == "/reset":
+        if path == "/reset" and request_id is not None:
             self._reset_connection(request_id)
             return
 
-        content_length = int(self.headers.get("Content-Length", 0))
-        if content_length > 0:
-            self.rfile.read(content_length)
-
+        self._read_body()
         self.send_response(404)
+        self.send_header("Content-Length", "0")
         self.end_headers()
 
     # PUT/PATCH/DELETE/HEAD/OPTIONS aren't auto-handled by BaseHTTPRequestHandler.
