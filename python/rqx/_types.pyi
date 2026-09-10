@@ -8,22 +8,23 @@ from collections.abc import AsyncIterator, Awaitable, Iterator, Mapping
 from types import TracebackType
 from typing import Any
 
+from typing_extensions import TypeAlias
+
 # ---------------------------------------------------------------------------
 # Type aliases used across the API
 # ---------------------------------------------------------------------------
 
 # `verify=` accepts True/False or a path to a CA bundle.
-VerifyTypes = bool | str
+VerifyTypes: TypeAlias = bool | str
 
 # `cert=` accepts either a combined PEM (path or bytes) or a (cert, key) tuple.
-CertTypes = str | bytes | tuple[str, str]
+CertTypes: TypeAlias = str | bytes | tuple[str, str]
 
 # `timeout=` accepts a bare number (applies to all phases) or a Timeout instance.
-TimeoutTypes = float | int | "Timeout"
+TimeoutTypes = ...
 
 # Proxy mapping: scheme ("http"/"https") -> proxy URL.
-ProxyTypes = Mapping[str, str]
-
+ProxyTypes: TypeAlias = Mapping[str, str]
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -66,7 +67,6 @@ class ConnectError(NetworkError): ...
 class ReadError(NetworkError): ...
 class WriteError(NetworkError): ...
 
-
 # ---------------------------------------------------------------------------
 # Headers
 # ---------------------------------------------------------------------------
@@ -81,13 +81,11 @@ class PyHeaders:
     def __contains__(self, key: str) -> bool: ...
     def __iter__(self) -> Iterator[str]: ...
     def __len__(self) -> int: ...
-    def __repr__(self) -> str: ...
     def __eq__(self, other: object) -> bool: ...
     def get(self, key: str, default: str | None = None) -> str | None: ...
     def keys(self) -> list[str]: ...
     def values(self) -> list[str]: ...
     def items(self) -> list[tuple[str, str]]: ...
-
 
 # ---------------------------------------------------------------------------
 # Timeout
@@ -121,14 +119,16 @@ class Timeout:
         write: float | None = None,
         pool: float | None = None,
     ) -> None: ...
-    def __repr__(self) -> str: ...
-
 
 # ---------------------------------------------------------------------------
 # Retry config
 # ---------------------------------------------------------------------------
 
 class PyRetry:
+    """total counts retries, not attempts: total=3 allows four attempts. Under
+    follow_redirects the budget is per hop; num_retries and retry_history on
+    the final response add up across the chain."""
+
     def __init__(
         self,
         total: int | None = None,
@@ -145,7 +145,6 @@ class PyRetry:
         raise_on_redirect: bool | None = None,
         total_timeout: float | None = None,
     ) -> None: ...
-
 
 # ---------------------------------------------------------------------------
 # Responses
@@ -180,7 +179,6 @@ class PyResponse:
     def is_error(self) -> bool: ...
     def json(self) -> Any: ...
     def raise_for_status(self) -> None: ...
-
 
 class PyStreamResponse:
     status_code: int
@@ -228,7 +226,6 @@ class PyStreamResponse:
         traceback: TracebackType | None,
     ) -> None: ...
 
-
 class PyAsyncStreamResponse:
     status_code: int
     headers: PyHeaders
@@ -275,7 +272,6 @@ class PyAsyncStreamResponse:
         traceback: TracebackType | None,
     ) -> bool: ...
 
-
 # ---------------------------------------------------------------------------
 # Transports
 # ---------------------------------------------------------------------------
@@ -297,7 +293,6 @@ class HTTPTransport:
         timeout: TimeoutTypes | None = None,
     ) -> None: ...
 
-
 class AsyncHTTPTransport:
     retries: PyRetry | None
 
@@ -315,7 +310,6 @@ class AsyncHTTPTransport:
         timeout: TimeoutTypes | None = None,
     ) -> None: ...
 
-
 # ---------------------------------------------------------------------------
 # Sync client
 # ---------------------------------------------------------------------------
@@ -325,7 +319,6 @@ class PyClient:
 
     @property
     def base_url(self) -> str | None: ...
-
     def __init__(
         self,
         verify: VerifyTypes | None = None,
@@ -337,7 +330,6 @@ class PyClient:
         auth_bearer: str | None = None,
         transport: HTTPTransport | None = None,
     ) -> None: ...
-
     def request(
         self,
         method: str,
@@ -352,7 +344,6 @@ class PyClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
-
     def get(
         self,
         url: str,
@@ -363,7 +354,6 @@ class PyClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
-
     def options(
         self,
         url: str,
@@ -374,7 +364,6 @@ class PyClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
-
     def head(
         self,
         url: str,
@@ -385,7 +374,6 @@ class PyClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
-
     def post(
         self,
         url: str,
@@ -399,7 +387,6 @@ class PyClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
-
     def put(
         self,
         url: str,
@@ -413,7 +400,6 @@ class PyClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
-
     def patch(
         self,
         url: str,
@@ -427,7 +413,6 @@ class PyClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
-
     def delete(
         self,
         url: str,
@@ -438,7 +423,6 @@ class PyClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyResponse: ...
-
     def stream(
         self,
         method: str,
@@ -453,7 +437,6 @@ class PyClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> PyStreamResponse: ...
-
     def __enter__(self) -> PyClient: ...
     def __exit__(
         self,
@@ -461,7 +444,6 @@ class PyClient:
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None: ...
-
 
 # ---------------------------------------------------------------------------
 # Async client
@@ -472,7 +454,6 @@ class PyAsyncClient:
 
     @property
     def base_url(self) -> str | None: ...
-
     def __init__(
         self,
         verify: VerifyTypes | None = None,
@@ -484,7 +465,6 @@ class PyAsyncClient:
         auth_bearer: str | None = None,
         transport: AsyncHTTPTransport | None = None,
     ) -> None: ...
-
     def request(
         self,
         method: str,
@@ -499,7 +479,6 @@ class PyAsyncClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
-
     def get(
         self,
         url: str,
@@ -510,7 +489,6 @@ class PyAsyncClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
-
     def options(
         self,
         url: str,
@@ -521,7 +499,6 @@ class PyAsyncClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
-
     def head(
         self,
         url: str,
@@ -532,7 +509,6 @@ class PyAsyncClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
-
     def post(
         self,
         url: str,
@@ -546,7 +522,6 @@ class PyAsyncClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
-
     def put(
         self,
         url: str,
@@ -560,7 +535,6 @@ class PyAsyncClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
-
     def patch(
         self,
         url: str,
@@ -574,7 +548,6 @@ class PyAsyncClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
-
     def delete(
         self,
         url: str,
@@ -585,7 +558,6 @@ class PyAsyncClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyResponse]: ...
-
     def stream(
         self,
         method: str,
@@ -600,7 +572,6 @@ class PyAsyncClient:
         follow_redirects: bool | None = None,
         timeout: TimeoutTypes | None = None,
     ) -> Awaitable[PyAsyncStreamResponse]: ...
-
     async def __aenter__(self) -> PyAsyncClient: ...
     async def __aexit__(
         self,

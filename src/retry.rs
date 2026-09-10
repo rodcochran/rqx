@@ -20,6 +20,9 @@ pub(crate) const DEFAULT_RAISE_ON_REDIRECT: bool = true;
 const DEFAULT_TOTAL_TIMEOUT: Option<f64> = None;
 
 
+/// `total` counts retries, not attempts: total=3 allows four attempts. Under
+/// follow_redirects the budget is per hop; num_retries and retry_history on
+/// the final response add up across the chain.
 #[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct PyRetry {
