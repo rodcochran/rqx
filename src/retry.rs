@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use pyo3::prelude::{PyResult, pyclass, pymethods};
+use std::collections::HashSet;
 
 const DEFAULT_TOTAL_RETRIES: i32 = 3;
 const DEFAULT_BACKOFF_FACTOR: f32 = 0.0;
@@ -7,18 +7,13 @@ const DEFAULT_BACKOFF_MAX: f32 = 120.0;
 const DEFAULT_BACKOFF_JITTER: f32 = 0.0;
 const DEFAULT_STATUS_FORCELIST: &[u16] = &[];
 const DEFAULT_ALLOWED_METHODS: &[&str] = &[
-    "DELETE", 
-    "GET", 
-    "HEAD", 
-    "OPTIONS", 
-    "PUT", 
+    "DELETE", "GET", "HEAD", "OPTIONS", "PUT",
     // "TRACE"
 ];
 const DEFAULT_RESPECT_RETRY_AFTER_HEADER: bool = true;
 const DEFAULT_RAISE_ON_STATUS: bool = true;
 pub(crate) const DEFAULT_RAISE_ON_REDIRECT: bool = true;
 const DEFAULT_TOTAL_TIMEOUT: Option<f64> = None;
-
 
 /// `total` counts retries, not attempts: total=3 allows four attempts. Under
 /// follow_redirects the budget is per hop; num_retries and retry_history on
@@ -49,7 +44,7 @@ pub struct PyRetry {
     // ceiling on computed backoff delay in seconds
     #[pyo3(get)]
     pub backoff_max: f32,
-    
+
     // random jitter added to backoff (0.0 = no jitter)
     #[pyo3(get)]
     pub backoff_jitter: f32,
@@ -112,39 +107,30 @@ impl PyRetry {
         raise_on_redirect: Option<bool>,
         total_timeout: Option<f64>,
     ) -> PyResult<Self> {
-
         let default_total = total.unwrap_or(DEFAULT_TOTAL_RETRIES);
 
-        Ok(
-            Self {
-                total: default_total,
-                connect: connect.unwrap_or(default_total),
-                read: read.unwrap_or(default_total),
-                status: status.unwrap_or(default_total),
-                backoff_factor: backoff_factor.unwrap_or(DEFAULT_BACKOFF_FACTOR),
-                backoff_max: backoff_max.unwrap_or(DEFAULT_BACKOFF_MAX),
-                backoff_jitter: backoff_jitter.unwrap_or(DEFAULT_BACKOFF_JITTER),
-                status_forcelist: status_forcelist.unwrap_or(
-                    DEFAULT_STATUS_FORCELIST
-                        .iter()
-                        .copied()
-                        .collect()
-                ),
-                allowed_methods: allowed_methods.unwrap_or(
-                    DEFAULT_ALLOWED_METHODS
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect()
-                ),
-                respect_retry_after_header: respect_retry_after_header.unwrap_or(
-                    DEFAULT_RESPECT_RETRY_AFTER_HEADER
-                ),
-                raise_on_status: raise_on_status.unwrap_or(DEFAULT_RAISE_ON_STATUS),
-                raise_on_redirect: raise_on_redirect.unwrap_or(DEFAULT_RAISE_ON_REDIRECT),
-                total_timeout: total_timeout
-            }
-        )
-
+        Ok(Self {
+            total: default_total,
+            connect: connect.unwrap_or(default_total),
+            read: read.unwrap_or(default_total),
+            status: status.unwrap_or(default_total),
+            backoff_factor: backoff_factor.unwrap_or(DEFAULT_BACKOFF_FACTOR),
+            backoff_max: backoff_max.unwrap_or(DEFAULT_BACKOFF_MAX),
+            backoff_jitter: backoff_jitter.unwrap_or(DEFAULT_BACKOFF_JITTER),
+            status_forcelist: status_forcelist
+                .unwrap_or(DEFAULT_STATUS_FORCELIST.iter().copied().collect()),
+            allowed_methods: allowed_methods.unwrap_or(
+                DEFAULT_ALLOWED_METHODS
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            ),
+            respect_retry_after_header: respect_retry_after_header
+                .unwrap_or(DEFAULT_RESPECT_RETRY_AFTER_HEADER),
+            raise_on_status: raise_on_status.unwrap_or(DEFAULT_RAISE_ON_STATUS),
+            raise_on_redirect: raise_on_redirect.unwrap_or(DEFAULT_RAISE_ON_REDIRECT),
+            total_timeout: total_timeout,
+        })
     }
 }
 
@@ -158,16 +144,11 @@ impl PyRetry {
             backoff_factor: DEFAULT_BACKOFF_FACTOR,
             backoff_max: DEFAULT_BACKOFF_MAX,
             backoff_jitter: DEFAULT_BACKOFF_JITTER,
-            status_forcelist: DEFAULT_STATUS_FORCELIST
-                .iter()
-                .copied()
-                .collect()
-            ,
+            status_forcelist: DEFAULT_STATUS_FORCELIST.iter().copied().collect(),
             allowed_methods: DEFAULT_ALLOWED_METHODS
                 .iter()
                 .map(ToString::to_string)
-                .collect()
-            ,
+                .collect(),
             respect_retry_after_header: DEFAULT_RESPECT_RETRY_AFTER_HEADER,
             raise_on_status: DEFAULT_RAISE_ON_STATUS,
             raise_on_redirect: DEFAULT_RAISE_ON_REDIRECT,

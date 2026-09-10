@@ -1,8 +1,8 @@
 #![allow(
-    clippy::collapsible_if, 
+    clippy::collapsible_if,
     clippy::too_many_arguments,
     clippy::redundant_field_names,
-    clippy::needless_return,
+    clippy::needless_return
 )]
 
 use pyo3::prelude::*;
@@ -10,6 +10,7 @@ use pyo3::prelude::*;
 use pyo3::types::IntoPyDict;
 
 mod client;
+pub mod exceptions;
 mod headers;
 mod http;
 mod py_json;
@@ -17,26 +18,24 @@ mod request;
 mod response;
 mod retry;
 mod runtime;
+mod stream;
 mod timeout;
 mod transport;
-mod stream;
 mod url;
-pub mod exceptions;
 
-use client::{PyClient, PyAsyncClient};
+use client::{PyAsyncClient, PyClient};
+use exceptions::*;
 use headers::PyHeaders;
 use response::PyResponse;
-use runtime::RUNTIME;
-use exceptions::*;
 use retry::PyRetry;
+use runtime::RUNTIME;
 use stream::{PyAsyncStreamResponse, PyStreamResponse};
 use timeout::PyTimeout;
-use transport::{HTTPTransport, AsyncHTTPTransport};
-
+use transport::{AsyncHTTPTransport, HTTPTransport};
 
 /// `atexit` hook: shut the tokio runtime down before the interpreter starts
 /// finalizing, so no tokio thread tries to attach to Python after that point
-/// (#99). Runs with the GIL released because in-flight result deliveries may
+/// (https://github.com/rodcochran/rqx/issues/99). Runs with the GIL released because in-flight result deliveries may
 /// need it to finish. See `runtime.rs` for the lifecycle as a whole.
 #[pyfunction]
 fn _shutdown_runtime(py: Python<'_>) {
@@ -45,7 +44,7 @@ fn _shutdown_runtime(py: Python<'_>) {
 
 /// `os.register_at_fork(before=...)` hook: initialize the Apple frameworks a
 /// client build touches while still in the parent, so the forked child does
-/// not trip the Objective-C fork guard (#159). See `Runtime::prepare_fork`.
+/// not trip the Objective-C fork guard (https://github.com/rodcochran/rqx/issues/159). See `Runtime::prepare_fork`.
 #[cfg(target_os = "macos")]
 #[pyfunction]
 fn _prepare_fork(py: Python<'_>) {
@@ -56,7 +55,7 @@ fn _prepare_fork(py: Python<'_>) {
 fn _rqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // The tokio runtime is deliberately NOT built here. It is created on first
     // use so that a process which only imports rqx (a prefork server's master)
-    // never owns runtime threads to lose across fork() (#159).
+    // never owns runtime threads to lose across fork() (https://github.com/rodcochran/rqx/issues/159).
     let py = m.py();
     m.add_function(wrap_pyfunction!(_shutdown_runtime, m)?)?;
     py.import("atexit")?
@@ -80,7 +79,10 @@ fn _rqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyAsyncStreamResponse>()?;
     m.add("RqxError", m.py().get_type::<RqxError>())?;
     m.add("RequestError", m.py().get_type::<RequestError>())?;
-    m.add("MaxRetriesExceeded", m.py().get_type::<MaxRetriesExceeded>())?;
+    m.add(
+        "MaxRetriesExceeded",
+        m.py().get_type::<MaxRetriesExceeded>(),
+    )?;
     m.add("TransportError", m.py().get_type::<TransportError>())?;
     m.add("HTTPStatusError", m.py().get_type::<HTTPStatusError>())?;
     m.add("TimeoutException", m.py().get_type::<TimeoutException>())?;

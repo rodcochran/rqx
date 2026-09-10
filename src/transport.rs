@@ -1,5 +1,5 @@
 use pyo3::Bound;
-use pyo3::prelude::{PyRef, PyResult, Python, pyclass, pymethods};
+use pyo3::prelude::{PyRef, PyResult, pyclass, pymethods};
 use pyo3::types::PyAny;
 use reqwest::tls::Identity;
 use reqwest::{Client, ClientBuilder, Request, Response};
@@ -12,9 +12,8 @@ use crate::exceptions::*;
 use crate::http::protocol::HttpVersionConfig;
 use crate::http::proxy::parse_proxies;
 use crate::http::tls::{VerifyConfig, parse_identity};
-use crate::response::{PendingResponse, PyResponse};
+use crate::response::PendingResponse;
 use crate::retry::PyRetry;
-use crate::runtime::RUNTIME;
 use crate::timeout::PyTimeout;
 
 // ────────────────────────────────────────────────────────────────────────
@@ -45,18 +44,13 @@ impl Transport {
         }
     }
 
-    /// Send with retries and buffer the body.
-    pub async fn handle_request(&self, request: Request) -> PyResult<PyResponse> {
-        self.send(request).await?.into_py_response().await
-    }
-
     /// Send with retries, body unread. Every path — buffered, redirect hops,
-    /// streaming — goes through here so retries can't be skipped (#148).
+    /// streaming — goes through here so retries can't be skipped (https://github.com/rodcochran/rqx/issues/148).
     pub async fn send(&self, request: Request) -> PyResult<PendingResponse> {
         if self.retries.is_some() {
             self.send_with_retries(request).await
         } else {
-            Ok(PendingResponse::once(self.send_raw(request).await?))
+            Ok(PendingResponse::new(self.send_raw(request).await?))
         }
     }
 
@@ -82,7 +76,7 @@ impl Transport {
     async fn send_with_retries(&self, request: Request) -> PyResult<PendingResponse> {
         // Operates on raw reqwest::Response throughout — reading status and
         // retry-after directly from response headers without acquiring the GIL.
-        // The body stays unread for the caller. Mirrors the redirect-loop fix from #93.
+        // The body stays unread for the caller. Mirrors the redirect-loop fix from https://github.com/rodcochran/rqx/issues/93.
         let r = self.retries.as_ref().unwrap();
         let method = request.method().to_string();
         let is_retryable_method = r.allowed_methods.contains(&method);
@@ -153,7 +147,7 @@ impl Transport {
             match self.send_raw(request_copy).await {
                 Ok(resp) => {
                     if !is_retryable_method {
-                        return Ok(PendingResponse::once(resp));
+                        return Ok(PendingResponse::new(resp));
                     }
 
                     let status = resp.status().as_u16();
@@ -163,11 +157,9 @@ impl Transport {
                     }
 
                     if !r.status_forcelist.contains(&status) {
-                        return Ok(PendingResponse {
-                            response: resp,
-                            num_retries,
-                            retry_history,
-                        });
+                        return Ok(
+                            PendingResponse::new(resp).with_retries(num_retries, retry_history)
+                        );
                     }
 
                     current_response = Some(resp);
@@ -198,11 +190,7 @@ impl Transport {
                         r.total
                     )));
                 }
-                Ok(PendingResponse {
-                    response: cr,
-                    num_retries,
-                    retry_history,
-                })
+                Ok(PendingResponse::new(cr).with_retries(num_retries, retry_history))
             }
             None => Err(MaxRetriesExceeded::new_err(format!(
                 "max retries exceeded: {}",
@@ -455,21 +443,6 @@ impl HTTPTransport {
         })
     }
 
-    pub fn handle_request(&self, py: Python<'_>, request: Request) -> PyResult<PyResponse> {
-        // NOTE: block_on panics if called from within an existing tokio runtime
-        // context. Safe here because Python is the caller and py.detach releases
-        // the GIL without entering a runtime. Callers embedding this in an async
-        // Python framework (or invoking from inside another tokio task) will
-        // panic — they should use the async variant instead.
-        py.detach(|| RUNTIME.block_on(self.inner.handle_request(request)))
-            .and_then(|result| result)
-    }
-
-    pub fn send(&self, py: Python<'_>, request: Request) -> PyResult<PendingResponse> {
-        py.detach(|| RUNTIME.block_on(self.inner.send(request)))
-            .and_then(|result| result)
-    }
-
     pub fn client(&self) -> &Client {
         self.inner.client()
     }
@@ -548,14 +521,6 @@ impl AsyncHTTPTransport {
         Ok(Self {
             inner: Transport::new(client, None, None),
         })
-    }
-
-    pub async fn handle_request(&self, request: Request) -> PyResult<PyResponse> {
-        self.inner.handle_request(request).await
-    }
-
-    pub async fn send(&self, request: Request) -> PyResult<PendingResponse> {
-        self.inner.send(request).await
     }
 
     pub fn client(&self) -> &Client {

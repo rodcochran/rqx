@@ -23,7 +23,6 @@ rqx.RqxError
 └── rqx.MaxRetriesExceeded           (raised when retry budget exhausted)
 */
 
-
 // Level 1
 create_exception!(rqx, RqxError, pyo3::exceptions::PyException);
 
@@ -49,7 +48,6 @@ create_exception!(rqx, PoolTimeout, TimeoutException);
 create_exception!(rqx, ConnectError, NetworkError);
 create_exception!(rqx, ReadError, NetworkError);
 create_exception!(rqx, WriteError, NetworkError);
-
 
 /// Map a reqwest error to the most specific rqx exception type.
 ///
