@@ -327,3 +327,36 @@ async def test_status_cap_stops_before_total_async(flaky_server):
     resp = await client.get(f"{flaky_server}/?request_id=status_cap_async")
     assert resp.status_code == 503
     assert resp.num_retries == 1
+
+
+def test_zero_cap_means_no_retry_of_that_kind(flaky_server):
+    retries = rqx.Retry(
+        total=5, status=0, backoff_factor=0.0, status_forcelist={503}, raise_on_status=False
+    )
+    client = rqx.Client(transport=rqx.HTTPTransport(retries=retries))
+    resp = client.get(f"{flaky_server}/?request_id=zero_status_cap")
+    assert resp.status_code == 503
+    assert resp.num_retries == 0
+
+
+def test_mixed_kinds_are_charged_separately(flaky_server):
+    """/reset-then-flaky: one reset (read), two 503s (status), then 200."""
+    retries = rqx.Retry(
+        total=5, read=1, status=2, backoff_factor=0.0, status_forcelist={503}
+    )
+    client = rqx.Client(transport=rqx.HTTPTransport(retries=retries))
+    resp = client.get(f"{flaky_server}/reset-then-flaky?request_id=mixed_kinds")
+    assert resp.status_code == 200
+    assert resp.num_retries == 3
+    # the reset is attempt 0, which retry_history never records
+    assert [status for status, _ in resp.retry_history] == ["503", "503", "200"]
+
+
+def test_mixed_kinds_stop_at_the_first_exhausted_cap(flaky_server):
+    retries = rqx.Retry(
+        total=5, read=0, status=2, backoff_factor=0.0, status_forcelist={503}
+    )
+    client = rqx.Client(transport=rqx.HTTPTransport(retries=retries))
+    with pytest.raises(rqx.MaxRetriesExceeded, match=r"0 retries \(0 connect, 0 read, 0 status\)"):
+        client.get(f"{flaky_server}/reset-then-flaky?request_id=mixed_kinds_read_zero")
+    assert FlakyServerHandler.counters["mixed_kinds_read_zero"] == 1

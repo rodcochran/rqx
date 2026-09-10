@@ -325,6 +325,20 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self._reset_connection(request_id)
             return
 
+        # /reset-then-flaky — closes the connection on the first hit, then 503 twice, then 200.
+        if path == "/reset-then-flaky":
+            self.counters[request_id] += 1
+            if self.counters[request_id] == 1:
+                self.connection.close()
+                return
+            if self.counters[request_id] <= DEFAULT_ERRORS_BEFORE_SUCCESS:
+                self.send_response(503)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self._sleep_then_respond(0)
+            return
+
         self.counters[request_id] += 1
 
         if self.counters[request_id] < DEFAULT_ERRORS_BEFORE_SUCCESS:
