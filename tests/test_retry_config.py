@@ -143,8 +143,9 @@ async def test_raise_on_redirect_false_returns_3xx_async(flaky_server):
 #
 # Every send — buffered, each redirect hop, and streaming — goes through
 # Transport::send, so the retry policy applies uniformly (#148). The budget is
-# per hop (each hop may use up to Retry.total attempts); num_retries and
-# retry_history on the final response are cumulative across the chain.
+# per hop (each hop may use up to Retry.total retries, i.e. Retry.total + 1
+# attempts); num_retries and retry_history on the final response are
+# cumulative across the chain.
 #
 # The control test below is identical except for follow_redirects, which
 # isolates the variable: same server, same Retry, same endpoint behavior.

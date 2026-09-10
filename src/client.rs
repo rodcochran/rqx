@@ -414,9 +414,10 @@ impl Client {
     /// Every hop goes through `Transport::send`, so the retry policy applies
     /// to each hop: a 503 on hop three retries hop three, not the whole
     /// chain (#148). The retry budget is per hop — each hop may use up to
-    /// `Retry.total` attempts — while the telemetry on the final response is
-    /// cumulative: `num_retries` and `retry_history` cover every hop in the
-    /// chain. The chain itself is bounded by `max_redirects`.
+    /// `Retry.total` retries, i.e. `Retry.total + 1` attempts — while the
+    /// telemetry on the final response is cumulative: `num_retries` and
+    /// `retry_history` cover every hop in the chain. `max_redirects` bounds
+    /// the number of requests in the chain, counting the initial URL.
     ///
     /// Operates on `reqwest::Response` end-to-end so reading the Location
     /// header and Set-Cookie values requires no GIL acquisition (see #93).
