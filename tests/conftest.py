@@ -204,6 +204,17 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
+        # /redirect-to-flaky — 302 to the flaky endpoint, preserving request_id.
+        # Used to check that retry config still applies while following a
+        # redirect chain. The Location is relative, so the client resolves it
+        # against the original URL.
+        if path == "/redirect-to-flaky":
+            self.send_response(302)
+            self.send_header("Location", f"/?request_id={params['request_id'][0]}")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
         # /redirect-once — 302 to /streamable. Used to test follow_redirects on stream.
         if path == "/redirect-once":
             self.send_response(302)

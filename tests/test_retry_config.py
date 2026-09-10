@@ -137,3 +137,62 @@ async def test_raise_on_redirect_false_returns_3xx_async(flaky_server):
     client = rqx.AsyncClient(transport=transport, follow_redirects=True, max_redirects=2)
     resp = await client.get(f"{flaky_server}/redirect-loop")
     assert 300 <= resp.status_code < 400
+
+
+# ----- retries under follow_redirects -----
+#
+# The retry state machine lives in Transport::send_with_retries, but
+# Client::follow_redirects reaches past it and calls Transport::send_raw per
+# hop (src/client.rs:429). So when follow_redirects=True the retry config is
+# silently ignored.
+#
+# The control test below is identical except for follow_redirects, which
+# isolates the variable: same server, same Retry, same endpoint behavior.
+
+
+def test_retries_fire_without_redirect_control(flaky_server):
+    """Control: retries work on the flaky endpoint when not following redirects."""
+    retries = rqx.Retry(total=5, backoff_factor=0.0, status_forcelist={503})
+    transport = rqx.HTTPTransport(retries=retries)
+    client = rqx.Client(transport=transport, follow_redirects=False)
+
+    resp = client.get(f"{flaky_server}/?request_id=retry_no_redirect_control")
+    assert resp.status_code == 200
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="follow_redirects bypasses the retry loop (src/client.rs:429 calls send_raw)",
+)
+def test_retries_fire_under_follow_redirects(flaky_server):
+    """Retry config must still apply while following a redirect chain.
+
+    /redirect-to-flaky 302s to the flaky endpoint, which returns 503 for its
+    first two hits and 200 on the third. With total=5 the retry loop should
+    ride through to the 200.
+    """
+    retries = rqx.Retry(total=5, backoff_factor=0.0, status_forcelist={503})
+    transport = rqx.HTTPTransport(retries=retries)
+    client = rqx.Client(transport=transport, follow_redirects=True)
+
+    resp = client.get(
+        f"{flaky_server}/redirect-to-flaky?request_id=retry_under_redirect_sync"
+    )
+    assert resp.status_code == 200
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="follow_redirects bypasses the retry loop (src/client.rs:429 calls send_raw)",
+)
+@pytest.mark.asyncio
+async def test_retries_fire_under_follow_redirects_async(flaky_server):
+    """Async path shares Client::request, so it has the same gap."""
+    retries = rqx.Retry(total=5, backoff_factor=0.0, status_forcelist={503})
+    transport = rqx.AsyncHTTPTransport(retries=retries)
+    client = rqx.AsyncClient(transport=transport, follow_redirects=True)
+
+    resp = await client.get(
+        f"{flaky_server}/redirect-to-flaky?request_id=retry_under_redirect_async"
+    )
+    assert resp.status_code == 200
