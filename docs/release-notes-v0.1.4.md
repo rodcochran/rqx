@@ -26,13 +26,13 @@ Correctness release. Fixes the runtime lifecycle so rqx survives `fork()` and in
 
 ## Performance
 
-Full run on paired AWS `c7i.large` instances (client + nginx, single-AZ), rqx at the release commit, 5 runs per bench, against httpr 0.7.2, aiohttp 3.14.3, httpx 0.28.1. Charts in `benchmarks/0.1.4/`; tables, method, and limitations in [`benchmarks/0.1.4/report.md`](benchmarks/0.1.4/report.md); raw logs in `benchmarks/results/aws-20260910-v014/`.
+Full run on paired AWS `c7i.large` instances (client + nginx, single-AZ), rqx at the release commit, 5 runs per bench, against httpr 0.7.2, aiohttp 3.14.3, httpx 0.28.1. Charts in [`benchmarks/0.1.4/`](https://github.com/rodcochran/rqx/tree/v0.1.4/benchmarks/0.1.4); tables, method, and limitations in [`benchmarks/0.1.4/report.md`](https://github.com/rodcochran/rqx/blob/v0.1.4/benchmarks/0.1.4/report.md); raw logs in [`benchmarks/results/aws-20260910-v014/`](https://github.com/rodcochran/rqx/tree/v0.1.4/benchmarks/results/aws-20260910-v014).
 
 * **Throughput (b1):** rqx leads every client at every concurrency — +29% over httpr and +69% over aiohttp at c=100 (19,723 RPS, median of 5, ±1%). Versus the 0.1.3 run rqx is +8 to +14%, but the box is newer (kernel 7.0, rustc 1.98.1) and the unchanged clients moved +1 to +12% too; the code-attributable gain is the same-box A/B on #162: +1.6 to +4.4% with the controls flat.
 * **Memory (b1):** rqx peak RSS down 14–16% at c=500–1000 (77.5 → 66.0 MB, 101.0 → 84.9 MB); lightest client through c=50. At c=500+ aiohttp and the current httpr are lighter.
 * **Latency (b2, c=100):** p50 **4.79 ms** (was 5.48), lowest of the four; p99 12.33 ms, unchanged, and higher than aiohttp's 8.52 — see #168.
 * **Latency under load (b8):** lowest p50 at every concurrency; p99/p50 ratio 1.9–2.1×, unchanged from 0.1.3; aiohttp holds 1.0–1.2×.
-* **Stability:** zero aborts across 100 b1 cells, 5 b2 runs, 5 b8 runs. The 0.1.2 and 0.1.3 bench runs each hit the shutdown abort (#99); this one did not.
+* **Stability:** zero aborts across 95 b1 cells (aiohttp c=1000 is skipped by design), 5 b2 runs, 5 b8 runs. The 0.1.2 and 0.1.3 bench runs each hit the shutdown abort (#99); this one did not.
 * httpr moved from 0.4.8 to 0.7.2 between runs and its `AsyncClient` no longer self-throttles to asyncio's default executor, so this run's rqx-vs-httpr lead is the fair one; the 0.1.3 report's "3.4× lighter than httpr" no longer applies.
 
 ## Internals
