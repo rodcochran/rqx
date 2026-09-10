@@ -15,6 +15,33 @@ use super::exceptions::{HTTPStatusError, RqxError, map_reqwest_error};
 use super::headers::PyHeaders;
 use super::py_json::value_to_py;
 
+/// Wire response with the body unread, plus the retries it took to get it.
+/// Seed of the deferred-body model in https://github.com/rodcochran/rqx/issues/55
+pub struct PendingResponse {
+    pub response: Response,
+    pub num_retries: u32,
+    pub retry_history: Vec<(String, f64)>,
+}
+
+impl PendingResponse {
+    /// One attempt, no retries.
+    pub(crate) fn once(response: Response) -> Self {
+        Self {
+            response,
+            num_retries: 0,
+            retry_history: Vec::new(),
+        }
+    }
+
+    /// Reads the body into a PyResponse, keeping the retry telemetry.
+    pub async fn into_py_response(self) -> PyResult<PyResponse> {
+        let mut response = PyResponse::from_response(self.response).await?;
+        response.parts.num_retries = self.num_retries;
+        response.parts.retry_history = self.retry_history;
+        Ok(response)
+    }
+}
+
 /*
 Pure Rust implementation of the response parts to avoid overhead with GIL and FFI
 */
