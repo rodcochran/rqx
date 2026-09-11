@@ -7,7 +7,7 @@ setup: install-python-deps build
 # Install Python deps via uv and generate lockfile
 install-python-deps:
     uv venv
-    uv pip install -e ".[dev]"
+    uv sync
     uv lock
 
 # Build the extension (debug; fast for iteration)
@@ -21,6 +21,18 @@ build-release:
 # Run the test suite in parallel
 test: build
     uv run pytest tests/ -n 8
+
+# Fixture-server tests only (no docker needed)
+test-unit:
+    uv run pytest tests/unit -n 8
+
+# Starts httpbin in Docker via testcontainers (or set RQX_HTTPBIN_URL)
+test-integration:
+    uv run pytest tests/integration -n 8
+
+# Hypothesis tests; HYPOTHESIS_PROFILE=nightly for the bigger budget
+test-property:
+    uv run pytest tests/property -n 8
 
 # Regenerate test certificates from scratch
 regen-certs:
@@ -55,10 +67,3 @@ bench-stream rounds="10" only="" base_ref="5e3fe3e812ba595265d01e089af2ae96aa5e6
         -v "{{justfile_directory()}}/benchmarks/stream_ab/results:/results" \
         rqx-stream-ab
 
-# Start test server
-httpbin-start:
-    docker run -d --name reqx-httpbin -p 80:80 kennethreitz/httpbin
-
-# Stop test server
-httpbin-stop:
-    docker rm -f reqx-httpbin

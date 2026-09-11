@@ -4,11 +4,8 @@ import time
 
 import pytest
 import rqx
-from conftest import FlakyServerHandler
+from tests.fixtures.server import FlakyServerHandler
 from rich import print
-
-# HTTPBIN_HOST = "https://httpbin.org"
-HTTPBIN_HOST = "http://localhost"
 
 
 # ================================================================
@@ -16,47 +13,47 @@ HTTPBIN_HOST = "http://localhost"
 # ================================================================
 
 
-def test_true_200():
+def test_true_200(httpbin):
     client = rqx.Client()
-    resp = client.get(f"{HTTPBIN_HOST}/get")
+    resp = client.get(f"{httpbin}/get")
     assert resp.status_code == 200
     assert "content-type" in resp.headers
     body = resp.json()
-    assert body["url"] == f"{HTTPBIN_HOST}/get"
+    assert body["url"] == f"{httpbin}/get"
     print("")
     print(f"JSON body:\n{body}")
 
 
-def test_400():
+def test_400(httpbin):
     client = rqx.Client()
-    resp = client.get(f"{HTTPBIN_HOST}/status/400")
+    resp = client.get(f"{httpbin}/status/400")
     assert resp.status_code == 400
     assert "content-type" in resp.headers
     with pytest.raises(rqx.RqxError):
         resp.json()
 
 
-def test_404():
+def test_404(httpbin):
     client = rqx.Client()
-    resp = client.get(f"{HTTPBIN_HOST}/status/404")
+    resp = client.get(f"{httpbin}/status/404")
     assert resp.status_code == 404
     assert "content-type" in resp.headers
     with pytest.raises(rqx.RqxError):
         resp.json()
 
 
-def test_500():
+def test_500(httpbin):
     client = rqx.Client()
-    resp = client.get(f"{HTTPBIN_HOST}/status/500")
+    resp = client.get(f"{httpbin}/status/500")
     assert resp.status_code == 500
     assert "content-type" in resp.headers
     with pytest.raises(rqx.RqxError):
         resp.json()
 
 
-def test_body():
+def test_body(httpbin):
     client = rqx.Client()
-    resp = client.get(f"{HTTPBIN_HOST}/get")
+    resp = client.get(f"{httpbin}/get")
     assert resp.status_code == 200
     assert "content-type" in resp.headers
     body = resp.json()
@@ -67,9 +64,9 @@ def test_body():
         assert k in body.keys()
 
 
-def test_valid_text():
+def test_valid_text(httpbin):
     client = rqx.Client()
-    resp = client.get(f"{HTTPBIN_HOST}/get")
+    resp = client.get(f"{httpbin}/get")
     text = resp.text
     assert text is not None
     assert isinstance(text, str)
@@ -78,9 +75,9 @@ def test_valid_text():
     print(f"Text:\n{text}")
 
 
-def test_valid_bytes():
+def test_valid_bytes(httpbin):
     client = rqx.Client()
-    resp = client.get(f"{HTTPBIN_HOST}/get")
+    resp = client.get(f"{httpbin}/get")
     content = resp.content
     assert content is not None
     assert isinstance(content, bytes)
@@ -89,9 +86,9 @@ def test_valid_bytes():
     print(f"Content:\n{content}")
 
 
-def test_headers():
+def test_headers(httpbin):
     client = rqx.Client()
-    resp = client.get(f"{HTTPBIN_HOST}/get")
+    resp = client.get(f"{httpbin}/get")
     headers = resp.headers
     assert headers is not None
     assert isinstance(headers, rqx.Headers)
@@ -100,7 +97,7 @@ def test_headers():
     print(f"Headers:\n{headers}")
 
 
-def test_nested_json():
+def test_nested_json(httpbin):
     # httpbin's /get?foo=bar&baz=123 will give you query params in the args field.
     # Good way to test that nested JSON values come through correctly.
     client = rqx.Client()
@@ -110,7 +107,7 @@ def test_nested_json():
     key2 = "foo"
     val2 = "bar"
 
-    resp = client.get(f"{HTTPBIN_HOST}/get?{key1}={val1}&{key2}={val2}")
+    resp = client.get(f"{httpbin}/get?{key1}={val1}&{key2}={val2}")
     body = resp.json()
     args = body["args"]
     assert args[key1] == val1
@@ -119,19 +116,19 @@ def test_nested_json():
     print(f"Nested Json (body args):\n{body}")
 
 
-def test_gil_release():
+def test_gil_release(httpbin):
 
     def task(wait_time: int):
         print(f"Starting {wait_time} second wait")
-        resp = client.get(f"{HTTPBIN_HOST}/delay/{wait_time}")
+        resp = client.get(f"{httpbin}/delay/{wait_time}")
         print(f"Finished {wait_time} second wait")
         assert resp.status_code == 200
         assert "content-type" in resp.headers
 
     client = rqx.Client()
 
-    wait_time_1 = 1
-    wait_time_2 = 2
+    wait_time_1 = 0.5
+    wait_time_2 = 1.0
 
     t1 = threading.Thread(target=task, args=(wait_time_1,))
     t2 = threading.Thread(target=task, args=(wait_time_2,))
@@ -148,7 +145,8 @@ def test_gil_release():
 
     print("")
     print(f"Duration: {duration}s")
-    assert duration <= max(wait_time_1, wait_time_2) * 1.1
+    # Serial would be the sum; concurrent lands near the max plus overhead.
+    assert duration < (wait_time_1 + wait_time_2) * 0.9
 
 
 # ================================================================
@@ -156,9 +154,9 @@ def test_gil_release():
 # ================================================================
 
 
-def test_blank_post():
+def test_blank_post(httpbin):
     client = rqx.Client()
-    resp = client.post(f"{HTTPBIN_HOST}/post", json=None)
+    resp = client.post(f"{httpbin}/post", json=None)
     assert resp.status_code == 200
     assert "content-type" in resp.headers
 
@@ -167,9 +165,9 @@ def test_blank_post():
     print(f"Post JSON response:\n{body}")
 
 
-def test_sample_json_params_post():
+def test_sample_json_params_post(httpbin):
     client = rqx.Client()
-    resp = client.post(f"{HTTPBIN_HOST}/post", json={"special_param": 1})
+    resp = client.post(f"{httpbin}/post", json={"special_param": 1})
     assert resp.status_code == 200
     assert "content-type" in resp.headers
 
@@ -178,50 +176,32 @@ def test_sample_json_params_post():
     print(f"Post JSON response:\n{body}")
 
 
-def test_blank_options():
+def test_blank_options(httpbin):
     client = rqx.Client()
-    resp = client.options(f"{HTTPBIN_HOST}/get")
+    resp = client.options(f"{httpbin}/get")
     assert resp.status_code == 200
     assert "content-type" in resp.headers
     assert "allow" in resp.headers
 
 
-def test_blank_head():
+def test_blank_head(httpbin):
     client = rqx.Client()
-    resp = client.head(f"{HTTPBIN_HOST}/get")
+    resp = client.head(f"{httpbin}/get")
     assert resp.status_code == 200
     assert "content-type" in resp.headers
     assert not resp.content
 
 
-def test_blank_put():
+def test_blank_put(httpbin):
     client = rqx.Client()
-    resp = client.put(f"{HTTPBIN_HOST}/put", json=None)
+    resp = client.put(f"{httpbin}/put", json=None)
     assert resp.status_code == 200
     assert "content-type" in resp.headers
 
 
-def test_sample_json_params_put():
+def test_sample_json_params_put(httpbin):
     client = rqx.Client()
-    resp = client.put(f"{HTTPBIN_HOST}/put", json={"special_param": 1})
-    assert resp.status_code == 200
-    assert "content-type" in resp.headers
-
-    body = resp.json()
-    print("")
-    print(f"Post JSON response:\n{body}")
-
-
-def test_blank_patch():
-    client = rqx.Client()
-    resp = client.patch(f"{HTTPBIN_HOST}/patch", json=None)
-    assert resp.status_code == 200
-    assert "content-type" in resp.headers
-
-
-def test_sample_json_params_patch():
-    client = rqx.Client()
-    resp = client.patch(f"{HTTPBIN_HOST}/patch", json={"special_param": 1})
+    resp = client.put(f"{httpbin}/put", json={"special_param": 1})
     assert resp.status_code == 200
     assert "content-type" in resp.headers
 
@@ -230,21 +210,39 @@ def test_sample_json_params_patch():
     print(f"Post JSON response:\n{body}")
 
 
-def test_blank_delete():
+def test_blank_patch(httpbin):
     client = rqx.Client()
-    resp = client.delete(f"{HTTPBIN_HOST}/delete")
+    resp = client.patch(f"{httpbin}/patch", json=None)
     assert resp.status_code == 200
     assert "content-type" in resp.headers
 
 
-def test_post_with_query_params():
+def test_sample_json_params_patch(httpbin):
+    client = rqx.Client()
+    resp = client.patch(f"{httpbin}/patch", json={"special_param": 1})
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+    body = resp.json()
+    print("")
+    print(f"Post JSON response:\n{body}")
+
+
+def test_blank_delete(httpbin):
+    client = rqx.Client()
+    resp = client.delete(f"{httpbin}/delete")
+    assert resp.status_code == 200
+    assert "content-type" in resp.headers
+
+
+def test_post_with_query_params(httpbin):
 
     query_param_1_key = "q_param_1"
     query_param_1_value = "hey"
 
     client = rqx.Client()
     resp = client.post(
-        f"{HTTPBIN_HOST}/post",
+        f"{httpbin}/post",
         params={query_param_1_key: query_param_1_value},
     )
     assert resp.status_code == 200
@@ -258,7 +256,7 @@ def test_post_with_query_params():
     print(f"Post JSON response:\n{body}")
 
 
-def test_post_with_query_params_and_json():
+def test_post_with_query_params_and_json(httpbin):
 
     query_param_1_key = "q_param_1"
     query_param_1_value = "hey"
@@ -268,7 +266,7 @@ def test_post_with_query_params_and_json():
 
     client = rqx.Client()
     resp = client.post(
-        f"{HTTPBIN_HOST}/post",
+        f"{httpbin}/post",
         json={json_param_1_key: json_param_1_value},
         params={query_param_1_key: query_param_1_value},
     )
@@ -284,14 +282,14 @@ def test_post_with_query_params_and_json():
     assert json.loads(body["data"]) == {json_param_1_key: json_param_1_value}
 
 
-def test_put_with_query_params():
+def test_put_with_query_params(httpbin):
 
     query_param_1_key = "q_param_1"
     query_param_1_value = "hey"
 
     client = rqx.Client()
     resp = client.put(
-        f"{HTTPBIN_HOST}/put",
+        f"{httpbin}/put",
         params={query_param_1_key: query_param_1_value},
     )
     assert resp.status_code == 200
@@ -305,7 +303,7 @@ def test_put_with_query_params():
     print(f"Put JSON response:\n{body}")
 
 
-def test_put_with_query_params_and_json():
+def test_put_with_query_params_and_json(httpbin):
 
     query_param_1_key = "q_param_1"
     query_param_1_value = "hey"
@@ -315,7 +313,7 @@ def test_put_with_query_params_and_json():
 
     client = rqx.Client()
     resp = client.put(
-        f"{HTTPBIN_HOST}/put",
+        f"{httpbin}/put",
         json={json_param_1_key: json_param_1_value},
         params={query_param_1_key: query_param_1_value},
     )
@@ -331,14 +329,14 @@ def test_put_with_query_params_and_json():
     assert json.loads(body["data"]) == {json_param_1_key: json_param_1_value}
 
 
-def test_patch_with_query_params():
+def test_patch_with_query_params(httpbin):
 
     query_param_1_key = "q_param_1"
     query_param_1_value = "hey"
 
     client = rqx.Client()
     resp = client.patch(
-        f"{HTTPBIN_HOST}/patch",
+        f"{httpbin}/patch",
         params={query_param_1_key: query_param_1_value},
     )
     assert resp.status_code == 200
@@ -352,7 +350,7 @@ def test_patch_with_query_params():
     print(f"Patch JSON response:\n{body}")
 
 
-def test_patch_with_query_params_and_json():
+def test_patch_with_query_params_and_json(httpbin):
 
     query_param_1_key = "q_param_1"
     query_param_1_value = "hey"
@@ -362,7 +360,7 @@ def test_patch_with_query_params_and_json():
 
     client = rqx.Client()
     resp = client.patch(
-        f"{HTTPBIN_HOST}/patch",
+        f"{httpbin}/patch",
         json={json_param_1_key: json_param_1_value},
         params={query_param_1_key: query_param_1_value},
     )
@@ -378,7 +376,7 @@ def test_patch_with_query_params_and_json():
     assert json.loads(body["data"]) == {json_param_1_key: json_param_1_value}
 
 
-def test_get_with_headers():
+def test_get_with_headers(httpbin):
 
     headers = {
         "Authorization": "Bearer your_access_token_here",
@@ -386,7 +384,7 @@ def test_get_with_headers():
     }
 
     client = rqx.Client()
-    resp = client.get(f"{HTTPBIN_HOST}/get", headers=headers)
+    resp = client.get(f"{httpbin}/get", headers=headers)
 
     print("")
     print(f"Response Headers:\n{resp.headers}")
@@ -394,7 +392,7 @@ def test_get_with_headers():
     assert resp.status_code == 200
     assert "content-type" in resp.headers
     body = resp.json()
-    assert body["url"] == f"{HTTPBIN_HOST}/get"
+    assert body["url"] == f"{httpbin}/get"
 
     echoed_headers = body["headers"]
 
@@ -412,37 +410,37 @@ def test_get_with_headers():
     print(f"JSON body:\n{body}")
 
 
-def test_get_with_timeout():
+def test_get_with_timeout(httpbin):
     client = rqx.Client()
     with pytest.raises(rqx.TimeoutException):
-        client.get(f"{HTTPBIN_HOST}/delay/5", timeout=1)
+        client.get(f"{httpbin}/delay/2", timeout=0.3)
 
 
-def test_context_manger_200():
+def test_context_manger_200(httpbin):
     with rqx.Client() as client:
-        resp = client.get(f"{HTTPBIN_HOST}/get")
+        resp = client.get(f"{httpbin}/get")
         assert resp.status_code == 200
         assert "content-type" in resp.headers
         body = resp.json()
-        assert body["url"] == f"{HTTPBIN_HOST}/get"
+        assert body["url"] == f"{httpbin}/get"
         print("")
         print(f"JSON body:\n{body}")
 
 
-def test_raise_for_status():
+def test_raise_for_status(httpbin):
     client = rqx.Client()
-    resp = client.get(f"{HTTPBIN_HOST}/status/400")
+    resp = client.get(f"{httpbin}/status/400")
     assert resp.status_code == 400
     assert "content-type" in resp.headers
     with pytest.raises(rqx.HTTPStatusError):
         resp.raise_for_status()
 
 
-def test_post_with_content():
+def test_post_with_content(httpbin):
     content_str = '{"raw_content": "hello"}'
     content_bytes = content_str.encode()
     client = rqx.Client()
-    resp = client.post(f"{HTTPBIN_HOST}/post", content=content_bytes)
+    resp = client.post(f"{httpbin}/post", content=content_bytes)
     assert resp.status_code == 200
     assert "content-type" in resp.headers
 
@@ -452,10 +450,10 @@ def test_post_with_content():
     print(f"Post JSON response:\n{body}")
 
 
-def test_post_with_data():
+def test_post_with_data(httpbin):
     data = {"hi": "goodbye", "hey": "2"}
     client = rqx.Client()
-    resp = client.post(f"{HTTPBIN_HOST}/post", data=data)
+    resp = client.post(f"{httpbin}/post", data=data)
     assert resp.status_code == 200
     assert "content-type" in resp.headers
     body = resp.json()
@@ -464,67 +462,67 @@ def test_post_with_data():
     print(f"Post JSON response:\n{body}")
 
 
-def test_basic_auth():
+def test_basic_auth(httpbin):
     u = "User"
     p = "Password"
     auth = (u, p)
     client = rqx.Client()
-    resp = client.get(f"{HTTPBIN_HOST}/basic-auth/{u}/{p}", auth=auth)
+    resp = client.get(f"{httpbin}/basic-auth/{u}/{p}", auth=auth)
     assert resp.status_code == 200
 
 
-def test_basic_client_based_redirect():
+def test_basic_client_based_redirect(httpbin):
     client = rqx.Client(follow_redirects=True)
     resp = client.get(
-        f"{HTTPBIN_HOST}/redirect/3",
+        f"{httpbin}/redirect/3",
     )
     assert resp.status_code == 200
 
 
-def test_basic_request_based_redirect():
+def test_basic_request_based_redirect(httpbin):
     client = rqx.Client(follow_redirects=False)
     resp = client.get(
-        f"{HTTPBIN_HOST}/redirect/3",
+        f"{httpbin}/redirect/3",
         follow_redirects=True,
     )
     assert resp.status_code == 200
 
 
-def test_false_follow_redirects_returns_302():
+def test_false_follow_redirects_returns_302(httpbin):
     client = rqx.Client(follow_redirects=False)
     resp = client.get(
-        f"{HTTPBIN_HOST}/redirect/3",
+        f"{httpbin}/redirect/3",
         follow_redirects=False,
     )
     assert resp.status_code == 302
 
 
-def test_raise_error_on_redirects_exeeding_max_redirects():
+def test_raise_error_on_redirects_exeeding_max_redirects(httpbin):
     client = rqx.Client(follow_redirects=True, max_redirects=1)
     with pytest.raises(rqx.TooManyRedirects):
-        client.get(f"{HTTPBIN_HOST}/redirect/3")
+        client.get(f"{httpbin}/redirect/3")
 
 
-def test_get_total_elapsed_time():
-    delay_time = 1
+def test_get_total_elapsed_time(httpbin):
+    delay_time = 0.3
     client = rqx.Client()
-    resp = client.get(f"{HTTPBIN_HOST}/delay/{delay_time}")
+    resp = client.get(f"{httpbin}/delay/{delay_time}")
     assert resp.elapsed is not None
     assert resp.elapsed > delay_time
     print("")
     print(f"Elapsed time:\n{resp.elapsed:.2f}s")
 
 
-def test_basic_final_url_in_output():
+def test_basic_final_url_in_output(httpbin):
     client = rqx.Client()
-    resp = client.get(f"{HTTPBIN_HOST}/get")
-    assert resp.url == f"{HTTPBIN_HOST}/get"
+    resp = client.get(f"{httpbin}/get")
+    assert resp.url == f"{httpbin}/get"
 
 
-def test_redirected_final_url_in_output():
+def test_redirected_final_url_in_output(httpbin):
     client = rqx.Client()
-    resp = client.get(f"{HTTPBIN_HOST}/redirect/3", follow_redirects=True)
-    assert resp.url == f"{HTTPBIN_HOST}/get"
+    resp = client.get(f"{httpbin}/redirect/3", follow_redirects=True)
+    assert resp.url == f"{httpbin}/get"
 
 
 def test_bad_url_raises():
@@ -607,7 +605,7 @@ def test_exceeded_retries_on_flaky_server(flaky_server):
         client.get(f"{flaky_server}/flaky?request_id=test2")
 
 
-def test_404_is_not_retried():
+def test_404_is_not_retried(httpbin):
     transport = rqx.HTTPTransport(
         retries=rqx.Retry(
             total=1,
@@ -617,7 +615,7 @@ def test_404_is_not_retried():
     )
     client = rqx.Client(transport=transport)
 
-    resp = client.get(f"{HTTPBIN_HOST}/status/404")
+    resp = client.get(f"{httpbin}/status/404")
     assert resp.status_code == 404
     assert "content-type" in resp.headers
     with pytest.raises(rqx.RqxError):
@@ -662,9 +660,9 @@ def test_total_timeout_exceeded(flaky_server):
     transport = rqx.HTTPTransport(
         retries=rqx.Retry(
             total=5,
-            backoff_factor=2.0,
+            backoff_factor=0.5,
             status_forcelist={503},
-            total_timeout=1.0,
+            total_timeout=0.3,
         )
     )
     client = rqx.Client(transport=transport)
@@ -696,11 +694,11 @@ def test_total_timeout_not_exceeded(flaky_server):
 # ================================================================
 
 
-def test_max_connections_with_freed_gil():
+def test_max_connections_with_freed_gil(httpbin):
 
     def task(wait_time: int):
         print(f"Starting {wait_time} second wait")
-        resp = client.get(f"{HTTPBIN_HOST}/delay/{wait_time}")
+        resp = client.get(f"{httpbin}/delay/{wait_time}")
         print(f"Finished {wait_time} second wait")
         assert resp.status_code == 200
         assert "content-type" in resp.headers
@@ -708,11 +706,11 @@ def test_max_connections_with_freed_gil():
     transport = rqx.HTTPTransport(max_connections=2)
     client = rqx.Client(transport=transport)
 
-    wait_time_1 = 1
-    wait_time_2 = 1
-    wait_time_3 = 1
-    wait_time_4 = 1
-    wait_time_5 = 1
+    wait_time_1 = 0.4
+    wait_time_2 = 0.4
+    wait_time_3 = 0.4
+    wait_time_4 = 0.4
+    wait_time_5 = 0.4
 
     wait_times = [wait_time_1, wait_time_2, wait_time_3, wait_time_4, wait_time_5]
 
@@ -812,11 +810,11 @@ def test_verify_is_false_returns_200_on_unsigned_url(http2_server):
     assert resp.status_code == 200
 
 
-def test_cookies_basic():
+def test_cookies_basic(httpbin):
     client = rqx.Client()
 
     # First request sets the cookie
-    resp1 = client.get(f"{HTTPBIN_HOST}/cookies/set/testcookie/hello")
+    resp1 = client.get(f"{httpbin}/cookies/set/testcookie/hello")
     assert "testcookie" in resp1.cookies
     assert resp1.cookies["testcookie"] == "hello"
 
@@ -825,14 +823,14 @@ def test_cookies_basic():
     assert client.cookies["testcookie"] == "hello"
 
     # Second request should send the cookie back
-    resp2 = client.get(f"{HTTPBIN_HOST}/cookies")
+    resp2 = client.get(f"{httpbin}/cookies")
     body = resp2.json()
     assert body["cookies"]["testcookie"] == "hello"
 
 
-def test_stream():
+def test_stream(httpbin):
     client = rqx.Client()
-    with client.stream("GET", f"{HTTPBIN_HOST}/stream/5") as resp:
+    with client.stream("GET", f"{httpbin}/stream/5") as resp:
         chunks = list(resp.iter_bytes(1024))
         assert len(chunks) > 0
         print(chunks)

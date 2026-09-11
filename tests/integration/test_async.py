@@ -5,8 +5,6 @@ import pytest
 import rqx
 from rich import print
 
-HTTPBIN_HOST = "http://localhost"
-
 
 @pytest.mark.asyncio
 async def test_context_mangers():
@@ -15,38 +13,39 @@ async def test_context_mangers():
 
 
 @pytest.mark.asyncio
-async def test_get():
+async def test_get(httpbin):
     async with rqx.AsyncClient() as client:
         assert client is not None
 
-        future = client.get(f"{HTTPBIN_HOST}/get")
+        future = client.get(f"{httpbin}/get")
         resp = await future
 
         assert resp.status_code == 200
         assert "content-type" in resp.headers
         body = resp.json()
-        assert body["url"] == f"{HTTPBIN_HOST}/get"
+        assert body["url"] == f"{httpbin}/get"
         print("")
         print(f"JSON body:\n{body}")
 
 
 @pytest.mark.asyncio
-async def test_concurrent_gets():
+async def test_concurrent_gets(httpbin):
     async with rqx.AsyncClient() as client:
         assert client is not None
 
         async def task(wait_time):
-            fut = client.get(f"{HTTPBIN_HOST}/delay/{wait_time}")
+            fut = client.get(f"{httpbin}/delay/{wait_time}")
             return await fut
 
-        durations = [1, 2, 3, 4, 5]
+        durations = [0.2, 0.4, 0.6, 0.8, 1.0]
         futures = [task(d) for d in durations]
         start = time.perf_counter()
         resp_list = await asyncio.gather(*futures)
         end = time.perf_counter()
         duration = end - start
 
-        assert duration < (max(durations) * 1.1)
+        # Serial would be the sum (3.0s); concurrent lands near the max.
+        assert duration < max(durations) * 1.5
         print(f"Concurrent tasks duration: {duration}s")
 
         for resp in resp_list:
@@ -56,75 +55,75 @@ async def test_concurrent_gets():
 
 
 @pytest.mark.asyncio
-async def test_post():
+async def test_post(httpbin):
     async with rqx.AsyncClient() as client:
         assert client is not None
 
-        future = client.post(f"{HTTPBIN_HOST}/post")
+        future = client.post(f"{httpbin}/post")
         resp = await future
 
         assert resp.status_code == 200
         assert "content-type" in resp.headers
         body = resp.json()
-        assert body["url"] == f"{HTTPBIN_HOST}/post"
+        assert body["url"] == f"{httpbin}/post"
         print("")
         print(f"JSON body:\n{body}")
 
 
 @pytest.mark.asyncio
-async def test_patch():
+async def test_patch(httpbin):
     async with rqx.AsyncClient() as client:
         assert client is not None
 
-        future = client.patch(f"{HTTPBIN_HOST}/patch")
+        future = client.patch(f"{httpbin}/patch")
         resp = await future
 
         assert resp.status_code == 200
         assert "content-type" in resp.headers
         body = resp.json()
-        assert body["url"] == f"{HTTPBIN_HOST}/patch"
+        assert body["url"] == f"{httpbin}/patch"
         print("")
         print(f"JSON body:\n{body}")
 
 
 @pytest.mark.asyncio
-async def test_put():
+async def test_put(httpbin):
     async with rqx.AsyncClient() as client:
         assert client is not None
 
-        future = client.put(f"{HTTPBIN_HOST}/put")
+        future = client.put(f"{httpbin}/put")
         resp = await future
 
         assert resp.status_code == 200
         assert "content-type" in resp.headers
         body = resp.json()
-        assert body["url"] == f"{HTTPBIN_HOST}/put"
+        assert body["url"] == f"{httpbin}/put"
         print("")
         print(f"JSON body:\n{body}")
 
 
 @pytest.mark.asyncio
-async def test_delete():
+async def test_delete(httpbin):
     async with rqx.AsyncClient() as client:
         assert client is not None
 
-        future = client.delete(f"{HTTPBIN_HOST}/delete")
+        future = client.delete(f"{httpbin}/delete")
         resp = await future
 
         assert resp.status_code == 200
         assert "content-type" in resp.headers
         body = resp.json()
-        assert body["url"] == f"{HTTPBIN_HOST}/delete"
+        assert body["url"] == f"{httpbin}/delete"
         print("")
         print(f"JSON body:\n{body}")
 
 
 @pytest.mark.asyncio
-async def test_options():
+async def test_options(httpbin):
     async with rqx.AsyncClient() as client:
         assert client is not None
 
-        future = client.options(f"{HTTPBIN_HOST}/get")
+        future = client.options(f"{httpbin}/get")
         resp = await future
 
         assert resp.status_code == 200
@@ -133,9 +132,9 @@ async def test_options():
 
 
 @pytest.mark.asyncio
-async def test_sample_json_params_post():
+async def test_sample_json_params_post(httpbin):
     client = rqx.AsyncClient()
-    resp = await client.post(f"{HTTPBIN_HOST}/post", json={"special_param": 1})
+    resp = await client.post(f"{httpbin}/post", json={"special_param": 1})
     assert resp.status_code == 200
     assert "content-type" in resp.headers
 
@@ -145,45 +144,45 @@ async def test_sample_json_params_post():
 
 
 @pytest.mark.asyncio
-async def test_basic_client_based_redirect():
+async def test_basic_client_based_redirect(httpbin):
     client = rqx.AsyncClient(follow_redirects=True)
     resp = await client.get(
-        f"{HTTPBIN_HOST}/redirect/3",
+        f"{httpbin}/redirect/3",
     )
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_basic_request_based_redirect():
+async def test_basic_request_based_redirect(httpbin):
     client = rqx.AsyncClient(follow_redirects=False)
     resp = await client.get(
-        f"{HTTPBIN_HOST}/redirect/3",
+        f"{httpbin}/redirect/3",
         follow_redirects=True,
     )
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_false_follow_redirects_returns_302():
+async def test_false_follow_redirects_returns_302(httpbin):
     client = rqx.AsyncClient(follow_redirects=False)
     resp = await client.get(
-        f"{HTTPBIN_HOST}/redirect/3",
+        f"{httpbin}/redirect/3",
         follow_redirects=False,
     )
     assert resp.status_code == 302
 
 
 @pytest.mark.asyncio
-async def test_raise_error_on_redirects_exeeding_max_redirects():
+async def test_raise_error_on_redirects_exeeding_max_redirects(httpbin):
     client = rqx.AsyncClient(follow_redirects=True, max_redirects=1)
     with pytest.raises(rqx.TooManyRedirects):
-        await client.get(f"{HTTPBIN_HOST}/redirect/3")
+        await client.get(f"{httpbin}/redirect/3")
 
 
 @pytest.mark.asyncio
-async def test_raise_for_status():
+async def test_raise_for_status(httpbin):
     client = rqx.AsyncClient()
-    resp = await client.get(f"{HTTPBIN_HOST}/status/400")
+    resp = await client.get(f"{httpbin}/status/400")
     assert resp.status_code == 400
     assert "content-type" in resp.headers
     with pytest.raises(rqx.HTTPStatusError):
@@ -191,11 +190,11 @@ async def test_raise_for_status():
 
 
 @pytest.mark.asyncio
-async def test_post_with_content():
+async def test_post_with_content(httpbin):
     content_str = '{"raw_content": "hello"}'
     content_bytes = content_str.encode()
     client = rqx.AsyncClient()
-    resp = await client.post(f"{HTTPBIN_HOST}/post", content=content_bytes)
+    resp = await client.post(f"{httpbin}/post", content=content_bytes)
     assert resp.status_code == 200
     assert "content-type" in resp.headers
 
@@ -206,10 +205,10 @@ async def test_post_with_content():
 
 
 @pytest.mark.asyncio
-async def test_post_with_data():
+async def test_post_with_data(httpbin):
     data = {"hi": "goodbye", "hey": "2"}
     client = rqx.AsyncClient()
-    resp = await client.post(f"{HTTPBIN_HOST}/post", data=data)
+    resp = await client.post(f"{httpbin}/post", data=data)
     assert resp.status_code == 200
     assert "content-type" in resp.headers
     body = resp.json()
@@ -219,19 +218,19 @@ async def test_post_with_data():
 
 
 @pytest.mark.asyncio
-async def test_basic_auth():
+async def test_basic_auth(httpbin):
     u = "User"
     p = "Password"
     auth = (u, p)
     client = rqx.AsyncClient()
-    resp = await client.get(f"{HTTPBIN_HOST}/basic-auth/{u}/{p}", auth=auth)
+    resp = await client.get(f"{httpbin}/basic-auth/{u}/{p}", auth=auth)
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_400():
+async def test_400(httpbin):
     client = rqx.AsyncClient()
-    resp = await client.get(f"{HTTPBIN_HOST}/status/400")
+    resp = await client.get(f"{httpbin}/status/400")
     assert resp.status_code == 400
     assert "content-type" in resp.headers
     with pytest.raises(rqx.RqxError):
@@ -239,9 +238,9 @@ async def test_400():
 
 
 @pytest.mark.asyncio
-async def test_404():
+async def test_404(httpbin):
     client = rqx.AsyncClient()
-    resp = await client.get(f"{HTTPBIN_HOST}/status/404")
+    resp = await client.get(f"{httpbin}/status/404")
     assert resp.status_code == 404
     assert "content-type" in resp.headers
     with pytest.raises(rqx.RqxError):
@@ -249,9 +248,9 @@ async def test_404():
 
 
 @pytest.mark.asyncio
-async def test_500():
+async def test_500(httpbin):
     client = rqx.AsyncClient()
-    resp = await client.get(f"{HTTPBIN_HOST}/status/500")
+    resp = await client.get(f"{httpbin}/status/500")
     assert resp.status_code == 500
     assert "content-type" in resp.headers
     with pytest.raises(rqx.RqxError):
@@ -259,9 +258,9 @@ async def test_500():
 
 
 @pytest.mark.asyncio
-async def test_body():
+async def test_body(httpbin):
     client = rqx.AsyncClient()
-    resp = await client.get(f"{HTTPBIN_HOST}/get")
+    resp = await client.get(f"{httpbin}/get")
     assert resp.status_code == 200
     assert "content-type" in resp.headers
     body = resp.json()
@@ -273,17 +272,17 @@ async def test_body():
 
 
 @pytest.mark.asyncio
-async def test_basic_final_url_in_output():
+async def test_basic_final_url_in_output(httpbin):
     client = rqx.AsyncClient()
-    resp = await client.get(f"{HTTPBIN_HOST}/get")
-    assert resp.url == f"{HTTPBIN_HOST}/get"
+    resp = await client.get(f"{httpbin}/get")
+    assert resp.url == f"{httpbin}/get"
 
 
 @pytest.mark.asyncio
-async def test_redirected_final_url_in_output():
+async def test_redirected_final_url_in_output(httpbin):
     client = rqx.AsyncClient()
-    resp = await client.get(f"{HTTPBIN_HOST}/redirect/3", follow_redirects=True)
-    assert resp.url == f"{HTTPBIN_HOST}/get"
+    resp = await client.get(f"{httpbin}/redirect/3", follow_redirects=True)
+    assert resp.url == f"{httpbin}/get"
 
 
 @pytest.mark.asyncio
@@ -294,10 +293,10 @@ async def test_bad_url_raises():
 
 
 @pytest.mark.asyncio
-async def test_get_total_elapsed_time():
-    delay_time = 1
+async def test_get_total_elapsed_time(httpbin):
+    delay_time = 0.3
     client = rqx.AsyncClient()
-    resp = await client.get(f"{HTTPBIN_HOST}/delay/{delay_time}")
+    resp = await client.get(f"{httpbin}/delay/{delay_time}")
     assert resp.elapsed is not None
     assert resp.elapsed > delay_time
     print("")
@@ -305,9 +304,9 @@ async def test_get_total_elapsed_time():
 
 
 @pytest.mark.asyncio
-async def test_valid_text():
+async def test_valid_text(httpbin):
     client = rqx.AsyncClient()
-    resp = await client.get(f"{HTTPBIN_HOST}/get")
+    resp = await client.get(f"{httpbin}/get")
     text = resp.text
     assert text is not None
     assert isinstance(text, str)
@@ -317,9 +316,9 @@ async def test_valid_text():
 
 
 @pytest.mark.asyncio
-async def test_valid_bytes():
+async def test_valid_bytes(httpbin):
     client = rqx.AsyncClient()
-    resp = await client.get(f"{HTTPBIN_HOST}/get")
+    resp = await client.get(f"{httpbin}/get")
     content = resp.content
     assert content is not None
     assert isinstance(content, bytes)
@@ -329,9 +328,9 @@ async def test_valid_bytes():
 
 
 @pytest.mark.asyncio
-async def test_headers():
+async def test_headers(httpbin):
     client = rqx.AsyncClient()
-    resp = await client.get(f"{HTTPBIN_HOST}/get")
+    resp = await client.get(f"{httpbin}/get")
     headers = resp.headers
     assert headers is not None
     assert isinstance(headers, rqx.Headers)
@@ -341,7 +340,7 @@ async def test_headers():
 
 
 @pytest.mark.asyncio
-async def test_nested_json():
+async def test_nested_json(httpbin):
     # httpbin's /get?foo=bar&baz=123 will give you query params in the args field.
     # Good way to test that nested JSON values come through correctly.
     client = rqx.AsyncClient()
@@ -351,7 +350,7 @@ async def test_nested_json():
     key2 = "foo"
     val2 = "bar"
 
-    resp = await client.get(f"{HTTPBIN_HOST}/get?{key1}={val1}&{key2}={val2}")
+    resp = await client.get(f"{httpbin}/get?{key1}={val1}&{key2}={val2}")
     body = resp.json()
     args = body["args"]
     assert args[key1] == val1
@@ -361,10 +360,10 @@ async def test_nested_json():
 
 
 @pytest.mark.asyncio
-async def test_get_with_timeout():
+async def test_get_with_timeout(httpbin):
     client = rqx.AsyncClient()
     with pytest.raises(rqx.TimeoutException):
-        await client.get(f"{HTTPBIN_HOST}/delay/5", timeout=1)
+        await client.get(f"{httpbin}/delay/2", timeout=0.3)
 
 
 # ================================================================
@@ -411,7 +410,7 @@ async def test_exceeded_retries_on_flaky_server(flaky_server):
 
 
 @pytest.mark.asyncio
-async def test_404_is_not_retried():
+async def test_404_is_not_retried(httpbin):
     transport = rqx.AsyncHTTPTransport(
         retries=rqx.Retry(
             total=1,
@@ -421,7 +420,7 @@ async def test_404_is_not_retried():
     )
     client = rqx.AsyncClient(transport=transport)
 
-    resp = await client.get(f"{HTTPBIN_HOST}/status/404")
+    resp = await client.get(f"{httpbin}/status/404")
     assert resp.status_code == 404
     assert "content-type" in resp.headers
     with pytest.raises(rqx.RqxError):
@@ -469,9 +468,9 @@ async def test_total_timeout_exceeded(flaky_server):
     transport = rqx.AsyncHTTPTransport(
         retries=rqx.Retry(
             total=5,
-            backoff_factor=2.0,
+            backoff_factor=0.5,
             status_forcelist={503},
-            total_timeout=1.0,
+            total_timeout=0.3,
         )
     )
     client = rqx.AsyncClient(transport=transport)
@@ -505,17 +504,17 @@ async def test_total_timeout_not_exceeded(flaky_server):
 
 
 @pytest.mark.asyncio
-async def test_max_connections():
+async def test_max_connections(httpbin):
     async with rqx.AsyncClient(
         transport=rqx.AsyncHTTPTransport(max_connections=2)
     ) as client:
         assert client is not None
 
         async def task(wait_time):
-            fut = client.get(f"{HTTPBIN_HOST}/delay/{wait_time}")
+            fut = client.get(f"{httpbin}/delay/{wait_time}")
             return await fut
 
-        durations = [1, 1, 1, 1, 1]
+        durations = [0.4, 0.4, 0.4, 0.4, 0.4]
         futures = [task(d) for d in durations]
         start = time.perf_counter()
         resp_list = await asyncio.gather(*futures)
@@ -603,11 +602,11 @@ async def test_verify_is_false_returns_200_on_unsigned_url(http2_server):
 
 
 @pytest.mark.asyncio
-async def test_cookies_basic():
+async def test_cookies_basic(httpbin):
     client = rqx.AsyncClient()
 
     # First request sets the cookie
-    resp1 = await client.get(f"{HTTPBIN_HOST}/cookies/set/testcookie/hello")
+    resp1 = await client.get(f"{httpbin}/cookies/set/testcookie/hello")
     assert "testcookie" in resp1.cookies
     assert resp1.cookies["testcookie"] == "hello"
 
@@ -616,15 +615,15 @@ async def test_cookies_basic():
     assert client.cookies["testcookie"] == "hello"
 
     # Second request should send the cookie back
-    resp2 = await client.get(f"{HTTPBIN_HOST}/cookies")
+    resp2 = await client.get(f"{httpbin}/cookies")
     body = resp2.json()
     assert body["cookies"]["testcookie"] == "hello"
 
 
 @pytest.mark.asyncio
-async def test_async_stream():
+async def test_async_stream(httpbin):
     async with rqx.AsyncClient() as client:
-        resp = await client.stream("GET", f"{HTTPBIN_HOST}/stream/5")
+        resp = await client.stream("GET", f"{httpbin}/stream/5")
         chunks = []
         async for chunk in resp.aiter_bytes(1024):
             chunks.append(chunk)

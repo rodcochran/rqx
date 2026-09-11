@@ -155,7 +155,9 @@ def test_none_header_value_raises_type_error(flaky_server):
         rqx.get(f"{flaky_server}/echo-headers", headers={"X-Test": None})
 
 
-def test_request_header_overrides_client_default(flaky_server):
+def test_request_header_replaces_the_built_in_user_agent(flaky_server):
+    """reqwest sets a default User-Agent; a per-request one must replace it,
+    not add a second line. (There is no client-level headers= in rqx yet.)"""
     resp = rqx.get(f"{flaky_server}/echo-headers", headers={"User-Agent": "custom/1"})
     assert _sent(resp)["user-agent"] == ["custom/1"]
 

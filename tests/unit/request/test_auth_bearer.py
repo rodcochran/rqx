@@ -73,6 +73,11 @@ def test_head_sends_bearer(flaky_server):
     client = rqx.Client()
     resp = client.head(f"{flaky_server}/echo-auth", auth_bearer=TOKEN)
     assert resp.status_code == 200
+    # The echo body is json.dumps({"authorization": <header>}); its length is
+    # the fixture's contract, so derive it rather than trust a GET that shares
+    # the same injection path.
+    expected = json.dumps({"authorization": f"Bearer {TOKEN}"}).encode()
+    assert resp.headers["content-length"] == str(len(expected))
 
 
 def test_request_method_sends_bearer(flaky_server):

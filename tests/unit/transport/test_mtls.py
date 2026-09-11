@@ -1,10 +1,8 @@
-from pathlib import Path
-
 import pytest
 import rqx
 
 # This gets the directory containing the pems
-script_dir = Path(__file__).resolve().parent
+from tests.fixtures.server import script_dir
 
 
 # ================================

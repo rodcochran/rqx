@@ -9,7 +9,7 @@ def test_connect_error_dns_failure():
     """A DNS failure raises ConnectError (subclass of NetworkError, RqxError)."""
     client = rqx.Client()
     with pytest.raises(rqx.ConnectError):
-        client.get("http://nonexistent.invalid.example.com/")
+        client.get("http://nonexistent.invalid/")
 
 
 def test_connect_error_connection_refused():
@@ -31,21 +31,21 @@ def test_connect_error_caught_by_rqxerror():
     """Old-style except rqx.RqxError still catches new-style ConnectError."""
     client = rqx.Client()
     with pytest.raises(rqx.RqxError):
-        client.get("http://nonexistent.invalid.example.com/")
+        client.get("http://nonexistent.invalid/")
 
 
 def test_read_timeout(flaky_server):
     """Server takes longer than the client's timeout — raises ReadTimeout."""
-    client = rqx.Client(timeout=1)  # 1-second timeout
+    client = rqx.Client(timeout=0.2)
     with pytest.raises(rqx.ReadTimeout):
-        client.get(f"{flaky_server}/sleep/3")  # server sleeps 3s
+        client.get(f"{flaky_server}/sleep/1")  # server sleeps past the timeout
 
 
 def test_read_timeout_caught_by_timeout_exception(flaky_server):
     """ReadTimeout is catchable as TimeoutException."""
-    client = rqx.Client(timeout=1)
+    client = rqx.Client(timeout=0.2)
     with pytest.raises(rqx.TimeoutException):
-        client.get(f"{flaky_server}/sleep/3")
+        client.get(f"{flaky_server}/sleep/1")
 
 
 def test_too_many_redirects(flaky_server):
@@ -83,14 +83,14 @@ def test_read_error_on_mid_response_close(flaky_server):
 async def test_connect_error_dns_failure_async():
     client = rqx.AsyncClient()
     with pytest.raises(rqx.ConnectError):
-        await client.get("http://nonexistent.invalid.example.com/")
+        await client.get("http://nonexistent.invalid/")
 
 
 @pytest.mark.asyncio
 async def test_read_timeout_async(flaky_server):
-    client = rqx.AsyncClient(timeout=1)
+    client = rqx.AsyncClient(timeout=0.2)
     with pytest.raises(rqx.ReadTimeout):
-        await client.get(f"{flaky_server}/sleep/3")
+        await client.get(f"{flaky_server}/sleep/1")
 
 
 @pytest.mark.asyncio

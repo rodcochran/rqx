@@ -44,7 +44,9 @@ def test_put(flaky_server):
 
 
 def test_patch(flaky_server):
-    resp = rqx.patch(f"{flaky_server}/anything?request_id=api-patch-test", json={"hi": 1})
+    resp = rqx.patch(
+        f"{flaky_server}/anything?request_id=api-patch-test", json={"hi": 1}
+    )
     assert isinstance(resp.status_code, int)
 
 
@@ -84,7 +86,7 @@ def test_headers_threaded_through(flaky_server):
 def test_timeout_threaded_through(flaky_server):
     """A per-call timeout shorter than the server's sleep raises ReadTimeout."""
     with pytest.raises(rqx.ReadTimeout):
-        rqx.get(f"{flaky_server}/sleep/2", timeout=0.5)
+        rqx.get(f"{flaky_server}/sleep/1", timeout=0.2)
 
 
 def test_follow_redirects_disabled_by_default(flaky_server):
@@ -112,7 +114,9 @@ def test_stream_yields_response(flaky_server):
 
 
 def test_stream_with_follow_redirects(flaky_server):
-    with rqx.stream("GET", f"{flaky_server}/redirect-once", follow_redirects=True) as resp:
+    with rqx.stream(
+        "GET", f"{flaky_server}/redirect-once", follow_redirects=True
+    ) as resp:
         assert resp.status_code == 200
         assert resp.url.endswith("/streamable")
 
@@ -124,8 +128,28 @@ def test_stream_with_follow_redirects(flaky_server):
 
 def test_all_verbs_in_public_api():
     """All eight verbs plus request and stream are on the rqx module."""
-    for name in ("request", "stream", "get", "post", "put", "patch", "delete", "head", "options"):
+    for name in (
+        "request",
+        "stream",
+        "get",
+        "post",
+        "put",
+        "patch",
+        "delete",
+        "head",
+        "options",
+    ):
         assert hasattr(rqx, name), f"rqx.{name} missing"
     # And they're in __all__ (so `from rqx import *` picks them up).
-    for name in ("request", "stream", "get", "post", "put", "patch", "delete", "head", "options"):
+    for name in (
+        "request",
+        "stream",
+        "get",
+        "post",
+        "put",
+        "patch",
+        "delete",
+        "head",
+        "options",
+    ):
         assert name in rqx.__all__

@@ -109,15 +109,15 @@ def test_client_transport_and_timeout_conflict():
 
 
 def test_read_timeout_via_bare_number(flaky_server):
-    client = rqx.Client(timeout=1.0)
+    client = rqx.Client(timeout=0.2)
     with pytest.raises(rqx.ReadTimeout):
-        client.get(f"{flaky_server}/sleep/3")
+        client.get(f"{flaky_server}/sleep/1")
 
 
 def test_read_timeout_via_timeout_instance(flaky_server):
-    client = rqx.Client(timeout=rqx.Timeout(read=1.0))
+    client = rqx.Client(timeout=rqx.Timeout(read=0.2))
     with pytest.raises(rqx.ReadTimeout):
-        client.get(f"{flaky_server}/sleep/3")
+        client.get(f"{flaky_server}/sleep/1")
 
 
 def test_read_timeout_does_not_fire_when_under_limit(flaky_server):
@@ -160,13 +160,13 @@ def test_per_request_timeout_overrides_client_default(flaky_server):
     """Client says 10s, per-request says 0.5s — the 0.5s should bite."""
     client = rqx.Client(timeout=10.0)
     with pytest.raises(rqx.ReadTimeout):
-        client.get(f"{flaky_server}/sleep/2", timeout=0.5)
+        client.get(f"{flaky_server}/sleep/1", timeout=0.2)
 
 
 def test_per_request_timeout_with_instance(flaky_server):
     client = rqx.Client(timeout=10.0)
     with pytest.raises(rqx.ReadTimeout):
-        client.get(f"{flaky_server}/sleep/2", timeout=rqx.Timeout(read=0.5))
+        client.get(f"{flaky_server}/sleep/1", timeout=rqx.Timeout(read=0.2))
 
 
 def test_per_request_cannot_loosen_transport_read_timeout(flaky_server):
@@ -174,7 +174,7 @@ def test_per_request_cannot_loosen_transport_read_timeout(flaky_server):
     reqwest Client. Per-request `timeout=` is only a request-level total — it
     can tighten the budget but cannot relax the transport's per-phase ceiling.
     Document this as the contract so it doesn't surprise callers."""
-    client = rqx.Client(timeout=0.5)
+    client = rqx.Client(timeout=0.2)
     with pytest.raises(rqx.ReadTimeout):
         client.get(f"{flaky_server}/sleep/1", timeout=5.0)
 
@@ -186,16 +186,16 @@ def test_per_request_cannot_loosen_transport_read_timeout(flaky_server):
 
 @pytest.mark.asyncio
 async def test_async_read_timeout(flaky_server):
-    client = rqx.AsyncClient(timeout=rqx.Timeout(read=1.0))
+    client = rqx.AsyncClient(timeout=rqx.Timeout(read=0.2))
     with pytest.raises(rqx.ReadTimeout):
-        await client.get(f"{flaky_server}/sleep/3")
+        await client.get(f"{flaky_server}/sleep/1")
 
 
 @pytest.mark.asyncio
 async def test_async_per_request_timeout_override(flaky_server):
     client = rqx.AsyncClient(timeout=10.0)
     with pytest.raises(rqx.ReadTimeout):
-        await client.get(f"{flaky_server}/sleep/2", timeout=0.5)
+        await client.get(f"{flaky_server}/sleep/1", timeout=0.2)
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +205,7 @@ async def test_async_per_request_timeout_override(flaky_server):
 
 def test_transport_accepts_timeout(flaky_server):
     """Timeout passed to HTTPTransport applies to clients using that transport."""
-    transport = rqx.HTTPTransport(timeout=rqx.Timeout(read=1.0))
+    transport = rqx.HTTPTransport(timeout=rqx.Timeout(read=0.2))
     client = rqx.Client(transport=transport)
     with pytest.raises(rqx.ReadTimeout):
-        client.get(f"{flaky_server}/sleep/3")
+        client.get(f"{flaky_server}/sleep/1")

@@ -29,11 +29,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    services:
-      httpbin:
-        image: kennethreitz/httpbin
-        ports:
-          - 80:80
+    # httpbin is started by the integration tests themselves (testcontainers).
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -43,12 +39,26 @@ jobs:
         with:
           enable-cache: true
       - uses: dtolnay/rust-toolchain@stable
+      # Cargo registry + target dir cache. Without it every run compiles
+      # reqwest/tokio/hyper from scratch (~50 s) for cargo test and again for
+      # maturin develop.
+      # Pull the integration httpbin image in the background so the fixture
+      # finds it ready instead of every worker waiting ~8 s on first use.
+      - run: nohup docker pull -q ghcr.io/psf/httpbin:0.10.2 >/dev/null 2>&1 &
+      - uses: Swatinem/rust-cache@v2
       # Rust unit tests (LineDecoder, etc.). Runs without the extension-module
       # feature so the test binary links libpython (provided by setup-python).
       - run: cargo test --lib
-      - run: uv sync --extra dev --frozen
-      - run: uv run maturin develop
-      - run: uv run pytest tests/ -n 8
+      # Dependencies only: installing the project here would invoke maturin as
+      # the build backend and compile a release wheel (~90 s) that the next
+      # step's dev build immediately replaces.
+      - run: uv sync --only-group test --frozen --no-install-project
+      # --no-sync: `uv run` would otherwise sync the default `dev` group first,
+      # pulling ruff/ty and rebuilding the project as a release wheel.
+      - run: uv run --no-sync maturin develop
+      # One worker per core. Oversubscribing measured a little faster (the suite
+      # sleeps and waits on sockets) but `auto` is the honest default.
+      - run: uv run --no-sync pytest tests/ -n auto --durations=15
 
   linux:
     runs-on: ${{ matrix.platform.runner }}

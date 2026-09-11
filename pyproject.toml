@@ -29,22 +29,42 @@ python-source = "python"
 features = ["extension-module"]
 
 [project.optional-dependencies]
-dev = [
-    "pytest",
-    "pytest-asyncio",
-    "pytest-xdist",
-    "rich",
-    "ty",
-    "ruff",
-    "filelock",
-    "maturin>=1.12,<2.0",
-    "brotli",
-    "zstandard",
-    "hypercorn",
-]
 benchmarks = [
     "matplotlib",
     "numpy",
+]
+
+# PEP 735 groups: private to development, never installable as `rqx[...]`.
+# `uv sync` installs `dev` by default; CI's test job uses `--only-group test`.
+[dependency-groups]
+test = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-xdist",
+    "pytest-timeout",
+    "hypothesis",
+    "filelock",
+    "brotli",
+    "zstandard",
+    "hypercorn",
+    "rich",
+    "testcontainers",
+    "maturin>=1.12,<2.0",
+]
+lint = [
+    "ruff",
+    "ty",
+]
+dev = [
+    { include-group = "test" },
+    { include-group = "lint" },
+]
+
+[tool.pytest.ini_options]
+# Hang guard: no single test should take anywhere near this.
+timeout = 30
+markers = [
+    "integration: needs the local httpbin container (just httpbin-start)",
 ]
 
 [tool.ty.rules]
