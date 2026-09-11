@@ -108,3 +108,70 @@ async def test_async_client_shares_the_coercion(flaky_server):
             params={"page": 1, "active": True, "ratio": 0.5, "empty": None},
         )
     assert _query(resp.url) == "page=1&active=true&ratio=0.5"
+
+
+# --- edge cases -------------------------------------------------------------
+
+
+def test_empty_params_mapping_sends_no_query(flaky_server):
+    resp = rqx.get(f"{flaky_server}/streamable", params={})
+    assert resp.status_code == 200
+    assert "?" not in resp.url
+
+
+def test_empty_string_key_and_value(flaky_server):
+    resp = rqx.get(f"{flaky_server}/streamable", params={"": "x", "a": ""})
+    assert _query(resp.url) == "=x&a="
+
+
+def test_negative_int_value(flaky_server):
+    resp = rqx.get(f"{flaky_server}/streamable", params={"n": -5})
+    assert _query(resp.url) == "n=-5"
+
+
+def test_integral_float_keeps_its_decimal(flaky_server):
+    """`1.0` must not collapse to `1`; Python's str() keeps the `.0`."""
+    resp = rqx.get(f"{flaky_server}/streamable", params={"r": 1.0})
+    assert _query(resp.url) == "r=1.0"
+
+
+def test_nan_and_inf_use_python_spelling(flaky_server):
+    resp = rqx.get(
+        f"{flaky_server}/streamable",
+        params={"a": float("nan"), "b": float("inf"), "c": float("-inf")},
+    )
+    assert _query(resp.url) == "a=nan&b=inf&c=-inf"
+
+
+def test_huge_float_uses_python_exponent_form(flaky_server):
+    resp = rqx.get(f"{flaky_server}/streamable", params={"x": 1e300})
+    assert _query(resp.url) == "x=1e%2B300"
+
+
+def test_special_chars_in_key_are_encoded(flaky_server):
+    resp = rqx.get(f"{flaky_server}/streamable", params={"a b&c=d": "1"})
+    assert _query(resp.url) == "a+b%26c%3Dd=1"
+
+
+def test_unicode_value_is_utf8_percent_encoded(flaky_server):
+    resp = rqx.get(f"{flaky_server}/streamable", params={"q": "héllo"})
+    assert _query(resp.url) == "q=h%C3%A9llo"
+
+
+def test_params_append_to_an_existing_query_string(flaky_server):
+    resp = rqx.get(f"{flaky_server}/streamable?foo=bar", params={"page": 1})
+    assert _query(resp.url) == "foo=bar&page=1"
+
+
+def test_mapping_whose_items_raises_propagates_that_error(flaky_server):
+    class Broken:
+        def items(self):
+            raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        rqx.get(f"{flaky_server}/streamable", params=Broken())  # ty: ignore[invalid-argument-type]
+
+
+def test_bytes_value_raises_type_error(flaky_server):
+    with pytest.raises(TypeError, match="str, int, float, bool, or None, got bytes"):
+        rqx.get(f"{flaky_server}/streamable", params={"k": b"v"})  # ty: ignore[invalid-argument-type]

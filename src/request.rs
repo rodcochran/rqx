@@ -66,7 +66,8 @@ pub fn build_client_request(
     auth_bearer: Option<&str>,
     timeout: f64,
 ) -> PyResult<Request> {
-    let method = Method::from_bytes(method.as_bytes())
+    // Uppercased like httpx, so `request("get", ...)` is GET on the wire.
+    let method = Method::from_bytes(method.to_ascii_uppercase().as_bytes())
         .map_err(|e| PyValueError::new_err(format!("invalid method {method:?}: {e}")))?;
     let mut builder = http_client.request(method, url);
 
