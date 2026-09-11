@@ -9,6 +9,7 @@ use url::Url;
 
 use super::exceptions::*;
 use super::query_params::QueryParams;
+use super::request_headers::RequestHeaders;
 
 /// Prototype request, never sent. Cloned per attempt and per redirect hop so
 /// retries and 307/308 keep the body (https://github.com/rodcochran/rqx/issues/149).
@@ -60,12 +61,14 @@ pub fn build_client_request(
     data: Option<HashMap<String, String>>,
     json: Option<&serde_json::Value>,
     params: Option<QueryParams>,
-    headers: Option<HashMap<String, String>>,
+    headers: Option<RequestHeaders>,
     auth: Option<(String, String)>,
     auth_bearer: Option<&str>,
     timeout: f64,
 ) -> PyResult<Request> {
-    let mut builder = http_client.request(Method::from_bytes(method.as_bytes()).unwrap(), url);
+    let method = Method::from_bytes(method.as_bytes())
+        .map_err(|e| PyValueError::new_err(format!("invalid method {method:?}: {e}")))?;
+    let mut builder = http_client.request(method, url);
 
     let count = [content.is_some(), data.is_some(), json.is_some()]
         .into_iter()
@@ -95,7 +98,7 @@ pub fn build_client_request(
     };
 
     if let Some(h) = headers {
-        builder = builder.headers((&h).try_into().expect("valid headers"))
+        builder = builder.headers(h.into_map())
     };
 
     if let Some(a) = auth {

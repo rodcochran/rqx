@@ -200,6 +200,12 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self._echo_body()
             return
 
+        # /echo-headers — echo the request headers back as a JSON list of
+        # [name, value] pairs, wire order and casing preserved, duplicates kept.
+        if path == "/echo-headers":
+            self._echo_headers()
+            return
+
         # /redirect/<status> — redirect with that status to /echo-body.
         if path.startswith("/redirect/") and path.removeprefix("/redirect/").isdigit():
             self._redirect(int(path.removeprefix("/redirect/")), "/echo-body")
@@ -475,6 +481,14 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         # HEAD must not include a body.
         if self.command != "HEAD":
             self.wfile.write(body)
+
+    def _echo_headers(self):
+        body = json.dumps(list(self.headers.items())).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _reset_connection(self, request_id):
         self.counters[request_id] += 1

@@ -12,7 +12,7 @@ use std::str::FromStr;
 /// semantics for free.
 #[pyclass]
 pub struct PyHeaders {
-    inner: HeaderMap,
+    pub(crate) inner: HeaderMap,
 }
 
 #[pymethods]
