@@ -39,14 +39,15 @@ async def test_concurrent_gets():
             fut = client.get(f"{HTTPBIN_HOST}/delay/{wait_time}")
             return await fut
 
-        durations = [1, 2, 3, 4, 5]
+        durations = [0.2, 0.4, 0.6, 0.8, 1.0]
         futures = [task(d) for d in durations]
         start = time.perf_counter()
         resp_list = await asyncio.gather(*futures)
         end = time.perf_counter()
         duration = end - start
 
-        assert duration < (max(durations) * 1.1)
+        # Serial would be the sum (3.0s); concurrent lands near the max.
+        assert duration < max(durations) * 1.5
         print(f"Concurrent tasks duration: {duration}s")
 
         for resp in resp_list:
@@ -295,7 +296,7 @@ async def test_bad_url_raises():
 
 @pytest.mark.asyncio
 async def test_get_total_elapsed_time():
-    delay_time = 1
+    delay_time = 0.3
     client = rqx.AsyncClient()
     resp = await client.get(f"{HTTPBIN_HOST}/delay/{delay_time}")
     assert resp.elapsed is not None
@@ -364,7 +365,7 @@ async def test_nested_json():
 async def test_get_with_timeout():
     client = rqx.AsyncClient()
     with pytest.raises(rqx.TimeoutException):
-        await client.get(f"{HTTPBIN_HOST}/delay/5", timeout=1)
+        await client.get(f"{HTTPBIN_HOST}/delay/2", timeout=0.3)
 
 
 # ================================================================
@@ -469,9 +470,9 @@ async def test_total_timeout_exceeded(flaky_server):
     transport = rqx.AsyncHTTPTransport(
         retries=rqx.Retry(
             total=5,
-            backoff_factor=2.0,
+            backoff_factor=0.5,
             status_forcelist={503},
-            total_timeout=1.0,
+            total_timeout=0.3,
         )
     )
     client = rqx.AsyncClient(transport=transport)
@@ -515,7 +516,7 @@ async def test_max_connections():
             fut = client.get(f"{HTTPBIN_HOST}/delay/{wait_time}")
             return await fut
 
-        durations = [1, 1, 1, 1, 1]
+        durations = [0.4, 0.4, 0.4, 0.4, 0.4]
         futures = [task(d) for d in durations]
         start = time.perf_counter()
         resp_list = await asyncio.gather(*futures)

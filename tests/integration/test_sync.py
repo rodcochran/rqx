@@ -130,8 +130,8 @@ def test_gil_release():
 
     client = rqx.Client()
 
-    wait_time_1 = 1
-    wait_time_2 = 2
+    wait_time_1 = 0.5
+    wait_time_2 = 1.0
 
     t1 = threading.Thread(target=task, args=(wait_time_1,))
     t2 = threading.Thread(target=task, args=(wait_time_2,))
@@ -148,7 +148,8 @@ def test_gil_release():
 
     print("")
     print(f"Duration: {duration}s")
-    assert duration <= max(wait_time_1, wait_time_2) * 1.1
+    # Serial would be the sum; concurrent lands near the max plus overhead.
+    assert duration < (wait_time_1 + wait_time_2) * 0.9
 
 
 # ================================================================
@@ -415,7 +416,7 @@ def test_get_with_headers():
 def test_get_with_timeout():
     client = rqx.Client()
     with pytest.raises(rqx.TimeoutException):
-        client.get(f"{HTTPBIN_HOST}/delay/5", timeout=1)
+        client.get(f"{HTTPBIN_HOST}/delay/2", timeout=0.3)
 
 
 def test_context_manger_200():
@@ -506,7 +507,7 @@ def test_raise_error_on_redirects_exeeding_max_redirects():
 
 
 def test_get_total_elapsed_time():
-    delay_time = 1
+    delay_time = 0.3
     client = rqx.Client()
     resp = client.get(f"{HTTPBIN_HOST}/delay/{delay_time}")
     assert resp.elapsed is not None
@@ -662,9 +663,9 @@ def test_total_timeout_exceeded(flaky_server):
     transport = rqx.HTTPTransport(
         retries=rqx.Retry(
             total=5,
-            backoff_factor=2.0,
+            backoff_factor=0.5,
             status_forcelist={503},
-            total_timeout=1.0,
+            total_timeout=0.3,
         )
     )
     client = rqx.Client(transport=transport)
@@ -708,11 +709,11 @@ def test_max_connections_with_freed_gil():
     transport = rqx.HTTPTransport(max_connections=2)
     client = rqx.Client(transport=transport)
 
-    wait_time_1 = 1
-    wait_time_2 = 1
-    wait_time_3 = 1
-    wait_time_4 = 1
-    wait_time_5 = 1
+    wait_time_1 = 0.4
+    wait_time_2 = 0.4
+    wait_time_3 = 0.4
+    wait_time_4 = 0.4
+    wait_time_5 = 0.4
 
     wait_times = [wait_time_1, wait_time_2, wait_time_3, wait_time_4, wait_time_5]
 

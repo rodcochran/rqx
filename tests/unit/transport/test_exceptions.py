@@ -36,16 +36,16 @@ def test_connect_error_caught_by_rqxerror():
 
 def test_read_timeout(flaky_server):
     """Server takes longer than the client's timeout — raises ReadTimeout."""
-    client = rqx.Client(timeout=1)  # 1-second timeout
+    client = rqx.Client(timeout=0.2)
     with pytest.raises(rqx.ReadTimeout):
-        client.get(f"{flaky_server}/sleep/3")  # server sleeps 3s
+        client.get(f"{flaky_server}/sleep/1")  # server sleeps past the timeout
 
 
 def test_read_timeout_caught_by_timeout_exception(flaky_server):
     """ReadTimeout is catchable as TimeoutException."""
-    client = rqx.Client(timeout=1)
+    client = rqx.Client(timeout=0.2)
     with pytest.raises(rqx.TimeoutException):
-        client.get(f"{flaky_server}/sleep/3")
+        client.get(f"{flaky_server}/sleep/1")
 
 
 def test_too_many_redirects(flaky_server):
@@ -88,9 +88,9 @@ async def test_connect_error_dns_failure_async():
 
 @pytest.mark.asyncio
 async def test_read_timeout_async(flaky_server):
-    client = rqx.AsyncClient(timeout=1)
+    client = rqx.AsyncClient(timeout=0.2)
     with pytest.raises(rqx.ReadTimeout):
-        await client.get(f"{flaky_server}/sleep/3")
+        await client.get(f"{flaky_server}/sleep/1")
 
 
 @pytest.mark.asyncio

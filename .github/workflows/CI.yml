@@ -48,7 +48,7 @@ jobs:
       - run: cargo test --lib
       - run: uv sync --extra dev --frozen
       - run: uv run maturin develop
-      - run: uv run pytest tests/ -n 8
+      - run: uv run pytest tests/ -n 8 --durations=15
 
   linux:
     runs-on: ${{ matrix.platform.runner }}

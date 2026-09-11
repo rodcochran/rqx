@@ -3,6 +3,7 @@
 import gzip
 import json
 import subprocess
+import threading
 import time
 import zlib
 from collections import defaultdict
@@ -140,7 +141,8 @@ CERTS = CertSet(
 
 
 class FlakyServerHandler(BaseHTTPRequestHandler):
-    counters = defaultdict(int)  # shared across requests
+    counters = defaultdict(int)  # shared across requests and handler threads
+    counters_lock = threading.Lock()
 
     def do_GET(self):
         # parse path like /flaky/3?request_id=abc
@@ -249,7 +251,8 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         # endpoint under "<request_id>-dest". Two hops, two retries each.
         if path == "/flaky-redirect":
             request_id = params["request_id"][0]
-            self.counters[request_id] += 1
+            with self.counters_lock:
+                self.counters[request_id] += 1
             if self.counters[request_id] < DEFAULT_ERRORS_BEFORE_SUCCESS:
                 self.send_response(503)
                 self.send_header("Content-Length", "0")
@@ -337,7 +340,8 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
 
         # /reset-then-flaky — closes the connection on the first hit, then 503 twice, then 200.
         if path == "/reset-then-flaky":
-            self.counters[request_id] += 1
+            with self.counters_lock:
+                self.counters[request_id] += 1
             if self.counters[request_id] == 1:
                 self.connection.close()
                 return
@@ -349,7 +353,8 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self._sleep_then_respond(0)
             return
 
-        self.counters[request_id] += 1
+        with self.counters_lock:
+            self.counters[request_id] += 1
 
         if self.counters[request_id] < DEFAULT_ERRORS_BEFORE_SUCCESS:
             # For a 503:
@@ -405,7 +410,8 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         # /flaky-echo-body — 503 twice, then echoes the body (retries must resend it).
         if path == "/flaky-echo-body" and request_id is not None:
             body = self._read_body()
-            self.counters[request_id] += 1
+            with self.counters_lock:
+                self.counters[request_id] += 1
             if self.counters[request_id] < DEFAULT_ERRORS_BEFORE_SUCCESS:
                 self.send_response(503)
                 self.send_header("Content-Length", "0")
@@ -495,7 +501,8 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _reset_connection(self, request_id):
-        self.counters[request_id] += 1
+        with self.counters_lock:
+            self.counters[request_id] += 1
         self.connection.close()
 
     def _sleep_then_respond(self, seconds: float):

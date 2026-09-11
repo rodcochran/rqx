@@ -86,7 +86,7 @@ def test_headers_threaded_through(flaky_server):
 def test_timeout_threaded_through(flaky_server):
     """A per-call timeout shorter than the server's sleep raises ReadTimeout."""
     with pytest.raises(rqx.ReadTimeout):
-        rqx.get(f"{flaky_server}/sleep/2", timeout=0.5)
+        rqx.get(f"{flaky_server}/sleep/1", timeout=0.2)
 
 
 def test_follow_redirects_disabled_by_default(flaky_server):
