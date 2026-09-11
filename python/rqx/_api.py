@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Union
 
 from ._rqx import PyClient, PyResponse, PyStreamResponse, Timeout
 
@@ -40,9 +40,12 @@ __all__ = [
 
 
 # Type aliases — kept loose because users routinely pass raw dicts / numbers.
-VerifyTypes = bool | str
-CertTypes = str | bytes | tuple[str, str]
-TimeoutTypes = float | int | Timeout
+# `Union[...]`, not `|`: these run at import time and cp38/cp39 wheels ship.
+VerifyTypes = Union[bool, str]
+CertTypes = Union[str, bytes, tuple[str, str]]
+TimeoutTypes = Union[float, int, Timeout]
+QueryParamValue = Union[str, int, float, bool, None]
+QueryParamTypes = Mapping[str, QueryParamValue]
 
 
 def request(
@@ -52,7 +55,7 @@ def request(
     content: bytes | None = None,
     data: Mapping[str, str] | None = None,
     json: Any | None = None,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -91,7 +94,7 @@ def stream(
     content: bytes | None = None,
     data: Mapping[str, str] | None = None,
     json: Any | None = None,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -132,7 +135,7 @@ def stream(
 def get(
     url: str,
     *,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -159,7 +162,7 @@ def get(
 def options(
     url: str,
     *,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -186,7 +189,7 @@ def options(
 def head(
     url: str,
     *,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -216,7 +219,7 @@ def post(
     content: bytes | None = None,
     data: Mapping[str, str] | None = None,
     json: Any | None = None,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -249,7 +252,7 @@ def put(
     content: bytes | None = None,
     data: Mapping[str, str] | None = None,
     json: Any | None = None,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -282,7 +285,7 @@ def patch(
     content: bytes | None = None,
     data: Mapping[str, str] | None = None,
     json: Any | None = None,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
@@ -312,7 +315,7 @@ def patch(
 def delete(
     url: str,
     *,
-    params: Mapping[str, str] | None = None,
+    params: QueryParamTypes | None = None,
     headers: Mapping[str, str] | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,

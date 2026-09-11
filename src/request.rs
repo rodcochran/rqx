@@ -8,6 +8,7 @@ use std::time::Duration;
 use url::Url;
 
 use super::exceptions::*;
+use super::query_params::QueryParams;
 
 /// Prototype request, never sent. Cloned per attempt and per redirect hop so
 /// retries and 307/308 keep the body (https://github.com/rodcochran/rqx/issues/149).
@@ -58,7 +59,7 @@ pub fn build_client_request(
     content: Option<&[u8]>,
     data: Option<HashMap<String, String>>,
     json: Option<&serde_json::Value>,
-    params: Option<HashMap<String, String>>,
+    params: Option<QueryParams>,
     headers: Option<HashMap<String, String>>,
     auth: Option<(String, String)>,
     auth_bearer: Option<&str>,
@@ -90,7 +91,7 @@ pub fn build_client_request(
     };
 
     if let Some(p) = params {
-        builder = builder.query(&p)
+        builder = builder.query(p.pairs())
     };
 
     if let Some(h) = headers {
