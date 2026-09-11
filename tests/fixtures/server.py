@@ -222,6 +222,30 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        # /cookies/set?name=value — Set-Cookie then redirect to /cookies, like
+        # httpbin. /cookies — echo the Cookie header as {"cookies": {...}}.
+        if path == "/cookies/set":
+            self.send_response(302)
+            for name, values in params.items():
+                self.send_header("Set-Cookie", f"{name}={values[0]}")
+            self.send_header("Location", "/cookies")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if path == "/cookies":
+            jar = {}
+            for part in self.headers.get("Cookie", "").split(";"):
+                if "=" in part:
+                    k, v = part.strip().split("=", 1)
+                    jar[k] = v
+            body = json.dumps({"cookies": jar}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         # /echo-url/<anything> — echo the path and query exactly as received.
         # Property tests generate URLs under this prefix so they never fall
         # into the flaky default below.

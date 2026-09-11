@@ -34,6 +34,10 @@ test-integration:
 test-property:
     uv run pytest tests/property -n 8
 
+# Same tests against httpx and rqx; known divergences are strict xfails
+test-equivalence:
+    uv run pytest tests/equivalence -n 8
+
 # Regenerate test certificates from scratch
 regen-certs:
     rm -rf tests/ssl/certs tests/ssl/.cert-gen.lock

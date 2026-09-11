@@ -49,6 +49,7 @@ test = [
     "hypercorn",
     "rich",
     "testcontainers",
+    "httpx",
     "maturin>=1.12,<2.0",
 ]
 lint = [
@@ -64,7 +65,9 @@ dev = [
 # Hang guard: no single test should take anywhere near this.
 timeout = 30
 markers = [
-    "integration: needs the local httpbin container (just httpbin-start)",
+    "integration: starts an httpbin container via testcontainers (needs Docker)",
+    "equivalence: same body run against httpx and rqx",
+    "rqx_diverges(issue, reason): known divergence from httpx; strict xfail for the rqx case",
 ]
 
 [tool.ty.rules]

@@ -121,16 +121,14 @@ pub fn build_client_request(
 
 /// Pick the request method to use when following an HTTP redirect.
 ///
-/// Per RFC 7231 §6.4, 302 and 303 responses conventionally cause the client
-/// to switch to GET on the follow-up request (except for HEAD, which stays
-/// HEAD). That's what we implement here.
-///
-/// 301 preserves the method for now; httpx downgrades it to GET.
+/// Matches httpx (and browsers): 302 and 303 switch every method except
+/// HEAD to GET; 301 switches only POST to GET; 307 and 308 keep the method.
+/// The body is dropped whenever the method changes (see `RequestSpec::redirected`).
 pub fn determine_redirect_method(original_method: &Method, status_code: u16) -> Method {
-    if (status_code == 302 || status_code == 303) && original_method != Method::HEAD {
-        Method::GET
-    } else {
-        original_method.to_owned()
+    match status_code {
+        302 | 303 if original_method != Method::HEAD => Method::GET,
+        301 if original_method == Method::POST => Method::GET,
+        _ => original_method.to_owned(),
     }
 }
 
