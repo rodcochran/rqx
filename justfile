@@ -7,7 +7,7 @@ setup: install-python-deps build
 # Install Python deps via uv and generate lockfile
 install-python-deps:
     uv venv
-    uv pip install -e ".[dev]"
+    uv sync
     uv lock
 
 # Build the extension (debug; fast for iteration)

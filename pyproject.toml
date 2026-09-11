@@ -29,24 +29,34 @@ python-source = "python"
 features = ["extension-module"]
 
 [project.optional-dependencies]
-dev = [
-    "pytest",
-    "pytest-asyncio",
-    "pytest-xdist",
-    "rich",
-    "ty",
-    "ruff",
-    "filelock",
-    "maturin>=1.12,<2.0",
-    "brotli",
-    "zstandard",
-    "hypercorn",
-    "hypothesis",
-    "pytest-timeout",
-]
 benchmarks = [
     "matplotlib",
     "numpy",
+]
+
+# PEP 735 groups: private to development, never installable as `rqx[...]`.
+# `uv sync` installs `dev` by default; CI's test job uses `--only-group test`.
+[dependency-groups]
+test = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-xdist",
+    "pytest-timeout",
+    "hypothesis",
+    "filelock",
+    "brotli",
+    "zstandard",
+    "hypercorn",
+    "rich",
+    "maturin>=1.12,<2.0",
+]
+lint = [
+    "ruff",
+    "ty",
+]
+dev = [
+    { include-group = "test" },
+    { include-group = "lint" },
 ]
 
 [tool.pytest.ini_options]

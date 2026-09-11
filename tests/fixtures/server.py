@@ -158,12 +158,23 @@ class QuietThreadingHTTPServer(ThreadingHTTPServer):
 
 
 class FlakyServerHandler(BaseHTTPRequestHandler):
+    # TCP_NODELAY. Headers and body go out as two small sends; with Nagle on,
+    # the second waits for the client's delayed ACK, which is 40 ms on Linux.
+    # That was ~40 ms per request on CI (3 ms locally on macOS).
+    disable_nagle_algorithm = True
     counters = defaultdict(int)  # shared across requests and handler threads
 
     def log_message(self, format, *args):
         pass
 
     counters_lock = threading.Lock()
+
+    def _bump(self, request_id) -> int:
+        """Increment and return this request_id's attempt count atomically, so
+        the branch that follows sees exactly the attempt it recorded."""
+        with self.counters_lock:
+            self.counters[request_id] += 1
+            return self.counters[request_id]
 
     def do_GET(self):
         # parse path like /flaky/3?request_id=abc
@@ -272,9 +283,8 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         # endpoint under "<request_id>-dest". Two hops, two retries each.
         if path == "/flaky-redirect":
             request_id = params["request_id"][0]
-            with self.counters_lock:
-                self.counters[request_id] += 1
-            if self.counters[request_id] < DEFAULT_ERRORS_BEFORE_SUCCESS:
+            attempt = self._bump(request_id)
+            if attempt < DEFAULT_ERRORS_BEFORE_SUCCESS:
                 self.send_response(503)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
@@ -361,12 +371,11 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
 
         # /reset-then-flaky — closes the connection on the first hit, then 503 twice, then 200.
         if path == "/reset-then-flaky":
-            with self.counters_lock:
-                self.counters[request_id] += 1
-            if self.counters[request_id] == 1:
+            attempt = self._bump(request_id)
+            if attempt == 1:
                 self.connection.close()
                 return
-            if self.counters[request_id] <= DEFAULT_ERRORS_BEFORE_SUCCESS:
+            if attempt <= DEFAULT_ERRORS_BEFORE_SUCCESS:
                 self.send_response(503)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
@@ -374,10 +383,9 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self._sleep_then_respond(0)
             return
 
-        with self.counters_lock:
-            self.counters[request_id] += 1
+        attempt = self._bump(request_id)
 
-        if self.counters[request_id] < DEFAULT_ERRORS_BEFORE_SUCCESS:
+        if attempt < DEFAULT_ERRORS_BEFORE_SUCCESS:
             # For a 503:
             self.send_response(503)
             self.send_header("Content-Type", "application/json")
@@ -431,9 +439,8 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         # /flaky-echo-body — 503 twice, then echoes the body (retries must resend it).
         if path == "/flaky-echo-body" and request_id is not None:
             body = self._read_body()
-            with self.counters_lock:
-                self.counters[request_id] += 1
-            if self.counters[request_id] < DEFAULT_ERRORS_BEFORE_SUCCESS:
+            attempt = self._bump(request_id)
+            if attempt < DEFAULT_ERRORS_BEFORE_SUCCESS:
                 self.send_response(503)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
@@ -522,8 +529,7 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _reset_connection(self, request_id):
-        with self.counters_lock:
-            self.counters[request_id] += 1
+        self._bump(request_id)
         self.connection.close()
 
     def _sleep_then_respond(self, seconds: float):
@@ -561,6 +567,7 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
 
 class MTLSHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    disable_nagle_algorithm = True
 
     def log_message(self, format, *args):
         pass

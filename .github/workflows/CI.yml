@@ -43,13 +43,20 @@ jobs:
         with:
           enable-cache: true
       - uses: dtolnay/rust-toolchain@stable
+      # Cargo registry + target dir cache. Without it every run compiles
+      # reqwest/tokio/hyper from scratch (~50 s) for cargo test and again for
+      # maturin develop.
+      - uses: Swatinem/rust-cache@v2
       # Rust unit tests (LineDecoder, etc.). Runs without the extension-module
       # feature so the test binary links libpython (provided by setup-python).
       - run: cargo test --lib
-      - run: uv sync --extra dev --frozen
+      # Dependencies only: installing the project here would invoke maturin as
+      # the build backend and compile a release wheel (~90 s) that the next
+      # step's dev build immediately replaces.
+      - run: uv sync --only-group test --frozen --no-install-project
       - run: uv run maturin develop
-      # `auto` = one worker per core. The suite is latency-bound now, not
-      # sleep-bound, so oversubscribing the 2-core runner only adds contention.
+      # One worker per core. Oversubscribing measured a little faster (the suite
+      # sleeps and waits on sockets) but `auto` is the honest default.
       - run: uv run pytest tests/ -n auto --durations=15
 
   linux:
