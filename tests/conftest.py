@@ -205,7 +205,7 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         if path == "/big-ints":
             body = (
                 b'{"i64_max": 9223372036854775807, "u64_min": 9223372036854775808, '
-                b'"u64_max": 18446744073709551615, "past_u64": 18446744073709551616}'
+                b'"u64_max": 18446744073709551615, "past_u64": 18446744073709551617}'
             )
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

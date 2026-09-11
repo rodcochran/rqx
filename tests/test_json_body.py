@@ -208,8 +208,10 @@ def test_response_json_decodes_u64_range_ints_exactly(flaky_server):
 
 def test_response_json_past_u64_is_a_float(flaky_server):
     """Documented divergence: past 2^64 serde_json parses the literal as f64,
-    so the value is rounded where stdlib returns an exact int. Tracked for the
-    migration guide, https://github.com/rodcochran/rqx/issues/116."""
+    so the value is rounded where stdlib returns an exact int. The fixture
+    serves 2^64 + 1, which is not representable as f64 and rounds to 2^64.
+    Tracked for the migration guide, https://github.com/rodcochran/rqx/issues/116."""
     body = rqx.get(f"{flaky_server}/big-ints").json()
     assert isinstance(body["past_u64"], float)
     assert body["past_u64"] == float(2**64)
+    assert body["past_u64"] != 2**64 + 1
