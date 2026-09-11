@@ -3,12 +3,12 @@
 import ssl
 import threading
 import time
-from http.server import ThreadingHTTPServer
 
 import pytest
 
 from tests.fixtures.server import (
     CERTS,
+    QuietThreadingHTTPServer,
     CERTS_DIR,
     FlakyServerHandler,
     MTLSHandler,
@@ -46,10 +46,7 @@ def pytest_configure(config):
 @pytest.fixture(scope="session")
 def flaky_server():
     # start server in thread
-    # Threaded so a request the client abandoned (read-timeout tests leave the
-    # handler asleep) never blocks the next request on this worker.
-    server = ThreadingHTTPServer(("localhost", 0), FlakyServerHandler)
-    server.daemon_threads = True
+    server = QuietThreadingHTTPServer(("localhost", 0), FlakyServerHandler)
     port = server.server_address[1]  # get the assigned port
     thread = threading.Thread(target=server.serve_forever)
     thread.daemon = True
@@ -142,10 +139,9 @@ def mtls_server():
     # actually demand a client cert
     ssl_context.verify_mode = ssl.CERT_REQUIRED
 
-    # Threaded: the handler speaks HTTP/1.1 keep-alive, so a pooled client
-    # connection would otherwise pin the single server thread.
-    server = ThreadingHTTPServer(("localhost", 0), MTLSHandler)
-    server.daemon_threads = True
+    # Threaded matters here too: the handler speaks HTTP/1.1 keep-alive, so a
+    # pooled client connection would otherwise pin a single server thread.
+    server = QuietThreadingHTTPServer(("localhost", 0), MTLSHandler)
     server.socket = ssl_context.wrap_socket(server.socket, server_side=True)
     port = server.server_address[1]  # get the assigned port
     thread = threading.Thread(target=server.serve_forever)

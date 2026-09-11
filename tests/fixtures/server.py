@@ -7,7 +7,7 @@ import threading
 import time
 import zlib
 from collections import defaultdict
-from http.server import BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -140,8 +140,29 @@ CERTS = CertSet(
 )
 
 
+class QuietThreadingHTTPServer(ThreadingHTTPServer):
+    """One thread per request, so a handler the client abandoned (a read-timeout
+    test leaves `/sleep` running) never blocks the next request. A client that
+    gave up is the expected outcome in those tests, so its broken pipe is not
+    an error worth a traceback."""
+
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        import sys
+
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError)):
+            return
+        super().handle_error(request, client_address)
+
+
 class FlakyServerHandler(BaseHTTPRequestHandler):
     counters = defaultdict(int)  # shared across requests and handler threads
+
+    def log_message(self, format, *args):
+        pass
+
     counters_lock = threading.Lock()
 
     def do_GET(self):
@@ -540,6 +561,9 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
 
 class MTLSHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+
+    def log_message(self, format, *args):
+        pass
 
     def do_GET(self):
         body = b'{"status": "ok"}'
