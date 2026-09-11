@@ -310,7 +310,11 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            # Written in 65537-byte slices: the unit is 10 bytes, so every
+            # boundary lands mid-character (offsets 7, 4, 1, 8, ...). The
+            # transport may still coalesce, but the server never helps.
+            for i in range(0, len(body), 65537):
+                self.wfile.write(body[i : i + 65537])
             return
 
         # /lines — small known body with several newline-terminated lines.
@@ -435,17 +439,6 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self._handle_simple_verb_for_echo_auth()
-
-    def _handle_body_verb_for_echo_auth(self):
-        parsed = urlparse(self.path)
-        if parsed.path != "/echo-auth":
-            self.send_response(404)
-            self.end_headers()
-            return
-        content_length = int(self.headers.get("Content-Length", 0))
-        if content_length > 0:
-            self.rfile.read(content_length)
-        self._echo_auth()
 
     def _handle_simple_verb_for_echo_auth(self):
         parsed = urlparse(self.path)

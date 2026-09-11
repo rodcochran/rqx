@@ -71,8 +71,10 @@ def test_head_sends_bearer(flaky_server):
     """HEAD: server's Authorization echo lands in the Content-Length header
     because HEAD bodies are suppressed. We assert via headers instead of body."""
     client = rqx.Client()
+    expected = client.get(f"{flaky_server}/echo-auth", auth_bearer=TOKEN)
     resp = client.head(f"{flaky_server}/echo-auth", auth_bearer=TOKEN)
     assert resp.status_code == 200
+    assert resp.headers["content-length"] == expected.headers["content-length"]
 
 
 def test_request_method_sends_bearer(flaky_server):

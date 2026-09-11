@@ -9,7 +9,7 @@ def test_connect_error_dns_failure():
     """A DNS failure raises ConnectError (subclass of NetworkError, RqxError)."""
     client = rqx.Client()
     with pytest.raises(rqx.ConnectError):
-        client.get("http://nonexistent.invalid.example.com/")
+        client.get("http://nonexistent.invalid/")
 
 
 def test_connect_error_connection_refused():
@@ -31,7 +31,7 @@ def test_connect_error_caught_by_rqxerror():
     """Old-style except rqx.RqxError still catches new-style ConnectError."""
     client = rqx.Client()
     with pytest.raises(rqx.RqxError):
-        client.get("http://nonexistent.invalid.example.com/")
+        client.get("http://nonexistent.invalid/")
 
 
 def test_read_timeout(flaky_server):
@@ -83,7 +83,7 @@ def test_read_error_on_mid_response_close(flaky_server):
 async def test_connect_error_dns_failure_async():
     client = rqx.AsyncClient()
     with pytest.raises(rqx.ConnectError):
-        await client.get("http://nonexistent.invalid.example.com/")
+        await client.get("http://nonexistent.invalid/")
 
 
 @pytest.mark.asyncio
