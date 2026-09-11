@@ -30,7 +30,7 @@ regen-certs:
 # Lint Rust + Python
 lint:
     cargo clippy
-    uv run ruff check python/
+    uv run ruff check python/ tests/
 
 # Type check Python
 typecheck:

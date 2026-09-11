@@ -78,19 +78,13 @@ def test_absolute_url_overrides_base_url(flaky_server):
 def test_base_url_with_path_prefix_is_preserved(flaky_server):
     """When base_url has its own path prefix, joining must preserve it.
 
-    Constructs a base_url like `http://localhost:PORT/redirect-once/` and
-    requests `/streamable`. The result should hit `/redirect-once/streamable`
-    — which 404s (no such route), but we know the path was joined correctly
-    rather than the base path being dropped.
+    `/nested/final` is a real route, so a base of `/nested` plus `/final`
+    proves the prefix survived the join instead of being dropped.
     """
-    client = rqx.Client(base_url=f"{flaky_server}/some-prefix")
-    # We don't have a server endpoint that combines paths this way, so just
-    # verify the join behavior produces the expected final URL by checking
-    # the response URL on a 200 case. Use a base that points at the server
-    # root and verify the path component made it through.
-    client2 = rqx.Client(base_url=flaky_server)
-    resp = client2.get("/streamable")
-    assert resp.url.endswith("/streamable")
+    client = rqx.Client(base_url=f"{flaky_server}/nested")
+    resp = client.get("/final")
+    assert resp.status_code == 200
+    assert resp.url.endswith("/nested/final")
 
 
 def test_relative_path_with_query_string(flaky_server):
