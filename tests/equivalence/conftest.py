@@ -8,6 +8,7 @@ test fails until the mark is removed, so flipping a divergence is deliberate.
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 from types import ModuleType
 
 import httpx
@@ -38,8 +39,21 @@ def lib(request):
     return which
 
 
+HERE = Path(__file__).parent
+
+PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_proxy(monkeypatch):
+    """Both clients honor proxy env vars at construction; the failure-mode
+    tests must see the network directly."""
+    for name in PROXY_VARS:
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+
+
 def pytest_collection_modifyitems(items):
-    here = __file__.rsplit("/", 1)[0]
     for item in items:
-        if str(item.path).startswith(here):
+        if HERE in item.path.parents:
             item.add_marker(pytest.mark.equivalence)

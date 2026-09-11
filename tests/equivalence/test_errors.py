@@ -10,6 +10,9 @@ ISSUE_88 = "https://github.com/rodcochran/rqx/issues/88"
 
 
 def _closed_port():
+    """An ephemeral port that was just released, so a connect is refused.
+    Holding the socket bound instead would be race-free on Linux, but macOS
+    drops SYNs to a bound, non-listening port and the connect hangs."""
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
     port = s.getsockname()[1]

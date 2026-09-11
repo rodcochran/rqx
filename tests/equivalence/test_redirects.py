@@ -2,6 +2,7 @@
 
 import pytest
 
+ISSUE_116 = "https://github.com/rodcochran/rqx/issues/116"
 PAYLOAD = {"k": 1}
 
 
@@ -63,3 +64,17 @@ def test_redirect_loop_raises_too_many_redirects(lib, flaky_server):
         lib.client(follow_redirects=True, max_redirects=3).get(
             f"{flaky_server}/redirect-loop"
         )
+
+
+@pytest.mark.rqx_diverges(
+    issue=ISSUE_116,
+    reason="rqx drops Content-Type along with the body on a 301/302/303 downgrade; httpx keeps the header",
+)
+def test_content_type_survives_a_downgraded_redirect(lib, flaky_server):
+    """httpx strips Content-Length and Transfer-Encoding when the method changes
+    but leaves Content-Type on the body-less GET. rqx drops it with the body,
+    which says nothing a receiver can use once there is no body."""
+    resp = lib.client(follow_redirects=True).post(
+        f"{flaky_server}/redirect/301", json=PAYLOAD
+    )
+    assert resp.json()["content_type"] == "application/json"
