@@ -1,8 +1,8 @@
-use pyo3::Bound;
 use pyo3::conversion::{IntoPyObject, IntoPyObjectExt};
-use pyo3::exceptions::PyValueError;
-use pyo3::prelude::{Py, PyAny, PyResult, Python};
-use pyo3::types::{PyAnyMethods, PyBool, PyDict, PyDictMethods, PyFloat, PyInt, PyList, PyString};
+use pyo3::exceptions::{PyOverflowError, PyRecursionError, PyTypeError, PyValueError};
+use pyo3::prelude::*;
+use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
+use serde_json::{Map, Number, Value};
 
 pub fn value_to_py(py: Python<'_>, val: serde_json::Value) -> PyResult<Py<PyAny>> {
     match val {
@@ -33,55 +33,152 @@ pub fn value_to_py(py: Python<'_>, val: serde_json::Value) -> PyResult<Py<PyAny>
     }
 }
 
-pub fn py_to_value(
-    // py: Python<'_>,
-    py_val: &Bound<'_, PyAny>,
-) -> serde_json::Value {
-    if py_val.is_none() {
-        serde_json::Value::Null
-    } else if py_val.is_instance_of::<PyBool>() {
-        serde_json::Value::Bool(py_val.cast::<PyBool>().unwrap().extract::<bool>().unwrap())
-    } else if py_val.is_instance_of::<PyInt>() {
-        serde_json::Value::Number(serde_json::Number::from(py_val.extract::<i64>().unwrap()))
-    } else if py_val.is_instance_of::<PyFloat>() {
-        let fv = serde_json::Number::from_f64(py_val.extract::<f64>().unwrap());
-        match fv {
-            Some(_fv) => serde_json::Value::Number(_fv),
-            None => serde_json::Value::Null,
+/// The `json=` kwarg, encoded at the boundary the way stdlib `json.dumps`
+/// does it (https://github.com/rodcochran/rqx/issues/118): tuples are arrays,
+/// dict keys are coerced like stdlib, NaN/Inf and unsupported types raise, ints
+/// past 64 bits are an OverflowError, and cycles or nesting past stdlib's
+/// recursion limit raise instead of overflowing the stack.
+pub struct JsonBody(Value);
+
+/// Containers on the current encode path, by object address. Detects cycles
+/// exactly and bounds depth. Linear scan is fine: the path is short.
+struct EncodePath(Vec<usize>);
+
+impl EncodePath {
+    const MAX_DEPTH: usize = 1000;
+
+    fn enter(&mut self, obj: &Bound<'_, PyAny>) -> PyResult<()> {
+        let addr = obj.as_ptr() as usize;
+        if self.0.contains(&addr) {
+            return Err(PyValueError::new_err("Circular reference detected"));
         }
-    } else if py_val.is_instance_of::<PyString>() {
-        serde_json::Value::String(py_val.extract::<String>().unwrap())
-    } else if py_val.is_instance_of::<PyDict>() {
-        serde_json::Value::Object(
-            py_val
-                .cast::<PyDict>()
-                .unwrap()
+        if self.0.len() >= Self::MAX_DEPTH {
+            return Err(PyRecursionError::new_err(
+                "maximum recursion depth exceeded while encoding a JSON object",
+            ));
+        }
+        self.0.push(addr);
+        Ok(())
+    }
+
+    fn leave(&mut self) {
+        self.0.pop();
+    }
+}
+
+impl JsonBody {
+    pub fn into_value(self) -> Value {
+        self.0
+    }
+
+    fn encode(obj: &Bound<'_, PyAny>, path: &mut EncodePath) -> PyResult<Value> {
+        if obj.is_none() {
+            return Ok(Value::Null);
+        }
+        // bool before int: Python's bool is an int subclass.
+        if let Ok(b) = obj.cast::<PyBool>() {
+            return Ok(Value::Bool(b.is_true()));
+        }
+        if obj.is_instance_of::<PyInt>() {
+            return Self::int(obj);
+        }
+        if let Ok(f) = obj.cast::<PyFloat>() {
+            return Self::float(f.value());
+        }
+        if let Ok(s) = obj.cast::<PyString>() {
+            return Ok(Value::String(s.to_cow()?.into_owned()));
+        }
+        if let Ok(dict) = obj.cast::<PyDict>() {
+            path.enter(obj)?;
+            let mut map = Map::with_capacity(dict.len());
+            for (k, v) in dict.iter() {
+                map.insert(Self::key(&k)?, Self::encode(&v, path)?);
+            }
+            path.leave();
+            return Ok(Value::Object(map));
+        }
+        if let Ok(list) = obj.cast::<PyList>() {
+            path.enter(obj)?;
+            let items = list
                 .iter()
-                .map(|(k, v)| {
-                    (
-                        k.extract::<String>().unwrap(),
-                        py_to_value(
-                            // py,
-                            &v,
-                        ),
-                    )
-                })
-                .collect(),
-        )
-    } else if py_val.is_instance_of::<PyList>() {
-        serde_json::Value::Array(
-            py_val
-                .cast::<PyList>()
+                .map(|v| Self::encode(&v, path))
+                .collect::<PyResult<_>>()?;
+            path.leave();
+            return Ok(Value::Array(items));
+        }
+        if let Ok(tuple) = obj.cast::<PyTuple>() {
+            path.enter(obj)?;
+            let items = tuple
                 .iter()
-                .map(|v| {
-                    py_to_value(
-                        // py,
-                        v,
-                    )
-                })
-                .collect(),
-        )
-    } else {
-        serde_json::Value::Null
+                .map(|v| Self::encode(&v, path))
+                .collect::<PyResult<_>>()?;
+            path.leave();
+            return Ok(Value::Array(items));
+        }
+        Err(PyTypeError::new_err(format!(
+            "Object of type {} is not JSON serializable",
+            obj.get_type().name()?
+        )))
+    }
+
+    /// i64 first, then u64; serde_json's Number holds nothing wider.
+    fn int(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
+        if let Ok(i) = obj.extract::<i64>() {
+            return Ok(Value::Number(Number::from(i)));
+        }
+        if let Ok(u) = obj.extract::<u64>() {
+            return Ok(Value::Number(Number::from(u)));
+        }
+        Err(PyOverflowError::new_err(
+            "Python int too large to encode as JSON (64-bit limit)",
+        ))
+    }
+
+    /// Finite only, like stdlib with `allow_nan=False`.
+    fn float(v: f64) -> PyResult<Value> {
+        match Number::from_f64(v) {
+            Some(n) => Ok(Value::Number(n)),
+            None => {
+                let spelling = if v.is_nan() {
+                    "nan"
+                } else if v > 0.0 {
+                    "inf"
+                } else {
+                    "-inf"
+                };
+                Err(PyValueError::new_err(format!(
+                    "Out of range float values are not JSON compliant: {spelling}"
+                )))
+            }
+        }
+    }
+
+    /// stdlib's key coercion: str as-is, bool/None/int/float stringified.
+    fn key(obj: &Bound<'_, PyAny>) -> PyResult<String> {
+        if let Ok(s) = obj.cast::<PyString>() {
+            return Ok(s.to_cow()?.into_owned());
+        }
+        if obj.is_none() {
+            return Ok("null".to_owned());
+        }
+        if let Ok(b) = obj.cast::<PyBool>() {
+            return Ok(if b.is_true() { "true" } else { "false" }.to_owned());
+        }
+        if obj.is_instance_of::<PyInt>() || obj.is_instance_of::<PyFloat>() {
+            return Ok(obj.str()?.to_cow()?.into_owned());
+        }
+        Err(PyTypeError::new_err(format!(
+            "keys must be str, int, float, bool or None, not {}",
+            obj.get_type().name()?
+        )))
+    }
+}
+
+impl<'py> FromPyObject<'_, 'py> for JsonBody {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
+        let mut path = EncodePath(Vec::new());
+        Ok(Self(JsonBody::encode(&obj, &mut path)?))
     }
 }
