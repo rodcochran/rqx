@@ -21,10 +21,14 @@ impl RequestHeaders {
         len: usize,
         items: impl Iterator<Item = PyResult<(Bound<'py, PyAny>, Bound<'py, PyAny>)>>,
     ) -> PyResult<Self> {
-        let mut map = HeaderMap::with_capacity(len);
+        // `len` is only a hint (a custom mapping's `__len__` may lie), so an
+        // oversized one just skips pre-sizing. A real overflow of the map's
+        // entry limit surfaces on append as a ValueError, never a panic.
+        let mut map = HeaderMap::try_with_capacity(len).unwrap_or_default();
         for item in items {
             let (name, value) = item?;
-            map.append(Self::name(&name)?, Self::value(&value)?);
+            map.try_append(Self::name(&name)?, Self::value(&value)?)
+                .map_err(|_| PyValueError::new_err("too many headers"))?;
         }
         Ok(Self(map))
     }
