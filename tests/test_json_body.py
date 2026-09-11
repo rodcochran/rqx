@@ -144,6 +144,22 @@ def test_unsupported_value_raises_type_error(flaky_server, value, type_name):
         rqx.post(f"{flaky_server}/echo-body", json={"v": value})
 
 
+@pytest.mark.parametrize("f", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_float_dict_key_raises_value_error(flaky_server, f):
+    """stdlib with allow_nan=False rejects a NaN key the same way as a value."""
+    with pytest.raises(
+        ValueError, match="Out of range float values are not JSON compliant"
+    ):
+        rqx.post(f"{flaky_server}/echo-body", json={f: 1})
+
+
+def test_keys_that_collide_after_coercion_keep_the_last_value(flaky_server):
+    """stdlib writes both keys (`{"1":"a","1":"b"}`); a receiver parsing that
+    gets last-wins, which is what serde's map yields directly. Pinned so a
+    change here is deliberate."""
+    assert _wire(flaky_server, {1: "a", "1": "b"}) == '{"1":"b"}'
+
+
 def test_unsupported_dict_key_raises_type_error(flaky_server):
     with pytest.raises(
         TypeError, match="keys must be str, int, float, bool or None, not tuple"

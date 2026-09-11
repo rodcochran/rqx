@@ -93,6 +93,9 @@ impl JsonBody {
         }
         if let Ok(dict) = obj.cast::<PyDict>() {
             path.enter(obj)?;
+            // Keys that collide after coercion (`1` and `"1"`) keep the last
+            // value. stdlib writes both keys; a receiver parsing that sees the
+            // same last-wins result, so this matches what httpx callers get.
             let mut map = Map::with_capacity(dict.len());
             for (k, v) in dict.iter() {
                 map.insert(Self::key(&k)?, Self::encode(&v, path)?);
@@ -167,7 +170,12 @@ impl JsonBody {
         if let Ok(b) = obj.cast::<PyBool>() {
             return Ok(if b.is_true() { "true" } else { "false" }.to_owned());
         }
-        if obj.is_instance_of::<PyInt>() || obj.is_instance_of::<PyFloat>() {
+        if let Ok(f) = obj.cast::<PyFloat>() {
+            // Same finite-only rule as values: stdlib raises for a NaN key too.
+            Self::float(f.value())?;
+            return Ok(obj.str()?.to_cow()?.into_owned());
+        }
+        if obj.is_instance_of::<PyInt>() {
             return Ok(obj.str()?.to_cow()?.into_owned());
         }
         Err(PyTypeError::new_err(format!(
