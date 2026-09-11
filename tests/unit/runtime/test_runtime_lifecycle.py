@@ -79,7 +79,9 @@ def test_import_does_not_start_runtime_threads():
     before, after = run.stdout.split()
     if before == "None":
         pytest.skip("no OS thread count available on this platform")
-    assert int(after) == int(before), f"import rqx started {int(after) - int(before)} OS threads"
+    assert int(after) == int(before), (
+        f"import rqx started {int(after) - int(before)} OS threads"
+    )
 
 
 def test_import_and_exit_without_use():

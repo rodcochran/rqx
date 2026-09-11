@@ -97,3 +97,6 @@ benchmarks/infra/.pulumi/
 *.csr
 *.srl
 *.cert-gen.lock
+
+# hypothesis example database
+.hypothesis/

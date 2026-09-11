@@ -1,7 +1,7 @@
 """Bodies across redirects and retries (https://github.com/rodcochran/rqx/issues/149).
-  /redirect/<status> -> redirect to /echo-body
-  /echo-body         -> {"method", "content_type", "body"}
-  /flaky-echo-body   -> 503 twice, then echo
+/redirect/<status> -> redirect to /echo-body
+/echo-body         -> {"method", "content_type", "body"}
+/flaky-echo-body   -> 503 twice, then echo
 """
 
 from urllib.parse import parse_qs

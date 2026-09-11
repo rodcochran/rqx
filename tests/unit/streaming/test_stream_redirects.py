@@ -11,7 +11,9 @@ import rqx
 def test_stream_follow_redirects_completes_chain(flaky_server):
     """/redirect-once → 302 → /streamable. Stream should yield the final body."""
     client = rqx.Client()
-    with client.stream("GET", f"{flaky_server}/redirect-once", follow_redirects=True) as resp:
+    with client.stream(
+        "GET", f"{flaky_server}/redirect-once", follow_redirects=True
+    ) as resp:
         chunks = list(resp.iter_bytes())
     body = b"".join(chunks)
     assert body == b'{"streamed": true}'
@@ -21,7 +23,9 @@ def test_stream_follow_redirects_does_not_panic(flaky_server):
     """Regression for the original todo!() panic on this code path."""
     client = rqx.Client()
     # Just exercise the path; assertion is "no exception escapes."
-    with client.stream("GET", f"{flaky_server}/redirect-once", follow_redirects=True) as resp:
+    with client.stream(
+        "GET", f"{flaky_server}/redirect-once", follow_redirects=True
+    ) as resp:
         for _ in resp.iter_bytes():
             pass
 

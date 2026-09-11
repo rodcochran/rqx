@@ -22,6 +22,18 @@ build-release:
 test: build
     uv run pytest tests/ -n 8
 
+# Fixture-server tests only (no docker needed)
+test-unit:
+    uv run pytest tests/unit -n 8
+
+# Tests against the local httpbin container
+test-integration:
+    uv run pytest tests/integration -n 8
+
+# Hypothesis tests; HYPOTHESIS_PROFILE=nightly for the bigger budget
+test-property:
+    uv run pytest tests/property -n 8
+
 # Regenerate test certificates from scratch
 regen-certs:
     rm -rf tests/ssl/certs tests/ssl/.cert-gen.lock

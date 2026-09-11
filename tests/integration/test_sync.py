@@ -4,7 +4,7 @@ import time
 
 import pytest
 import rqx
-from conftest import FlakyServerHandler
+from tests.fixtures.server import FlakyServerHandler
 from rich import print
 
 # HTTPBIN_HOST = "https://httpbin.org"

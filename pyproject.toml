@@ -41,10 +41,16 @@ dev = [
     "brotli",
     "zstandard",
     "hypercorn",
+    "hypothesis",
 ]
 benchmarks = [
     "matplotlib",
     "numpy",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: needs the local httpbin container (just httpbin-start)",
 ]
 
 [tool.ty.rules]

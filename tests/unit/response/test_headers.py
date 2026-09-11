@@ -4,8 +4,6 @@ import pytest
 
 import rqx
 
-HTTPBIN_HOST = "http://localhost"
-
 
 def test_headers_case_insensitive_getitem():
     """All casings of the same header name return the same value."""
@@ -71,34 +69,6 @@ def test_headers_iteration():
 def test_headers_len():
     h = rqx.Headers({"A": "1", "B": "2", "C": "3"})
     assert len(h) == 3
-
-
-def test_headers_from_response_is_case_insensitive():
-    """The headers attribute on a real response is also case-insensitive."""
-    resp = rqx.Client().get(f"{HTTPBIN_HOST}/get")
-    assert resp.headers["Content-Type"] == resp.headers["content-type"]
-    assert resp.headers["CONTENT-TYPE"] == resp.headers["Content-Type"]
-    assert "Content-Type" in resp.headers
-    assert "content-type" in resp.headers
-    assert resp.headers.get("Content-Type") is not None
-    assert resp.headers.get("missing-header") is None
-
-
-@pytest.mark.asyncio
-async def test_headers_from_async_response_is_case_insensitive():
-    client = rqx.AsyncClient()
-    resp = await client.get(f"{HTTPBIN_HOST}/get")
-    assert resp.headers["Content-Type"] == resp.headers["content-type"]
-    assert "Content-Type" in resp.headers
-    assert "CONTENT-TYPE" in resp.headers
-
-
-def test_response_headers_are_cached():
-    """`.headers` materializes once and returns the same object on repeat
-    access — safe because a response's headers are read-only, and it matches
-    httpx (`resp.headers is resp.headers`)."""
-    resp = rqx.Client().get(f"{HTTPBIN_HOST}/get")
-    assert resp.headers is resp.headers
 
 
 # --- entry cap: http's HeaderMap has 32768 slots at a 0.75 load factor, so
