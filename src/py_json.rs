@@ -9,12 +9,15 @@ pub fn value_to_py(py: Python<'_>, val: serde_json::Value) -> PyResult<Py<PyAny>
         serde_json::Value::Null => Ok(py.None()),
         serde_json::Value::Bool(b) => b.into_py_any(py),
         serde_json::Value::String(s) => s.into_py_any(py),
-        serde_json::Value::Number(n) => match n.as_i64() {
-            Some(i) => i.into_py_any(py),
-            None => match n.as_f64() {
-                Some(f) => f.into_py_any(py),
-                None => Err(PyValueError::new_err("invalid JSON number")),
-            },
+        // i64, then u64 (exact up to 2^64 - 1), then f64. Past u64 serde_json
+        // already parsed the literal as f64, so precision is lost there; stdlib
+        // returns an exact int. Documented divergence, see
+        // https://github.com/rodcochran/rqx/issues/116.
+        serde_json::Value::Number(n) => match (n.as_i64(), n.as_u64(), n.as_f64()) {
+            (Some(i), _, _) => i.into_py_any(py),
+            (None, Some(u), _) => u.into_py_any(py),
+            (None, None, Some(f)) => f.into_py_any(py),
+            (None, None, None) => Err(PyValueError::new_err("invalid JSON number")),
         },
 
         serde_json::Value::Array(arr) => {

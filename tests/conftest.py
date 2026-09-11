@@ -200,6 +200,20 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self._echo_body()
             return
 
+        # /big-ints — integer literals at and past the 64-bit boundaries, for
+        # the decode side of https://github.com/rodcochran/rqx/issues/118.
+        if path == "/big-ints":
+            body = (
+                b'{"i64_max": 9223372036854775807, "u64_min": 9223372036854775808, '
+                b'"u64_max": 18446744073709551615, "past_u64": 18446744073709551616}'
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         # /echo-headers — echo the request headers back as a JSON list of
         # [name, value] pairs, wire order and casing preserved, duplicates kept.
         if path == "/echo-headers":

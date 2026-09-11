@@ -175,3 +175,25 @@ async def test_async_client_shares_the_encoder(flaky_server):
         assert resp.json()["body"] == '{"b":1,"a":[2]}'
         with pytest.raises(OverflowError):
             await client.post(f"{flaky_server}/echo-body", json={"n": 2**64})
+
+
+# --- decode side: integers at the 64-bit boundaries -------------------------
+
+
+def test_response_json_decodes_u64_range_ints_exactly(flaky_server):
+    """Literals between 2^63 and 2^64 - 1 fit serde_json's u64 and must come
+    back as exact ints, not floats."""
+    body = rqx.get(f"{flaky_server}/big-ints").json()
+    assert body["i64_max"] == 2**63 - 1
+    assert body["u64_min"] == 2**63
+    assert body["u64_max"] == 2**64 - 1
+    assert all(isinstance(body[k], int) for k in ("i64_max", "u64_min", "u64_max"))
+
+
+def test_response_json_past_u64_is_a_float(flaky_server):
+    """Documented divergence: past 2^64 serde_json parses the literal as f64,
+    so the value is rounded where stdlib returns an exact int. Tracked for the
+    migration guide, https://github.com/rodcochran/rqx/issues/116."""
+    body = rqx.get(f"{flaky_server}/big-ints").json()
+    assert isinstance(body["past_u64"], float)
+    assert body["past_u64"] == float(2**64)
