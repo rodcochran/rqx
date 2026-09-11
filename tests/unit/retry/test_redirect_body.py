@@ -55,12 +55,13 @@ def test_raw_content_survives_308(flaky_server):
     assert echo["body"] == "raw bytes"
 
 
-def test_301_keeps_method_and_body_for_now(flaky_server):
-    """Pins today's behavior; the httpx-style GET downgrade is a separate decision."""
+def test_301_downgrades_post_to_get_like_httpx(flaky_server):
+    """301 and 302 turn a POST into a body-less GET, as httpx and browsers do
+    (https://github.com/rodcochran/rqx/issues/42). Other methods are kept."""
     resp = _client().post(f"{flaky_server}/redirect/301", json=PAYLOAD)
     echo = resp.json()
-    assert echo["method"] == "POST"
-    assert echo["body"] == '{"id":1}'
+    assert echo["method"] == "GET"
+    assert echo["body"] == ""
 
 
 def test_retried_request_carries_its_body(flaky_server):
