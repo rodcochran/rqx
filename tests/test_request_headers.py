@@ -189,8 +189,8 @@ def test_non_callable_items_attribute_raises_type_error(flaky_server):
 
 
 def test_more_headers_than_the_map_allows_raises_value_error(flaky_server):
-    """http's HeaderMap caps at 32768 entries; past that must be a ValueError,
-    not a panic."""
+    """http's HeaderMap holds about 24576 entries (32768 slots at a 0.75 load
+    factor); past that must be a ValueError, not a panic."""
     headers = {f"X-H-{i}": "v" for i in range(40_000)}
     with pytest.raises(ValueError, match="too many headers"):
         rqx.get(f"{flaky_server}/echo-headers", headers=headers)

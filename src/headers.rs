@@ -29,7 +29,9 @@ impl PyHeaders {
                 let value = HeaderValue::from_str(&v).map_err(|e| {
                     PyValueError::new_err(format!("invalid header value {v:?}: {e}"))
                 })?;
-                inner.insert(name, value);
+                inner
+                    .try_insert(name, value)
+                    .map_err(|_| PyValueError::new_err("too many headers"))?;
             }
         }
         Ok(Self { inner })
@@ -54,7 +56,10 @@ impl PyHeaders {
             .map_err(|e| PyValueError::new_err(format!("invalid header name {key:?}: {e}")))?;
         let val = HeaderValue::from_str(&value)
             .map_err(|e| PyValueError::new_err(format!("invalid header value {value:?}: {e}")))?;
-        self.inner.insert(name, val); // replaces existing entries with this name
+        // Replaces existing entries with this name.
+        self.inner
+            .try_insert(name, val)
+            .map_err(|_| PyValueError::new_err("too many headers"))?;
         Ok(())
     }
 
@@ -91,7 +96,7 @@ impl PyHeaders {
             return Ok(self.inner == other_headers.borrow().inner);
         }
         if let Ok(other_map) = other.extract::<HashMap<String, String>>() {
-            let mut other_inner = HeaderMap::with_capacity(other_map.len());
+            let mut other_inner = HeaderMap::try_with_capacity(other_map.len()).unwrap_or_default();
             for (k, v) in other_map {
                 let name = match HeaderName::from_str(&k) {
                     Ok(n) => n,
@@ -101,7 +106,10 @@ impl PyHeaders {
                     Ok(v) => v,
                     Err(_) => return Ok(false),
                 };
-                other_inner.insert(name, value);
+                // A mapping too large to hold can't equal this one.
+                if other_inner.try_insert(name, value).is_err() {
+                    return Ok(false);
+                }
             }
             return Ok(self.inner == other_inner);
         }
@@ -138,13 +146,13 @@ impl PyHeaders {
     /// Build from `Vec<(name, value)>` — used by response construction where
     /// the data came from reqwest's iteration.
     pub fn from_pairs(items: Vec<(String, String)>) -> Self {
-        let mut inner = HeaderMap::with_capacity(items.len());
+        let mut inner = HeaderMap::try_with_capacity(items.len()).unwrap_or_default();
         for (k, v) in items {
             // Skip malformed names/values defensively. reqwest's HeaderMap
             // shouldn't ever produce them, but we don't want to panic if
-            // something pathological slips through.
+            // something pathological slips through. Same for the entry cap.
             if let (Ok(name), Ok(value)) = (HeaderName::from_str(&k), HeaderValue::from_str(&v)) {
-                inner.append(name, value); // append preserves multi-values
+                let _ = inner.try_append(name, value); // append preserves multi-values
             }
         }
         Self { inner }
