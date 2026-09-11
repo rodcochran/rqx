@@ -7,7 +7,7 @@ use tokio::sync::Mutex as TokioMutex;
 use url::Url;
 
 use crate::exceptions::*;
-use crate::py_json::py_to_value;
+use crate::py_json::JsonBody;
 use crate::query_params::QueryParams;
 use crate::request::{RequestSpec, build_client_request, determine_redirect_url};
 use crate::request_headers::RequestHeaders;
@@ -546,7 +546,7 @@ impl PyClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        json: Option<&Bound<'_, PyAny>>,
+        json: Option<JsonBody>,
         params: Option<QueryParams>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
@@ -554,7 +554,7 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
-        let json_value = json.map(py_to_value);
+        let json_value = json.map(JsonBody::into_value);
         let timeout_f64 = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
         block_on_inner(
             py,
@@ -661,7 +661,7 @@ impl PyClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        json: Option<&Bound<'_, PyAny>>,
+        json: Option<JsonBody>,
         params: Option<QueryParams>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
@@ -669,7 +669,7 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
-        let json_value = json.map(py_to_value);
+        let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
         block_on_inner(
             py,
@@ -695,7 +695,7 @@ impl PyClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        json: Option<&Bound<'_, PyAny>>,
+        json: Option<JsonBody>,
         params: Option<QueryParams>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
@@ -703,7 +703,7 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
-        let json_value = json.map(py_to_value);
+        let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
         block_on_inner(
             py,
@@ -729,7 +729,7 @@ impl PyClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        json: Option<&Bound<'_, PyAny>>,
+        json: Option<JsonBody>,
         params: Option<QueryParams>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
@@ -737,7 +737,7 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyResponse> {
-        let json_value = json.map(py_to_value);
+        let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
         block_on_inner(
             py,
@@ -764,7 +764,7 @@ impl PyClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        json: Option<&Bound<'_, PyAny>>,
+        json: Option<JsonBody>,
         params: Option<QueryParams>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
@@ -772,7 +772,7 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyStreamResponse> {
-        let json_value = json.map(py_to_value);
+        let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
         let pending = block_on_inner(
             py,
@@ -877,7 +877,7 @@ impl PyAsyncClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        json: Option<&Bound<'_, PyAny>>,
+        json: Option<JsonBody>,
         params: Option<QueryParams>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
@@ -885,7 +885,7 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
-        let json_value = json.map(py_to_value);
+        let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
         let method = method.to_string();
         let url = url.to_string();
@@ -1037,7 +1037,7 @@ impl PyAsyncClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        json: Option<&Bound<'_, PyAny>>,
+        json: Option<JsonBody>,
         params: Option<QueryParams>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
@@ -1045,7 +1045,7 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
-        let json_value = json.map(py_to_value);
+        let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
         let url = url.to_string();
         let content = content.map(<[u8]>::to_vec);
@@ -1075,7 +1075,7 @@ impl PyAsyncClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        json: Option<&Bound<'_, PyAny>>,
+        json: Option<JsonBody>,
         params: Option<QueryParams>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
@@ -1083,7 +1083,7 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
-        let json_value = json.map(py_to_value);
+        let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
         let url = url.to_string();
         let content = content.map(<[u8]>::to_vec);
@@ -1113,7 +1113,7 @@ impl PyAsyncClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        json: Option<&Bound<'_, PyAny>>,
+        json: Option<JsonBody>,
         params: Option<QueryParams>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
@@ -1121,7 +1121,7 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
-        let json_value = json.map(py_to_value);
+        let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
         let url = url.to_string();
         let content = content.map(<[u8]>::to_vec);
@@ -1152,7 +1152,7 @@ impl PyAsyncClient {
         url: &str,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
-        json: Option<&Bound<'_, PyAny>>,
+        json: Option<JsonBody>,
         params: Option<QueryParams>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
@@ -1160,7 +1160,7 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
-        let json_value = json.map(py_to_value);
+        let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
         let method = method.to_string();
         let url = url.to_string();
