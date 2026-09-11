@@ -20,9 +20,9 @@ omitted — anyone reaching for those is already constructing a long-lived
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Union
+from typing import Any, Mapping, Tuple, Union
 
 from ._rqx import PyClient, PyResponse, PyStreamResponse, Timeout
 
@@ -40,9 +40,10 @@ __all__ = [
 
 
 # Type aliases — kept loose because users routinely pass raw dicts / numbers.
-# `Union[...]`, not `|`: these run at import time and cp38/cp39 wheels ship.
+# `Union[...]` / `Tuple` / `typing.Mapping`, not `|` or PEP 585 generics: these
+# run at import time and cp38/cp39 wheels ship.
 VerifyTypes = Union[bool, str]
-CertTypes = Union[str, bytes, tuple[str, str]]
+CertTypes = Union[str, bytes, Tuple[str, str]]
 TimeoutTypes = Union[float, int, Timeout]
 QueryParamValue = Union[str, int, float, bool, None]
 QueryParamTypes = Mapping[str, QueryParamValue]

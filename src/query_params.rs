@@ -19,8 +19,9 @@ impl QueryParams {
         let mut pairs = Vec::new();
         for item in items {
             let (key, value) = item?;
+            let key = Self::key(&key)?;
             if let Some(value) = Self::value(&value)? {
-                pairs.push((Self::key(&key)?, value));
+                pairs.push((key, value));
             }
         }
         Ok(Self(pairs))

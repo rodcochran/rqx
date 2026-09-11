@@ -88,6 +88,12 @@ def test_non_str_key_raises_type_error(flaky_server):
         rqx.get(f"{flaky_server}/streamable", params={1: "a"})  # ty: ignore[invalid-argument-type]
 
 
+def test_non_str_key_with_none_value_still_raises(flaky_server):
+    """Key validation must not be skipped by the None short-circuit."""
+    with pytest.raises(TypeError, match="keys must be str"):
+        rqx.get(f"{flaky_server}/streamable", params={1: None})  # ty: ignore[invalid-argument-type]
+
+
 def test_client_verbs_share_the_coercion(flaky_server):
     client = rqx.Client(base_url=flaky_server)
     resp = client.get("/streamable", params={"page": 1, "active": True})
