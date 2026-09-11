@@ -26,6 +26,11 @@ TimeoutTypes = ...
 # Proxy mapping: scheme ("http"/"https") -> proxy URL.
 ProxyTypes: TypeAlias = Mapping[str, str]
 
+# `params=` values are coerced like httpx: bool -> "true"/"false", None drops
+# the key, int/float -> str(). See https://github.com/rodcochran/rqx/issues/115.
+QueryParamValue: TypeAlias = str | int | float | bool | None
+QueryParamTypes: TypeAlias = Mapping[str, QueryParamValue]
+
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
@@ -337,7 +342,7 @@ class PyClient:
         content: bytes | None = None,
         data: Mapping[str, str] | None = None,
         json: Any | None = None,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -347,7 +352,7 @@ class PyClient:
     def get(
         self,
         url: str,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -357,7 +362,7 @@ class PyClient:
     def options(
         self,
         url: str,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -367,7 +372,7 @@ class PyClient:
     def head(
         self,
         url: str,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -380,7 +385,7 @@ class PyClient:
         content: bytes | None = None,
         data: Mapping[str, str] | None = None,
         json: Any | None = None,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -393,7 +398,7 @@ class PyClient:
         content: bytes | None = None,
         data: Mapping[str, str] | None = None,
         json: Any | None = None,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -406,7 +411,7 @@ class PyClient:
         content: bytes | None = None,
         data: Mapping[str, str] | None = None,
         json: Any | None = None,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -416,7 +421,7 @@ class PyClient:
     def delete(
         self,
         url: str,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -430,7 +435,7 @@ class PyClient:
         content: bytes | None = None,
         data: Mapping[str, str] | None = None,
         json: Any | None = None,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -472,7 +477,7 @@ class PyAsyncClient:
         content: bytes | None = None,
         data: Mapping[str, str] | None = None,
         json: Any | None = None,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -482,7 +487,7 @@ class PyAsyncClient:
     def get(
         self,
         url: str,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -492,7 +497,7 @@ class PyAsyncClient:
     def options(
         self,
         url: str,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -502,7 +507,7 @@ class PyAsyncClient:
     def head(
         self,
         url: str,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -515,7 +520,7 @@ class PyAsyncClient:
         content: bytes | None = None,
         data: Mapping[str, str] | None = None,
         json: Any | None = None,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -528,7 +533,7 @@ class PyAsyncClient:
         content: bytes | None = None,
         data: Mapping[str, str] | None = None,
         json: Any | None = None,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -541,7 +546,7 @@ class PyAsyncClient:
         content: bytes | None = None,
         data: Mapping[str, str] | None = None,
         json: Any | None = None,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -551,7 +556,7 @@ class PyAsyncClient:
     def delete(
         self,
         url: str,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,
@@ -565,7 +570,7 @@ class PyAsyncClient:
         content: bytes | None = None,
         data: Mapping[str, str] | None = None,
         json: Any | None = None,
-        params: Mapping[str, str] | None = None,
+        params: QueryParamTypes | None = None,
         headers: Mapping[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         auth_bearer: str | None = None,

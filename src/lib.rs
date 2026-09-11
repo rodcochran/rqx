@@ -14,6 +14,7 @@ pub mod exceptions;
 mod headers;
 mod http;
 mod py_json;
+mod query_params;
 mod request;
 mod response;
 mod retry;
