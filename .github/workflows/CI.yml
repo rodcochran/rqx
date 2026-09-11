@@ -29,11 +29,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    services:
-      httpbin:
-        image: kennethreitz/httpbin
-        ports:
-          - 80:80
+    # httpbin is started by the integration tests themselves (testcontainers).
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -54,10 +50,12 @@ jobs:
       # the build backend and compile a release wheel (~90 s) that the next
       # step's dev build immediately replaces.
       - run: uv sync --only-group test --frozen --no-install-project
-      - run: uv run maturin develop
+      # --no-sync: `uv run` would otherwise sync the default `dev` group first,
+      # pulling ruff/ty and rebuilding the project as a release wheel.
+      - run: uv run --no-sync maturin develop
       # One worker per core. Oversubscribing measured a little faster (the suite
       # sleeps and waits on sockets) but `auto` is the honest default.
-      - run: uv run pytest tests/ -n auto --durations=15
+      - run: uv run --no-sync pytest tests/ -n auto --durations=15
 
   linux:
     runs-on: ${{ matrix.platform.runner }}

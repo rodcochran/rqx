@@ -26,7 +26,7 @@ test: build
 test-unit:
     uv run pytest tests/unit -n 8
 
-# Tests against the local httpbin container
+# Starts httpbin in Docker via testcontainers (or set RQX_HTTPBIN_URL)
 test-integration:
     uv run pytest tests/integration -n 8
 
@@ -67,10 +67,3 @@ bench-stream rounds="10" only="" base_ref="5e3fe3e812ba595265d01e089af2ae96aa5e6
         -v "{{justfile_directory()}}/benchmarks/stream_ab/results:/results" \
         rqx-stream-ab
 
-# Start test server
-httpbin-start:
-    docker run -d --name reqx-httpbin -p 80:80 kennethreitz/httpbin
-
-# Stop test server
-httpbin-stop:
-    docker rm -f reqx-httpbin

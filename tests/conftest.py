@@ -43,6 +43,24 @@ def pytest_configure(config):
     CERTS.ensure()
 
 
+def pytest_unconfigure(config):
+    """Remove the httpbin container the integration fixture may have started.
+
+    Runs on the controller only, after every worker has finished, which is
+    the one place that knows the container is no longer in use. Cheap when
+    nothing was started: one lookup by name. Never fails the run."""
+    if hasattr(config, "workerinput"):
+        return
+    try:
+        import docker
+
+        from tests.integration.conftest import CONTAINER_NAME
+
+        docker.from_env().containers.get(CONTAINER_NAME).remove(force=True)
+    except Exception:
+        pass
+
+
 @pytest.fixture(scope="session")
 def flaky_server():
     # start server in thread
