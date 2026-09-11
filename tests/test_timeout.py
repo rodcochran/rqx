@@ -12,7 +12,6 @@ Covers:
   - mutual exclusion with transport=
 """
 
-import asyncio
 import time
 
 import pytest

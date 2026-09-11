@@ -24,7 +24,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Mapping, Tuple, Union
 
-from ._rqx import PyClient, PyResponse, PyStreamResponse, Timeout
+from ._rqx import PyClient, PyHeaders, PyResponse, PyStreamResponse, Timeout
 
 __all__ = [
     "delete",
@@ -47,6 +47,7 @@ CertTypes = Union[str, bytes, Tuple[str, str]]
 TimeoutTypes = Union[float, int, Timeout]
 QueryParamValue = Union[str, int, float, bool, None]
 QueryParamTypes = Mapping[str, QueryParamValue]
+HeaderTypes = Union[Mapping[str, str], PyHeaders]
 
 
 def request(
@@ -57,7 +58,7 @@ def request(
     data: Mapping[str, str] | None = None,
     json: Any | None = None,
     params: QueryParamTypes | None = None,
-    headers: Mapping[str, str] | None = None,
+    headers: HeaderTypes | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
     follow_redirects: bool = False,
@@ -96,7 +97,7 @@ def stream(
     data: Mapping[str, str] | None = None,
     json: Any | None = None,
     params: QueryParamTypes | None = None,
-    headers: Mapping[str, str] | None = None,
+    headers: HeaderTypes | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
     follow_redirects: bool = False,
@@ -137,7 +138,7 @@ def get(
     url: str,
     *,
     params: QueryParamTypes | None = None,
-    headers: Mapping[str, str] | None = None,
+    headers: HeaderTypes | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
     follow_redirects: bool = False,
@@ -164,7 +165,7 @@ def options(
     url: str,
     *,
     params: QueryParamTypes | None = None,
-    headers: Mapping[str, str] | None = None,
+    headers: HeaderTypes | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
     follow_redirects: bool = False,
@@ -191,7 +192,7 @@ def head(
     url: str,
     *,
     params: QueryParamTypes | None = None,
-    headers: Mapping[str, str] | None = None,
+    headers: HeaderTypes | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
     follow_redirects: bool = False,
@@ -221,7 +222,7 @@ def post(
     data: Mapping[str, str] | None = None,
     json: Any | None = None,
     params: QueryParamTypes | None = None,
-    headers: Mapping[str, str] | None = None,
+    headers: HeaderTypes | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
     follow_redirects: bool = False,
@@ -254,7 +255,7 @@ def put(
     data: Mapping[str, str] | None = None,
     json: Any | None = None,
     params: QueryParamTypes | None = None,
-    headers: Mapping[str, str] | None = None,
+    headers: HeaderTypes | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
     follow_redirects: bool = False,
@@ -287,7 +288,7 @@ def patch(
     data: Mapping[str, str] | None = None,
     json: Any | None = None,
     params: QueryParamTypes | None = None,
-    headers: Mapping[str, str] | None = None,
+    headers: HeaderTypes | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
     follow_redirects: bool = False,
@@ -317,7 +318,7 @@ def delete(
     url: str,
     *,
     params: QueryParamTypes | None = None,
-    headers: Mapping[str, str] | None = None,
+    headers: HeaderTypes | None = None,
     auth: tuple[str, str] | None = None,
     auth_bearer: str | None = None,
     follow_redirects: bool = False,
