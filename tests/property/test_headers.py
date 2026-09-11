@@ -19,8 +19,8 @@ def _sent(resp):
 
 
 @given(headers)
-def test_valid_headers_reach_the_server_grouped_by_name(flaky_server, mapping):
-    resp = rqx.get(f"{flaky_server}/echo-headers", headers=mapping)
+def test_valid_headers_reach_the_server_grouped_by_name(flaky_server, client, mapping):
+    resp = client.get(f"{flaky_server}/echo-headers", headers=mapping)
     sent = _sent(resp)
     expected = {}
     for name, value in mapping.items():
@@ -30,9 +30,11 @@ def test_valid_headers_reach_the_server_grouped_by_name(flaky_server, mapping):
 
 
 @given(header_name_with_one_bad_char(), header_value)
-def test_any_non_token_char_in_a_name_raises_value_error(flaky_server, name, value):
+def test_any_non_token_char_in_a_name_raises_value_error(
+    flaky_server, client, name, value
+):
     try:
-        rqx.get(f"{flaky_server}/echo-headers", headers={name: value})
+        client.get(f"{flaky_server}/echo-headers", headers={name: value})
     except ValueError as e:
         assert "invalid header name" in str(e)
     else:

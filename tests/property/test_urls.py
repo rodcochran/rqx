@@ -18,7 +18,13 @@ def _expected_path(base_segs, rel_segs):
 
 @given(segments, st.booleans(), segments, st.booleans(), query_pairs)
 def test_relative_paths_join_under_the_base_path(
-    flaky_server, base_segs, base_trailing_slash, rel_segs, rel_leading_slash, pairs
+    flaky_server,
+    transport,
+    base_segs,
+    base_trailing_slash,
+    rel_segs,
+    rel_leading_slash,
+    pairs,
 ):
     base = f"{flaky_server}/echo-url/" + "/".join(base_segs)
     if base_trailing_slash and base_segs:
@@ -28,14 +34,14 @@ def test_relative_paths_join_under_the_base_path(
     if query:
         rel += "?" + query
 
-    echoed = rqx.Client(base_url=base).get(rel).json()
+    echoed = rqx.Client(base_url=base, transport=transport).get(rel).json()
     assert echoed["path"] == _expected_path(base_segs, rel_segs)
     assert echoed["query"] == query
 
 
 @given(segments, segments)
-def test_absolute_url_ignores_the_base(flaky_server, base_segs, abs_segs):
+def test_absolute_url_ignores_the_base(flaky_server, transport, base_segs, abs_segs):
     base = f"{flaky_server}/echo-url/" + "/".join(base_segs)
     absolute = f"{flaky_server}/echo-url/" + "/".join(abs_segs)
-    echoed = rqx.Client(base_url=base).get(absolute).json()
+    echoed = rqx.Client(base_url=base, transport=transport).get(absolute).json()
     assert echoed["path"] == "/echo-url/" + "/".join(abs_segs)

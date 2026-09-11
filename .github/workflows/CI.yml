@@ -42,6 +42,9 @@ jobs:
       # Cargo registry + target dir cache. Without it every run compiles
       # reqwest/tokio/hyper from scratch (~50 s) for cargo test and again for
       # maturin develop.
+      # Pull the integration httpbin image in the background so the fixture
+      # finds it ready instead of every worker waiting ~8 s on first use.
+      - run: nohup docker pull -q ghcr.io/psf/httpbin:0.10.2 >/dev/null 2>&1 &
       - uses: Swatinem/rust-cache@v2
       # Rust unit tests (LineDecoder, etc.). Runs without the extension-module
       # feature so the test binary links libpython (provided by setup-python).

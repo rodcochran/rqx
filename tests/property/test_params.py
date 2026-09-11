@@ -6,7 +6,6 @@ from urllib.parse import parse_qsl
 from hypothesis import given
 from hypothesis import strategies as st
 
-import rqx
 from tests.property.strategies import params
 
 
@@ -26,8 +25,8 @@ def _httpx_pairs(mapping):
 
 
 @given(params)
-def test_params_round_trip_as_httpx_would_send_them(flaky_server, mapping):
-    resp = rqx.get(f"{flaky_server}/echo-url/p", params=mapping)
+def test_params_round_trip_as_httpx_would_send_them(flaky_server, client, mapping):
+    resp = client.get(f"{flaky_server}/echo-url/p", params=mapping)
     query = resp.json()["query"]
     assert parse_qsl(query, keep_blank_values=True) == _httpx_pairs(mapping)
 
@@ -40,9 +39,9 @@ def test_params_round_trip_as_httpx_would_send_them(flaky_server, mapping):
         st.dictionaries(st.text(), st.text()),
     )
 )
-def test_unsupported_param_value_types_raise_type_error(flaky_server, value):
+def test_unsupported_param_value_types_raise_type_error(flaky_server, client, value):
     try:
-        rqx.get(f"{flaky_server}/echo-url/p", params={"k": value})
+        client.get(f"{flaky_server}/echo-url/p", params={"k": value})
     except TypeError as e:
         assert "str, int, float, bool, or None" in str(e)
     else:
