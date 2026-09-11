@@ -48,7 +48,9 @@ jobs:
       - run: cargo test --lib
       - run: uv sync --extra dev --frozen
       - run: uv run maturin develop
-      - run: uv run pytest tests/ -n 8 --durations=15
+      # `auto` = one worker per core. The suite is latency-bound now, not
+      # sleep-bound, so oversubscribing the 2-core runner only adds contention.
+      - run: uv run pytest tests/ -n auto --durations=15
 
   linux:
     runs-on: ${{ matrix.platform.runner }}
