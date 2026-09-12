@@ -13,7 +13,7 @@ Two documents capture this:
 - **[docs/reqx_project_spec.md](docs/reqx_project_spec.md)** — the original project specification: problem statement, design constraints, acceptance criteria.
 - **[docs/report.md](docs/report.md)** — the write-up: design decisions, lessons learned, and the things that didn't work. Written while the project was still called `reqx`, against an early local-machine benchmark; the architectural discussion holds, the numbers in it are superseded.
 
-Read the report for the architectural trade-offs (sync vs async paths, retry placement, JSON parsing strategy, runtime singleton). For performance numbers, use the benchmark section below and [benchmarks/0.1.4/report.md](benchmarks/0.1.4/report.md).
+Read the report for the architectural trade-offs (sync vs async paths, retry placement, JSON parsing strategy, runtime singleton). For performance numbers, use the benchmark section below and [benchmarks/0.1.5/report.md](benchmarks/0.1.5/report.md).
 
 ## Quick look
 
@@ -62,19 +62,19 @@ just test         # full test suite
 
 Measured on a paired AWS c7i.large client/server (2 vCPU each, dedicated CPU) in `us-east-1`, hitting nginx over an intra-VPC private IP. Each bar is the median of 5 runs; each (client, concurrency, run) executes in its own Python subprocess to keep clients from contaminating each other's measurements.
 
-Charts below are from the 0.1.4 run (2026-09-10). Full methodology, per-concurrency tables, and limitations: [benchmarks/0.1.4/report.md](benchmarks/0.1.4/report.md). Earlier runs are kept at [benchmarks/0.1.3/report.md](benchmarks/0.1.3/report.md) and [docs/launch_report.md](docs/launch_report.md) for comparison.
+Charts below are from the 0.1.5 run (2026-09-11). Full methodology, per-concurrency tables, and limitations: [benchmarks/0.1.5/report.md](benchmarks/0.1.5/report.md). Earlier runs are kept at [benchmarks/0.1.4/report.md](benchmarks/0.1.4/report.md), [benchmarks/0.1.3/report.md](benchmarks/0.1.3/report.md), and [docs/launch_report.md](docs/launch_report.md) for comparison.
 
-![Throughput at concurrency=100](benchmarks/0.1.4/throughput.png)
+![Throughput at concurrency=100](benchmarks/0.1.5/throughput.png)
 
-![Memory at concurrency=100](benchmarks/0.1.4/memory.png)
+![Memory at concurrency=100](benchmarks/0.1.5/memory.png)
 
-![Median latency at concurrency=100](benchmarks/0.1.4/latency.png)
+![Median latency at concurrency=100](benchmarks/0.1.5/latency.png)
 
 httpx is the modern successor to requests, aiohttp is the de-facto async HTTP library, and httpr is another Rust-backed alternative.
 
 ## Status
 
-0.1.4, published on PyPI. Usable, but the API may still shift in small ways during 0.x. Open issues track the v0.x roadmap — anything labeled `httpx-feature-parity` is a known surface gap.
+0.1.5, published on PyPI. Usable, but the API may still shift in small ways during 0.x. Open issues track the v0.x roadmap — anything labeled `httpx-feature-parity` is a known surface gap.
 
 ## Contributing
 
