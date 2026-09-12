@@ -25,7 +25,13 @@ Request-building release. The three per-request inputs that ported httpx code tr
 
 ## Performance
 
-<!-- filled from the v0.1.5 bench run -->
+Full run on paired AWS `c7i.large` instances (client + nginx, single-AZ), rqx at the release commit, 5 runs per bench, against httpr 0.7.2, aiohttp 3.14.3, httpx 0.28.1 — the same comparator versions as the 0.1.4 run. Charts in [`benchmarks/0.1.5/`](https://github.com/rodcochran/rqx/tree/v0.1.5/benchmarks/0.1.5); tables, method, and limitations in [`benchmarks/0.1.5/report.md`](https://github.com/rodcochran/rqx/blob/v0.1.5/benchmarks/0.1.5/report.md); raw logs in [`benchmarks/results/aws-20260911-v015/`](https://github.com/rodcochran/rqx/tree/v0.1.5/benchmarks/results/aws-20260911-v015).
+
+* **Neutral by design.** This release changed request validation and encoding at the call boundary and nothing on the send path. At the chart cell (c=100) rqx serves 19,743 RPS vs 19,723 in 0.1.4; peak RSS matches at every concurrency to within half a megabyte; b2 p50 is 4.81 ms vs 4.79.
+* **Throughput (b1):** rqx leads every client at every concurrency — +26% over httpr and +64% over aiohttp at c=100. The +7–8% over 0.1.4 at c=500–1000 is the instance: httpr and aiohttp moved +10 to +16% at the same levels. c=10 is −4.7% against controls at −1.4% to −5.7%, inside the band but at its edge; a same-box A/B would settle whether any of it is the new per-request validation.
+* **Memory (b1):** unchanged — 29.3 / 33.8 / 38.6 / 66.5 / 85.0 MB across c=10…1000. Lightest client through c=50.
+* **Latency (b2, c=100):** p50 4.81 ms, lowest of the four; p99 12.11 ms, still above aiohttp's 8.71 — the #168 tail, unchanged.
+* **Stability:** zero aborts across 95 b1 cells, 5 b2 runs, 5 b8 runs; zero request failures. Second consecutive clean run since the 0.1.4 lifecycle fix.
 
 ## Internals
 
@@ -47,6 +53,7 @@ Request-building release. The three per-request inputs that ported httpx code tr
 * Test job: 218 s → 57 s. Rust cache, `uv sync --no-install-project` (the sync was building a release wheel that the next step replaced), `uv run --no-sync`, and the httpbin image pulled in the background (#175).
 * `just lint` runs the locked ruff via `uv run` and covers `tests/` (#173).
 * Dependabot: `pillow` 12.3.0 (#172).
+* Bench `client-setup.sh` installs maturin explicitly; it relied on the removed `dev` extra and the first v0.1.5 bench attempt failed in setup.
 
 ## Known issues
 
