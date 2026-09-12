@@ -2,6 +2,8 @@
 
 import gzip
 import json
+import socket
+import struct
 import subprocess
 import threading
 import time
@@ -645,6 +647,40 @@ async def _http2_app(scope, receive, send):
         }
     )
     await send({"type": "http.response.body", "body": body})
+
+
+class CannedServer:
+    """Answers every connection with the same bytes, then closes it. With
+    `reset=True` the close is a TCP reset instead of a normal FIN."""
+
+    def __init__(self, *, payload: bytes, reset: bool = False):
+        self.payload = payload
+        self.reset = reset
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.url = f"http://127.0.0.1:{self.sock.getsockname()[1]}/"
+
+    def start(self):
+        threading.Thread(target=self._serve, daemon=True).start()
+        return self
+
+    def close(self):
+        self.sock.close()
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            with conn:
+                conn.recv(65536)
+                conn.sendall(self.payload)
+                if self.reset:
+                    conn.setsockopt(
+                        socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
+                    )
 
 
 def _free_port():

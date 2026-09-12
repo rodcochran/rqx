@@ -6,7 +6,9 @@
 
 use pyo3::PyResult;
 use pyo3::exceptions::PyValueError;
-use url::Url;
+use url::{ParseError, Url};
+
+use crate::exceptions::UnsupportedProtocol;
 
 /// Parse a `base_url=` argument into a canonicalized URL.
 ///
@@ -26,30 +28,32 @@ pub fn parse_base_url(s: &str) -> PyResult<Url> {
 
 /// Resolve a per-request URL against an optional client base URL.
 ///
-/// Rules (chosen to match httpx's `_merge_url`):
-///   - If `input` is already an absolute URL (has a scheme + host), use it
-///     as-is — the base is ignored.
-///   - Otherwise, if `base` is set: strip a leading `/` from `input`, then
-///     join. Combined with the trailing-`/` canonicalization in
-///     `parse_base_url`, this preserves the base's path segments instead of
-///     dropping them per strict RFC 3986 resolution.
-///   - If there's no base and `input` isn't absolute, pass through and let
-///     reqwest raise the URL parse error as it does today.
-pub fn resolve_url(base: Option<&Url>, input: &str) -> PyResult<String> {
-    // Cheap absolute-URL check: if parsing as a full URL succeeds and yields
-    // a non-empty host, it's absolute and overrides any base.
-    if let Ok(parsed) = Url::parse(input) {
-        if parsed.has_host() {
-            return Ok(input.to_string());
+/// An absolute URL is used as-is; anything else is joined onto the base
+/// (leading `/` stripped so the base's path segments survive). The result
+/// must be http or https.
+pub fn resolve_url(base: Option<&Url>, input: &str) -> PyResult<Url> {
+    let absolute = match Url::parse(input) {
+        Ok(url) if url.has_authority() => Some(url),
+        Ok(_) | Err(ParseError::RelativeUrlWithoutBase) => None,
+        Err(e) => return Err(PyValueError::new_err(format!("invalid URL {input:?}: {e}"))),
+    };
+
+    let url = match (absolute, base) {
+        (Some(url), _) => url,
+        (None, Some(base)) => base.join(input.trim_start_matches('/')).map_err(|e| {
+            PyValueError::new_err(format!("could not join base_url with {input:?}: {e}"))
+        })?,
+        (None, None) => {
+            return Err(UnsupportedProtocol::new_err(
+                "Request URL is missing an 'http://' or 'https://' protocol.",
+            ));
         }
-    }
-    match base {
-        None => Ok(input.to_string()),
-        Some(b) => {
-            let stripped = input.trim_start_matches('/');
-            b.join(stripped).map(|u| u.to_string()).map_err(|e| {
-                PyValueError::new_err(format!("could not join base_url with {input:?}: {e}"))
-            })
-        }
+    };
+
+    match url.scheme() {
+        "http" | "https" => Ok(url),
+        scheme => Err(UnsupportedProtocol::new_err(format!(
+            "Request URL has an unsupported protocol '{scheme}://'."
+        ))),
     }
 }

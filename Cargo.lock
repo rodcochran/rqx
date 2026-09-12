@@ -1236,6 +1236,7 @@ dependencies = [
  "encoding_rs",
  "futures",
  "http",
+ "hyper",
  "mime",
  "pyo3",
  "pyo3-async-runtimes",

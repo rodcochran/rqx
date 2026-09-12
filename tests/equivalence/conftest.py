@@ -13,7 +13,6 @@ from types import ModuleType
 
 import httpx
 import pytest
-
 import rqx
 
 
@@ -24,6 +23,13 @@ class Lib:
 
     def client(self, **kwargs):
         return self.module.Client(**kwargs)
+
+    def proxied_client(self, proxy_url: str):
+        proxy = proxy_url.rstrip("/")
+        if self.name == "httpx":
+            return self.module.Client(proxy=proxy)
+        transport = self.module.HTTPTransport(proxy={"http": proxy, "https": proxy})
+        return self.module.Client(transport=transport)
 
 
 @pytest.fixture(params=["httpx", "rqx"])
