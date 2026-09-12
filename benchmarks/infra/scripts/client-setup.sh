@@ -59,7 +59,8 @@ if [ ! -d .venv ]; then
 fi
 # shellcheck disable=SC1091
 . .venv/bin/activate
-uv pip install -e ".[dev,benchmarks]" httpx aiohttp httpr
+# maturin explicitly: dev tooling moved from the `dev` extra to dependency groups (#175)
+uv pip install -e ".[benchmarks]" maturin httpx aiohttp httpr
 
 # Build rqx in release mode (the long pole — ~5-10 min on cold cargo cache).
 echo "[client-setup] building rqx in release mode (this takes a while)..."
