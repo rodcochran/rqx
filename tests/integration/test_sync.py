@@ -4,9 +4,9 @@ import time
 
 import pytest
 import rqx
-from tests.fixtures.server import FlakyServerHandler
 from rich import print
 
+from tests.fixtures.server import FlakyServerHandler
 
 # ================================================================
 # Phase 1 tests
@@ -403,7 +403,7 @@ def test_get_with_headers(httpbin):
         for _k, _v in echoed_headers.items():
             _lower_k = _k.lower()
             if lower_k == _lower_k:
-                assert echoed_headers[_k] == v
+                assert _v == v
                 break
 
     print("")
@@ -843,8 +843,8 @@ def test_stream(httpbin):
 
 def test_unreachable_raises_with_follow_redirects_enabled():
     client = rqx.Client(follow_redirects=True)
-    with pytest.raises(rqx.RqxError):
-        client.get("http://<unreachable>")
+    with pytest.raises(rqx.ConnectError):
+        client.get("http://nonexistent.invalid/")
 
 
 def test_post_not_retried_on_connection_reset(flaky_server):

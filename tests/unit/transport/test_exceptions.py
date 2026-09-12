@@ -1,7 +1,6 @@
 """Tests for the specific exception types raised on different failure modes (Issue #1)."""
 
 import pytest
-
 import rqx
 
 
@@ -20,11 +19,263 @@ def test_connect_error_connection_refused():
 
 
 def test_connect_error_is_subclass_of_rqxerror():
-    """Hierarchy invariant: ConnectError → NetworkError → TransportError → RequestError → RqxError."""
+    """Hierarchy invariant: ConnectError → NetworkError → TransportError → RequestError → HTTPError → RqxError."""
     assert issubclass(rqx.ConnectError, rqx.NetworkError)
     assert issubclass(rqx.NetworkError, rqx.TransportError)
     assert issubclass(rqx.TransportError, rqx.RequestError)
-    assert issubclass(rqx.RequestError, rqx.RqxError)
+    assert issubclass(rqx.RequestError, rqx.HTTPError)
+    assert issubclass(rqx.HTTPError, rqx.RqxError)
+
+
+def test_status_and_request_errors_are_siblings_under_http_error():
+    """Same shape as httpx: HTTPError -> {RequestError, HTTPStatusError}, MaxRetriesExceeded beside them."""
+    assert issubclass(rqx.HTTPStatusError, rqx.HTTPError)
+    assert not issubclass(rqx.HTTPStatusError, rqx.RequestError)
+    assert issubclass(rqx.MaxRetriesExceeded, rqx.HTTPError)
+    assert not issubclass(rqx.MaxRetriesExceeded, rqx.RequestError)
+
+
+def test_stub_hierarchy_matches_runtime():
+    """Every exception class the stub declares has the parent the stub says it has."""
+    import ast
+    import pathlib
+
+    stub = pathlib.Path(rqx.__file__).with_name("_types.pyi").read_text()
+    classes = {
+        node.name: [base.id for base in node.bases]
+        for node in ast.parse(stub).body
+        if isinstance(node, ast.ClassDef)
+    }
+    # Walk down from Exception so the set is the stub's own tree, not a name pattern.
+    declared = {"Exception"}
+    while True:
+        more = {
+            name for name, bases in classes.items() if bases and bases[0] in declared
+        }
+        if more <= declared:
+            break
+        declared |= more
+    declared.discard("Exception")
+    assert "ConnectTimeout" in declared and "RqxError" in declared
+    for name in sorted(declared):
+        runtime = [base.__name__ for base in getattr(rqx, name).__bases__]
+        assert runtime == classes[name], (
+            f"{name}: stub says {classes[name]}, runtime is {runtime}"
+        )
+
+
+def test_new_leaf_classes_have_httpx_parents():
+    assert issubclass(rqx.ProtocolError, rqx.TransportError)
+    assert issubclass(rqx.RemoteProtocolError, rqx.ProtocolError)
+    assert issubclass(rqx.UnsupportedProtocol, rqx.TransportError)
+    assert issubclass(rqx.DecodingError, rqx.RequestError)
+    assert not issubclass(rqx.DecodingError, rqx.TransportError)
+
+
+# ----- issue #182: what the server sent decides the class -----
+
+
+def _encoded(encoding: str, body: bytes) -> bytes:
+    head = f"HTTP/1.1 200 OK\r\nContent-Encoding: {encoding}\r\nContent-Length: {len(body)}\r\n\r\n"
+    return head.encode() + body
+
+
+MALFORMED_HEADS = {
+    "garbage status line": b"garbage\r\n\r\n",
+    "invalid header line": b"HTTP/1.1 200 OK\r\nBad Header\r\nContent-Length: 0\r\n\r\n",
+    "closed mid headers": b"HTTP/1.1 200 OK\r\nContent-Ty",
+    "closed before response": b"",
+}
+
+BROKEN_BODIES = {
+    "shorter than content-length": b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nhello",
+    "bad chunk size": b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nhello\r\n0\r\n\r\n",
+}
+
+CORRUPT_ENCODINGS = {
+    encoding: _encoded(encoding, b"xxxxx")
+    for encoding in ("gzip", "br", "zstd", "deflate")
+}
+
+SHORT_BODY = BROKEN_BODIES["shorter than content-length"]
+
+
+def _stream_all(url: str):
+    with rqx.Client().stream("GET", url) as resp:
+        return list(resp.iter_bytes())
+
+
+@pytest.mark.parametrize("payload", MALFORMED_HEADS.values(), ids=MALFORMED_HEADS)
+def test_malformed_head_is_remote_protocol_error(canned_server, payload):
+    url = canned_server(payload)
+    with pytest.raises(rqx.RemoteProtocolError):
+        rqx.Client().get(url)
+    with pytest.raises(rqx.RemoteProtocolError):
+        _stream_all(url)
+
+
+@pytest.mark.parametrize("payload", BROKEN_BODIES.values(), ids=BROKEN_BODIES)
+def test_broken_body_is_remote_protocol_error(canned_server, payload):
+    url = canned_server(payload)
+    with pytest.raises(rqx.RemoteProtocolError):
+        rqx.Client().get(url)
+    with pytest.raises(rqx.RemoteProtocolError):
+        _stream_all(url)
+
+
+@pytest.mark.parametrize("payload", CORRUPT_ENCODINGS.values(), ids=CORRUPT_ENCODINGS)
+def test_corrupt_encoding_is_decoding_error(canned_server, payload):
+    """A body the decompressor rejects is a DecodingError, not a transport failure."""
+    url = canned_server(payload)
+    with pytest.raises(rqx.DecodingError):
+        rqx.Client().get(url)
+    with pytest.raises(rqx.DecodingError):
+        _stream_all(url)
+
+
+def test_reset_mid_body_is_read_error(canned_server):
+    url = canned_server(SHORT_BODY, reset=True)
+    with pytest.raises(rqx.ReadError):
+        rqx.Client().get(url)
+    with pytest.raises(rqx.ReadError):
+        _stream_all(url)
+
+
+def test_reset_before_response_is_read_error(canned_server):
+    url = canned_server(b"", reset=True)
+    with pytest.raises(rqx.ReadError):
+        rqx.Client().get(url)
+
+
+def test_stream_iterators_share_the_mapping(canned_server):
+    """Every iterator flavor raises the mapped class, not a bare RqxError."""
+    url = canned_server(SHORT_BODY)
+    with rqx.Client().stream("GET", url) as resp:
+        with pytest.raises(rqx.RemoteProtocolError):
+            list(resp.iter_text())
+    with rqx.Client().stream("GET", url) as resp:
+        with pytest.raises(rqx.RemoteProtocolError):
+            list(resp.iter_lines())
+
+
+@pytest.mark.asyncio
+async def test_stream_iterators_share_the_mapping_async(canned_server):
+    url = canned_server(SHORT_BODY)
+    corrupt = canned_server(CORRUPT_ENCODINGS["gzip"])
+    async with rqx.AsyncClient() as client:
+        resp = await client.stream("GET", url)
+        with pytest.raises(rqx.RemoteProtocolError):
+            async for _ in resp.aiter_bytes():
+                pass
+        resp = await client.stream("GET", url)
+        with pytest.raises(rqx.RemoteProtocolError):
+            async for _ in resp.aiter_text():
+                pass
+        resp = await client.stream("GET", url)
+        with pytest.raises(rqx.RemoteProtocolError):
+            async for _ in resp.aiter_lines():
+                pass
+        resp = await client.stream("GET", corrupt)
+        with pytest.raises(rqx.DecodingError):
+            async for _ in resp.aiter_bytes():
+                pass
+
+
+# ----- issue #182: URLs -----
+
+
+@pytest.mark.parametrize("url", ["example.com", "", "/users", "mailto:x@y"])
+def test_missing_scheme_is_unsupported_protocol(url):
+    with pytest.raises(
+        rqx.UnsupportedProtocol, match="missing an 'http://' or 'https://'"
+    ):
+        rqx.Client().get(url)
+
+
+@pytest.mark.parametrize("url", ["ftp://example.com/", "file:///etc/hosts"])
+def test_non_http_scheme_is_unsupported_protocol(url):
+    with pytest.raises(rqx.UnsupportedProtocol, match="unsupported protocol"):
+        rqx.Client().get(url)
+
+
+@pytest.mark.parametrize("url", ["http://[::1", "http://"])
+def test_unparsable_url_is_value_error(url):
+    with pytest.raises(ValueError):
+        rqx.Client().get(url)
+
+
+# ----- issue #182: proxies -----
+
+CONNECT_REFUSED = b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n"
+CONNECT_AUTH = (
+    b"HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n"
+)
+
+
+def _via_proxy(proxy_url: str) -> rqx.Client:
+    proxy = proxy_url.rstrip("/")
+    return rqx.Client(
+        transport=rqx.HTTPTransport(proxy={"http": proxy, "https": proxy})
+    )
+
+
+def _closed_port() -> int:
+    import socket
+
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def test_proxy_refusing_connect_is_proxy_error(canned_server):
+    """Same rule as httpx: ProxyError means the proxy answered CONNECT with a failure."""
+    with pytest.raises(rqx.ProxyError):
+        _via_proxy(canned_server(CONNECT_REFUSED)).get("https://example.com/")
+
+
+def test_proxy_demanding_auth_is_proxy_error(canned_server):
+    with pytest.raises(rqx.ProxyError):
+        _via_proxy(canned_server(CONNECT_AUTH)).get("https://example.com/")
+
+
+def test_unreachable_proxy_is_connect_error():
+    """The proxy never answered, so it is a plain connect failure, like httpx."""
+    with pytest.raises(rqx.ConnectError):
+        _via_proxy(f"http://127.0.0.1:{_closed_port()}").get("https://example.com/")
+
+
+def test_proxy_response_for_plain_http_is_returned(canned_server):
+    """For an http:// target the proxy's own reply is the response, not an error."""
+    resp = _via_proxy(canned_server(CONNECT_REFUSED)).get("http://example.com/")
+    assert resp.status_code == 503
+
+
+def test_request_error_does_not_catch_status_error(flaky_server):
+    """except RequestError is for transport failures; a 404 from raise_for_status() passes through it."""
+    resp = rqx.Client().delete(f"{flaky_server}/no-such-route")
+    with pytest.raises(rqx.HTTPStatusError):
+        try:
+            resp.raise_for_status()
+        except rqx.RequestError:
+            pytest.fail("RequestError caught an HTTPStatusError")
+
+
+def test_http_error_catches_status_and_transport_errors(flaky_server):
+    """except HTTPError is the one clause for both."""
+    resp = rqx.Client().delete(f"{flaky_server}/no-such-route")
+    with pytest.raises(rqx.HTTPError):
+        resp.raise_for_status()
+    with pytest.raises(rqx.HTTPError):
+        rqx.Client().get("http://nonexistent.invalid/")
+
+
+def test_http_error_catches_max_retries_exceeded(flaky_server):
+    retry = rqx.Retry(total=1, status=1, status_forcelist={503}, raise_on_status=True)
+    client = rqx.Client(transport=rqx.HTTPTransport(retries=retry))
+    with pytest.raises(rqx.HTTPError):
+        client.get(f"{flaky_server}/status/503")
 
 
 def test_connect_error_caught_by_rqxerror():

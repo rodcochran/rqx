@@ -178,7 +178,7 @@ impl Client {
         let request = build_client_request(
             self.transport.client(),
             method,
-            &resolved_url,
+            resolved_url.as_str(),
             content,
             data,
             json.as_ref(),

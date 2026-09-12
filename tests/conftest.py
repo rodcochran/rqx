@@ -8,10 +8,11 @@ import pytest
 
 from tests.fixtures.server import (
     CERTS,
-    QuietThreadingHTTPServer,
     CERTS_DIR,
+    CannedServer,
     FlakyServerHandler,
     MTLSHandler,
+    QuietThreadingHTTPServer,
     _free_port,
     _http2_app,
     script_dir,
@@ -59,6 +60,21 @@ def pytest_unconfigure(config):
         docker.from_env().containers.get(CONTAINER_NAME).remove(force=True)
     except Exception:
         pass
+
+
+@pytest.fixture
+def canned_server():
+    """Start servers that reply with fixed bytes; returns the URL of each."""
+    servers = []
+
+    def start(payload: bytes, *, reset: bool = False) -> str:
+        server = CannedServer(payload=payload, reset=reset).start()
+        servers.append(server)
+        return server.url
+
+    yield start
+    for server in servers:
+        server.close()
 
 
 @pytest.fixture(scope="session")

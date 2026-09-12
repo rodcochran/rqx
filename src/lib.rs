@@ -80,6 +80,7 @@ fn _rqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStreamResponse>()?;
     m.add_class::<PyAsyncStreamResponse>()?;
     m.add("RqxError", m.py().get_type::<RqxError>())?;
+    m.add("HTTPError", m.py().get_type::<HTTPError>())?;
     m.add("RequestError", m.py().get_type::<RequestError>())?;
     m.add(
         "MaxRetriesExceeded",
@@ -91,6 +92,16 @@ fn _rqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("NetworkError", m.py().get_type::<NetworkError>())?;
     m.add("TooManyRedirects", m.py().get_type::<TooManyRedirects>())?;
     m.add("ProxyError", m.py().get_type::<ProxyError>())?;
+    m.add("ProtocolError", m.py().get_type::<ProtocolError>())?;
+    m.add(
+        "RemoteProtocolError",
+        m.py().get_type::<RemoteProtocolError>(),
+    )?;
+    m.add(
+        "UnsupportedProtocol",
+        m.py().get_type::<UnsupportedProtocol>(),
+    )?;
+    m.add("DecodingError", m.py().get_type::<DecodingError>())?;
     m.add("ConnectTimeout", m.py().get_type::<ConnectTimeout>())?;
     m.add("ReadTimeout", m.py().get_type::<ReadTimeout>())?;
     m.add("WriteTimeout", m.py().get_type::<WriteTimeout>())?;

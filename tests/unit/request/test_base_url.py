@@ -9,9 +9,7 @@ Verifies httpx-style merge semantics:
 """
 
 import pytest
-
 import rqx
-
 
 # ---------------------------------------------------------------------------
 # Construction + getter
@@ -127,8 +125,8 @@ async def test_async_absolute_url_overrides_base_url(flaky_server):
 # ---------------------------------------------------------------------------
 
 
-def test_no_base_url_relative_path_still_fails():
-    """Without base_url set, a bare relative path should fail like it always has."""
+def test_no_base_url_relative_path_is_unsupported_protocol():
+    """Without base_url set, a bare relative path has no scheme to send with."""
     client = rqx.Client()
-    with pytest.raises(rqx.RqxError):
+    with pytest.raises(rqx.UnsupportedProtocol):
         client.get("/users")
