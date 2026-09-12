@@ -1,23 +1,25 @@
 /**
  * Pulumi stack for rqx remote benchmarks.
  *
- * Provisions two `c7i.large` EC2 instances (client + server) in a single AZ,
- * connected over a private VPC subnet. Both also have public IPs so the
- * operator can SSH in directly; HTTP traffic between client and server is
- * restricted to the private network via security groups.
+ * Provisions two EC2 instances (client + server) in a single AZ, connected
+ * over a private VPC subnet. Both also have public IPs so the operator can
+ * SSH in directly; HTTP traffic between client and server is restricted to
+ * the private network via security groups.
  *
- * Bench harness invocation order:
+ * Bench harness invocation order (scripts/bench.sh):
  *   1. SSH into the server, start nginx + delay-server via docker compose.
  *   2. SSH into the client, build rqx in release mode, run benches against
  *      the server's *private* IP (avoids unnecessary trips through the IGW).
- *   3. Capture results to disk on the client; `scp` back to laptop on exit.
+ *   3. Results are written to disk on the client, `scp`'d to the laptop, and
+ *      uploaded to the results bucket from there.
  *   4. `pulumi destroy` to tear everything down once results are saved.
  *
- * Config keys (set via `pulumi config set`):
- *   - aws:region             — AWS region (e.g., us-east-1)
- *   - sshAllowedCidr         — CIDR allowed to SSH (e.g., "203.0.113.5/32")
- *   - sshPublicKey           — contents of your SSH public key
- *   - instanceType           — optional, defaults to c7i.large
+ * Config keys:
+ *   - aws:profile            — per operator, written by scripts/setup.sh
+ *   - sshAllowedCidr         — CIDR allowed to SSH, your IP; scripts/setup.sh
+ *   - sshPublicKey           — contents of your SSH public key; scripts/setup.sh
+ *   - aws:region             — defaults to us-east-1 in Pulumi.yaml
+ *   - instanceType           — defaults to c7i.large in Pulumi.yaml
  */
 
 import * as pulumi from "@pulumi/pulumi";
@@ -154,9 +156,10 @@ systemctl enable --now docker
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Results bucket + IAM
-// Bench output lands in S3 so it survives `pulumi destroy`. The bucket name
-// includes the AWS account ID so it's globally unique without manual config.
+// Results bucket
+// bench.sh uploads each run here from the laptop after scp'ing it down, so
+// results survive `pulumi destroy`. The bucket name includes the AWS account
+// ID so it's globally unique without manual config.
 // ---------------------------------------------------------------------------
 
 const callerIdentity = aws.getCallerIdentity({});
@@ -179,52 +182,12 @@ new aws.s3.BucketPublicAccessBlock("rqx-bench-results-block", {
     restrictPublicBuckets: true,
 });
 
-// IAM role the client EC2 assumes — grants PutObject + ListBucket on the
-// bench results bucket and nothing else.
-const clientRole = new aws.iam.Role("rqx-bench-client-role", {
-    assumeRolePolicy: JSON.stringify({
-        Version: "2012-10-17",
-        Statement: [{
-            Effect: "Allow",
-            Principal: { Service: "ec2.amazonaws.com" },
-            Action: "sts:AssumeRole",
-        }],
-    }),
-    tags: { Name: "rqx-bench-client-role" },
-});
-
-new aws.iam.RolePolicy("rqx-bench-client-policy", {
-    role: clientRole.id,
-    policy: pulumi.all([resultsBucket.arn]).apply(([bucketArn]) =>
-        JSON.stringify({
-            Version: "2012-10-17",
-            Statement: [
-                {
-                    Effect: "Allow",
-                    Action: ["s3:PutObject", "s3:PutObjectAcl"],
-                    Resource: `${bucketArn}/*`,
-                },
-                {
-                    Effect: "Allow",
-                    Action: ["s3:ListBucket", "s3:GetBucketLocation"],
-                    Resource: bucketArn,
-                },
-            ],
-        }),
-    ),
-});
-
-const clientInstanceProfile = new aws.iam.InstanceProfile("rqx-bench-client-profile", {
-    role: clientRole.name,
-});
-
 const clientInstance = new aws.ec2.Instance("rqx-bench-client", {
     ami: ubuntu.then(a => a.id),
     instanceType,
     subnetId: subnet.id,
     vpcSecurityGroupIds: [clientSg.id],
     keyName: keyPair.keyName,
-    iamInstanceProfile: clientInstanceProfile.name,
     userData: clientUserData,
     rootBlockDevice: { volumeSize: 16, volumeType: "gp3" },
     tags: { Name: "rqx-bench-client" },

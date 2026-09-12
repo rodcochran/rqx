@@ -2,12 +2,12 @@
 # Full benchmark sweep with between-bench state reset.
 #
 # What this does:
-#   - Rebuilds reqx in release mode
+#   - Rebuilds rqx in release mode
 #   - Starts the local delay server on :8081 (for b7)
 #   - Verifies both targets are reachable
 #   - Runs b4, b7, b8, b1 in order (short → long)
 #   - Between each bench: restarts nginx and sleeps to let TCP TIME_WAIT drain
-#   - Captures per-bench output under /tmp/reqx_bench_<timestamp>/
+#   - Captures per-bench output under /tmp/rqx_bench_<timestamp>/
 #
 # Why the between-bench dance:
 #   - Localhost under sustained high-concurrency HTTP generates a lot of
@@ -23,13 +23,13 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 # shellcheck disable=SC1091
-source venv/bin/activate
+source .venv/bin/activate
 
-OUT_DIR="/tmp/reqx_bench_$(date +%Y%m%d_%H%M%S)"
+OUT_DIR="/tmp/rqx_bench_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$OUT_DIR"
 echo "=== Output dir: $OUT_DIR ==="
 
-echo "=== Rebuilding reqx in release mode ==="
+echo "=== Rebuilding rqx in release mode ==="
 maturin develop --release > "$OUT_DIR/build.log" 2>&1
 tail -3 "$OUT_DIR/build.log"
 

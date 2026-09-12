@@ -3,8 +3,8 @@
 #   1. pulumi up    (provision VPC, EC2 client + server, S3 results bucket)
 #   2. server setup (clone repo + docker compose up)
 #   3. client setup (rust + uv + build rqx + patch bench scripts)
-#   4. run benches  (b1, b2, b8 × N runs each, capture to S3)
-#   5. download     (mirror S3 results to ./results/<run-id>/ locally)
+#   4. run benches  (b1, b2, b8 × N runs each, captured on the client)
+#   5. collect      (scp the run down to ./results/<run-id>/, then upload it to S3)
 #   6. destroy      (pulumi destroy — prompts for confirmation)
 #
 # Flags:
@@ -12,10 +12,14 @@
 #   --skip-destroy    leave infra running after benches (you handle teardown)
 #   --runs-per-bench N    override default (5)
 #   --ref REF         git ref (branch, tag, or commit SHA) to bench. Default: main.
+#                     Cloned from GitHub on the client, so it benches pushed code.
 #
 # Env (optional):
 #   PULUMI_STACK      stack to use (default: dev)
-#   AWS_PROFILE       AWS profile (default: whatever's active)
+#   PULUMI_BACKEND_URL / PULUMI_CONFIG_PASSPHRASE
+#                     default to the local file backend with a blank passphrase,
+#                     same as scripts/setup.sh; export your own to use another backend
+#   AWS_PROFILE       AWS profile for the S3 upload (default: the stack's aws:profile)
 #   SSH_KEY           private key path (default: ~/.ssh/id_ed25519)
 set -euo pipefail
 
@@ -34,6 +38,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+export PULUMI_BACKEND_URL="${PULUMI_BACKEND_URL:-file://~}"
+export PULUMI_CONFIG_PASSPHRASE="${PULUMI_CONFIG_PASSPHRASE-}"
 PULUMI_STACK="${PULUMI_STACK:-dev}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -53,6 +59,7 @@ log() { printf "\n[%s] %s\n" "$(date +%H:%M:%S)" "$*"; }
 # ---------- pulumi up ----------
 cd "$INFRA_DIR"
 pulumi stack select "$PULUMI_STACK" >/dev/null
+export AWS_PROFILE="${AWS_PROFILE:-$(pulumi config get aws:profile 2>/dev/null || true)}"
 
 if ! $SKIP_UP; then
     log "pulumi up (this can take a few minutes)..."
@@ -94,23 +101,38 @@ log "running server-setup.sh on $SERVER_IP_PUBLIC..."
 ssh "${SSH_OPTS[@]}" "ubuntu@$SERVER_IP_PUBLIC" 'bash -s' < "$SCRIPTS_DIR/server-setup.sh"
 
 # ---------- client setup ----------
-log "running client-setup.sh on $CLIENT_IP (this is the long pole — ~10-15 min)..."
+log "running client-setup.sh on $CLIENT_IP (release build; ~4 min cold, ~1 min with a warm cargo cache)..."
 ssh "${SSH_OPTS[@]}" "ubuntu@$CLIENT_IP" "bash -s $SERVER_IP_PRIVATE $REF" < "$SCRIPTS_DIR/client-setup.sh"
 
 # ---------- run benches ----------
+# A failing bench must not strand what already finished on the client, so the
+# exit code is kept and applied after the results are down.
 log "running benches on $CLIENT_IP (run id: $RUN_ID)..."
+BENCH_STATUS=0
 ssh "${SSH_OPTS[@]}" "ubuntu@$CLIENT_IP" \
-    "RUNS_PER_BENCH=$RUNS_PER_BENCH bash -s $RUN_ID $BUCKET" \
-    < "$SCRIPTS_DIR/run-benches.sh"
+    "RUNS_PER_BENCH=$RUNS_PER_BENCH bash -s $RUN_ID" \
+    < "$SCRIPTS_DIR/run-benches.sh" || BENCH_STATUS=$?
+if [[ $BENCH_STATUS -ne 0 ]]; then
+    log "benches exited with status $BENCH_STATUS; collecting what finished"
+fi
 
-# ---------- download ----------
+# ---------- collect ----------
 LOCAL_RESULTS="$INFRA_DIR/results/$RUN_ID"
 mkdir -p "$LOCAL_RESULTS"
-log "downloading results from s3://$BUCKET/$RUN_ID/ to $LOCAL_RESULTS"
-aws s3 sync "s3://$BUCKET/$RUN_ID/" "$LOCAL_RESULTS/"
-
-log "results saved locally at $LOCAL_RESULTS"
+log "copying results from the client to $LOCAL_RESULTS"
+scp "${SSH_OPTS[@]}" -r "ubuntu@$CLIENT_IP:results/$RUN_ID/." "$LOCAL_RESULTS/"
 ls -la "$LOCAL_RESULTS"
+
+log "uploading to s3://$BUCKET/$RUN_ID/"
+if ! aws s3 sync "$LOCAL_RESULTS/" "s3://$BUCKET/$RUN_ID/"; then
+    log "WARNING: S3 upload failed; results are still at $LOCAL_RESULTS"
+fi
+
+if [[ $BENCH_STATUS -ne 0 ]]; then
+    log "FATAL: benches failed (status $BENCH_STATUS). infra left running for inspection"
+    log "  client: ssh ubuntu@$CLIENT_IP"
+    exit "$BENCH_STATUS"
+fi
 
 # ---------- destroy ----------
 if $SKIP_DESTROY; then
