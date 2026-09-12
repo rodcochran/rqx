@@ -85,7 +85,7 @@ pub fn map_reqwest_error(e: reqwest::Error) -> PyErr {
         return TooManyRedirects::new_err(msg);
     }
 
-    // Fallback: keep callers' "request failed" prefix for grep-friendliness
-    // with the pre-mapping error messages.
-    RqxError::new_err(format!("request failed: {e}"))
+    // Anything else still failed before a response arrived, so it stays
+    // under RequestError and `except HTTPError` catches it.
+    RequestError::new_err(format!("request failed: {e}"))
 }

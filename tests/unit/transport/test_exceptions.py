@@ -1,8 +1,37 @@
 """Tests for the specific exception types raised on different failure modes (Issue #1)."""
 
+import contextlib
+import socket
+import threading
+
 import pytest
 
 import rqx
+
+
+@contextlib.contextmanager
+def _raw_server(payload: bytes):
+    """Answer every connection with the given bytes, then close it."""
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(5)
+    port = sock.getsockname()[1]
+
+    def serve():
+        while True:
+            try:
+                conn, _ = sock.accept()
+            except OSError:
+                return
+            with conn:
+                conn.recv(65536)
+                conn.sendall(payload)
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{port}/"
+    finally:
+        sock.close()
 
 
 def test_connect_error_dns_failure():
@@ -42,16 +71,69 @@ def test_stub_hierarchy_matches_runtime():
     import pathlib
 
     stub = pathlib.Path(rqx.__file__).with_name("_types.pyi").read_text()
-    declared = {
+    classes = {
         node.name: [base.id for base in node.bases]
         for node in ast.parse(stub).body
         if isinstance(node, ast.ClassDef)
-        and node.name.endswith(("Error", "Exception", "Exceeded", "Redirects"))
     }
-    assert declared, "no exception classes found in the stub"
-    for name, bases in declared.items():
+    # Walk down from Exception so the set is the stub's own tree, not a name pattern.
+    declared = {"Exception"}
+    while True:
+        more = {
+            name for name, bases in classes.items() if bases and bases[0] in declared
+        }
+        if more <= declared:
+            break
+        declared |= more
+    declared.discard("Exception")
+    assert "ConnectTimeout" in declared and "RqxError" in declared
+    for name in sorted(declared):
         runtime = [base.__name__ for base in getattr(rqx, name).__bases__]
-        assert runtime == bases, f"{name}: stub says {bases}, runtime is {runtime}"
+        assert runtime == classes[name], (
+            f"{name}: stub says {classes[name]}, runtime is {runtime}"
+        )
+
+
+def test_malformed_response_is_caught_by_http_error():
+    """A response hyper can't parse has no specific class yet, but it is still a request failure."""
+    with _raw_server(b"garbage\r\n\r\n") as url:
+        with pytest.raises(rqx.RequestError):
+            rqx.Client().get(url)
+
+
+SHORT_BODY = b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nhello"
+
+
+def test_stream_body_failure_is_transport_error():
+    """A body cut short mid-stream goes through the same mapping as a buffered read."""
+    with _raw_server(SHORT_BODY) as url:
+        with rqx.Client().stream("GET", url) as resp:
+            with pytest.raises(rqx.TransportError):
+                list(resp.iter_bytes())
+        with rqx.Client().stream("GET", url) as resp:
+            with pytest.raises(rqx.TransportError):
+                list(resp.iter_text())
+        with rqx.Client().stream("GET", url) as resp:
+            with pytest.raises(rqx.TransportError):
+                list(resp.iter_lines())
+
+
+@pytest.mark.asyncio
+async def test_stream_body_failure_is_transport_error_async():
+    with _raw_server(SHORT_BODY) as url:
+        async with rqx.AsyncClient() as client:
+            resp = await client.stream("GET", url)
+            with pytest.raises(rqx.TransportError):
+                async for _ in resp.aiter_bytes():
+                    pass
+            resp = await client.stream("GET", url)
+            with pytest.raises(rqx.TransportError):
+                async for _ in resp.aiter_text():
+                    pass
+            resp = await client.stream("GET", url)
+            with pytest.raises(rqx.TransportError):
+                async for _ in resp.aiter_lines():
+                    pass
 
 
 def test_request_error_does_not_catch_status_error(flaky_server):

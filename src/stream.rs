@@ -191,7 +191,7 @@ impl PyByteIterator {
 
         match chunk {
             Some(Ok(bytes)) => Ok(Some(PyBytes::new(py, &bytes).unbind())),
-            Some(Err(e)) => Err(RqxError::new_err(format!("stream error: {e}"))),
+            Some(Err(e)) => Err(map_reqwest_error(e)),
             None => Ok(None),
         }
     }
@@ -238,7 +238,7 @@ impl PyTextIterator {
 
             let chunk = match chunk {
                 Ok(c) => c,
-                Err(e) => return Err(RqxError::new_err(format!("stream error: {e}"))),
+                Err(e) => return Err(map_reqwest_error(e)),
             };
 
             match chunk {
@@ -302,7 +302,7 @@ impl PyLineIterator {
 
             let chunk = match chunk {
                 Ok(c) => c,
-                Err(e) => return Err(RqxError::new_err(format!("stream error: {e}"))),
+                Err(e) => return Err(map_reqwest_error(e)),
             };
 
             match chunk {
@@ -365,7 +365,7 @@ impl PyAsyncByteIterator {
             let mut guard = stream.lock().await;
             match guard.as_mut().next().await {
                 Some(Ok(bytes)) => Ok(Some(PyBytesChunk(bytes))),
-                Some(Err(e)) => Err(RqxError::new_err(format!("stream error: {e}"))),
+                Some(Err(e)) => Err(map_reqwest_error(e)),
                 None => Err(pyo3::exceptions::PyStopAsyncIteration::new_err(())),
             }
         })
@@ -409,7 +409,7 @@ impl PyAsyncTextIterator {
                             return Ok(text);
                         }
                     }
-                    Some(Err(e)) => return Err(RqxError::new_err(format!("stream error: {e}"))),
+                    Some(Err(e)) => return Err(map_reqwest_error(e)),
                     None => {
                         s.finished = true;
                         let text = s.decoder.decode(&[], true);
@@ -463,7 +463,7 @@ impl PyAsyncLineIterator {
                         let lines = s.lines.feed(&text);
                         s.pending.extend(lines);
                     }
-                    Some(Err(e)) => return Err(RqxError::new_err(format!("stream error: {e}"))),
+                    Some(Err(e)) => return Err(map_reqwest_error(e)),
                     None => {
                         // EOF: flush the byte decoder, feed the final text, then
                         // flush the line buffer — same two flushes as the sync path.

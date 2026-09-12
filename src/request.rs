@@ -114,7 +114,7 @@ pub fn build_client_request(
 
     let request = builder
         .build()
-        .map_err(|e| RqxError::new_err(format!("Failed to build request: {e}")))?;
+        .map_err(|e| RequestError::new_err(format!("Failed to build request: {e}")))?;
 
     return Ok(request);
 }
