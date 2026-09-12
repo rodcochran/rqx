@@ -39,30 +39,32 @@ HeaderTypes: TypeAlias = Mapping[str, str] | PyHeaders
 # Exceptions
 # ---------------------------------------------------------------------------
 #
-# Exception hierarchy:
+# Exception hierarchy (same shape as httpx):
 #
 #   RqxError
-#     ├── RequestError
-#     │     ├── TransportError
-#     │     │     ├── TimeoutException
-#     │     │     │     ├── ConnectTimeout
-#     │     │     │     ├── ReadTimeout
-#     │     │     │     ├── WriteTimeout
-#     │     │     │     └── PoolTimeout
-#     │     │     ├── NetworkError
-#     │     │     │     ├── ConnectError
-#     │     │     │     ├── ReadError
-#     │     │     │     └── WriteError
-#     │     │     └── ProxyError
-#     │     └── TooManyRedirects
-#     ├── HTTPStatusError
-#     └── MaxRetriesExceeded
+#     └── HTTPError
+#           ├── RequestError
+#           │     ├── TransportError
+#           │     │     ├── TimeoutException
+#           │     │     │     ├── ConnectTimeout
+#           │     │     │     ├── ReadTimeout
+#           │     │     │     ├── WriteTimeout
+#           │     │     │     └── PoolTimeout
+#           │     │     ├── NetworkError
+#           │     │     │     ├── ConnectError
+#           │     │     │     ├── ReadError
+#           │     │     │     └── WriteError
+#           │     │     └── ProxyError
+#           │     └── TooManyRedirects
+#           ├── HTTPStatusError
+#           └── MaxRetriesExceeded
 #
 
 class RqxError(Exception): ...
-class RequestError(RqxError): ...
-class HTTPStatusError(RqxError): ...
-class MaxRetriesExceeded(RqxError): ...
+class HTTPError(RqxError): ...
+class RequestError(HTTPError): ...
+class HTTPStatusError(HTTPError): ...
+class MaxRetriesExceeded(HTTPError): ...
 class TransportError(RequestError): ...
 class TooManyRedirects(RequestError): ...
 class TimeoutException(TransportError): ...

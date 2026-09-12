@@ -20,11 +20,64 @@ def test_connect_error_connection_refused():
 
 
 def test_connect_error_is_subclass_of_rqxerror():
-    """Hierarchy invariant: ConnectError → NetworkError → TransportError → RequestError → RqxError."""
+    """Hierarchy invariant: ConnectError → NetworkError → TransportError → RequestError → HTTPError → RqxError."""
     assert issubclass(rqx.ConnectError, rqx.NetworkError)
     assert issubclass(rqx.NetworkError, rqx.TransportError)
     assert issubclass(rqx.TransportError, rqx.RequestError)
-    assert issubclass(rqx.RequestError, rqx.RqxError)
+    assert issubclass(rqx.RequestError, rqx.HTTPError)
+    assert issubclass(rqx.HTTPError, rqx.RqxError)
+
+
+def test_status_and_request_errors_are_siblings_under_http_error():
+    """Same shape as httpx: HTTPError -> {RequestError, HTTPStatusError}, MaxRetriesExceeded beside them."""
+    assert issubclass(rqx.HTTPStatusError, rqx.HTTPError)
+    assert not issubclass(rqx.HTTPStatusError, rqx.RequestError)
+    assert issubclass(rqx.MaxRetriesExceeded, rqx.HTTPError)
+    assert not issubclass(rqx.MaxRetriesExceeded, rqx.RequestError)
+
+
+def test_stub_hierarchy_matches_runtime():
+    """Every exception class the stub declares has the parent the stub says it has."""
+    import ast
+    import pathlib
+
+    stub = pathlib.Path(rqx.__file__).with_name("_types.pyi").read_text()
+    declared = {
+        node.name: [base.id for base in node.bases]
+        for node in ast.parse(stub).body
+        if isinstance(node, ast.ClassDef)
+        and node.name.endswith(("Error", "Exception", "Exceeded", "Redirects"))
+    }
+    assert declared, "no exception classes found in the stub"
+    for name, bases in declared.items():
+        runtime = [base.__name__ for base in getattr(rqx, name).__bases__]
+        assert runtime == bases, f"{name}: stub says {bases}, runtime is {runtime}"
+
+
+def test_request_error_does_not_catch_status_error(flaky_server):
+    """except RequestError is for transport failures; a 404 from raise_for_status() passes through it."""
+    resp = rqx.Client().delete(f"{flaky_server}/no-such-route")
+    with pytest.raises(rqx.HTTPStatusError):
+        try:
+            resp.raise_for_status()
+        except rqx.RequestError:
+            pytest.fail("RequestError caught an HTTPStatusError")
+
+
+def test_http_error_catches_status_and_transport_errors(flaky_server):
+    """except HTTPError is the one clause for both."""
+    resp = rqx.Client().delete(f"{flaky_server}/no-such-route")
+    with pytest.raises(rqx.HTTPError):
+        resp.raise_for_status()
+    with pytest.raises(rqx.HTTPError):
+        rqx.Client().get("http://nonexistent.invalid/")
+
+
+def test_http_error_catches_max_retries_exceeded(flaky_server):
+    retry = rqx.Retry(total=1, status=1, status_forcelist={503}, raise_on_status=True)
+    client = rqx.Client(transport=rqx.HTTPTransport(retries=retry))
+    with pytest.raises(rqx.HTTPError):
+        client.get(f"{flaky_server}/status/503")
 
 
 def test_connect_error_caught_by_rqxerror():

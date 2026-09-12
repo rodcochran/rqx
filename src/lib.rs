@@ -80,6 +80,7 @@ fn _rqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStreamResponse>()?;
     m.add_class::<PyAsyncStreamResponse>()?;
     m.add("RqxError", m.py().get_type::<RqxError>())?;
+    m.add("HTTPError", m.py().get_type::<HTTPError>())?;
     m.add("RequestError", m.py().get_type::<RequestError>())?;
     m.add(
         "MaxRetriesExceeded",
