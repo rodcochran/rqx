@@ -10,3 +10,6 @@ Pulumi.*.yaml
 
 # Local copy of bench results — large, and mirrored to S3 by bench.sh.
 results/
+
+.known_hosts.*
+results/.current-run

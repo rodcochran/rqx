@@ -1,0 +1,83 @@
+# rqx benchmarks. `just benchmarks::<recipe>` from the repo root, or `just <recipe>` from here.
+
+here := module_directory()
+repo := here / ".."
+infra := here / "infra/scripts"
+python := repo / ".venv/bin/python"
+
+default:
+    @just --list --justfile {{here}}/justfile
+
+# ---- AWS session: setup once, then up → run → status/wait → collect → destroy ----
+
+# One-time: Pulumi deps + stack + your AWS profile, IP and SSH key
+setup profile:
+    {{infra}}/setup.sh --profile {{profile}}
+
+# Provision the client + server and prepare the server
+up:
+    {{infra}}/up.sh
+
+# Build a ref on the client and start the benches, detached (~95 min at 5 runs)
+run ref="main" runs="5":
+    {{infra}}/run.sh --ref {{ref}} --runs {{runs}}
+
+# Progress and the b1 medians so far, next to the last archive
+status run_id="":
+    {{infra}}/status.sh {{run_id}}
+
+# Block until the run finishes, printing the phase once a minute
+wait run_id="":
+    {{infra}}/wait.sh {{run_id}}
+
+# Copy the run down and upload it to S3
+collect run_id="":
+    {{infra}}/collect.sh {{run_id}}
+
+# collect, then keep the run as benchmarks/results/aws-<date>-v<version> and render the charts
+archive version run_id="":
+    {{infra}}/collect.sh {{run_id}} --archive {{version}}
+
+# Tear down; the results bucket is kept
+destroy:
+    {{infra}}/destroy.sh
+
+# The whole session for a release: up, run, wait, archive, destroy
+release version ref: up
+    {{infra}}/run.sh --ref {{ref}}
+    {{infra}}/wait.sh
+    {{infra}}/collect.sh --archive {{version}}
+    {{infra}}/destroy.sh
+
+# ---- Local: nginx in Docker on this machine ----
+
+# Start nginx (:8080) for the local benches
+local-up:
+    docker compose -f {{here}}/docker-compose.yaml up -d
+
+local-down:
+    docker compose -f {{here}}/docker-compose.yaml down
+
+# Throughput sweep, one process per (client, concurrency, run)
+b1 runs="5" out="b1_results.jsonl":
+    cd {{repo}} && bash benchmarks/run_b1.sh --runs {{runs}} --out {{out}}
+
+# Any single bench by number, e.g. `just b 2`, `just b 8 --runs 3`
+b n *args:
+    cd {{repo}} && {{python}} $(ls benchmarks/b{{n}}_*.py | head -1) {{args}}
+
+# The full local sweep with nginx restarts between benches
+sweep:
+    bash {{here}}/run_all.sh
+
+# Median/min/max per (client, c) from a b1 results file
+analyze file="b1_results.jsonl":
+    {{python}} {{here}}/analyze_b1.py {{file}}
+
+# b1 medians next to a baseline archive (default: the newest benchmarks/results/aws-*)
+compare file *args:
+    {{python}} {{here}}/compare_b1.py {{file}} {{args}}
+
+# Render throughput/memory/latency charts from a results dir into benchmarks/<version>/
+plot dir version:
+    cd {{repo}} && {{python}} benchmarks/plot_bench.py {{dir}} --out-dir benchmarks/{{version}}
