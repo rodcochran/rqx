@@ -34,10 +34,13 @@ def load(path: Path) -> dict:
     rows = defaultdict(list)
     for line in path.read_text().splitlines():
         line = line.strip()
-        if not line.startswith('{"client"'):
+        if not line.startswith("{"):
             continue
-        row = json.loads(line)
-        if "rps" in row:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if "client" in row and "rps" in row:
             rows[(row["client"], row["concurrency"])].append(row["rps"])
     return {
         key: Cell(client=key[0], concurrency=key[1], samples=v)

@@ -26,8 +26,9 @@ if [[ ! -f "$driver" ]]; then
 elif grep -q '^\[bench\] done' "$driver"; then
     phase="all benches done"
 else
-    bench="$(grep -oE '^\[bench\] (b1|b2_latency|b8_concurrency_sweep)' "$driver" | tail -1 | cut -d' ' -f2)"
-    run="$(grep -oE '^\[(run [0-9]+\]|bench\]   run [0-9]+/[0-9]+)' "$driver" | tail -1 | sed 's/.*run /run /; s/\]//')"
+    # `|| true`: no marker yet is a valid state during setup, not an error.
+    bench="$(grep -oE '^\[bench\] (b1|b2_latency|b8_concurrency_sweep)' "$driver" | tail -1 | cut -d' ' -f2 || true)"
+    run="$(grep -oE '^\[(run [0-9]+\]|bench\]   run [0-9]+/[0-9]+)' "$driver" | tail -1 | sed 's/.*run /run /; s/\]//' || true)"
     phase="${bench:-setup} ${run:-}"
 fi
 

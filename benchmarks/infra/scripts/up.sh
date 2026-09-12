@@ -5,17 +5,21 @@
 . "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 missing=()
-for tool in pulumi aws node npm ssh scp curl; do
+for tool in pulumi aws node npm ssh scp curl jq; do
     command -v "$tool" >/dev/null || missing+=("$tool")
 done
 [[ ${#missing[@]} -eq 0 ]] || die "missing on PATH: ${missing[*]}"
 [[ -f "$SSH_KEY" ]] || die "no SSH private key at $SSH_KEY (set SSH_KEY)"
 
 select_stack
-rm -f "$KNOWN_HOSTS"
+before="$(instance_ids)"
 log "pulumi up..."
 pulumi up --yes
 read_outputs
+# A replaced instance presents a new host key behind the same address; forget only those.
+while read -r instance ip; do
+    grep -qx "$instance" <<<"$before" || ssh-keygen -R "$ip" -f "$KNOWN_HOSTS" >/dev/null 2>&1 || true
+done <<<"$(eip_instances)"
 wait_for_ssh "$CLIENT_IP" "client"
 wait_for_ssh "$SERVER_IP_PUBLIC" "server"
 log "preparing the server (nginx + delay server)..."

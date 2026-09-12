@@ -6,7 +6,13 @@
 
 select_stack
 log "pulumi destroy..."
-if ! pulumi destroy --yes; then
-    log "destroy reported an error for the results bucket, which is kept on purpose; everything else is gone"
+pulumi destroy --yes || true
+# The bucket is kept on purpose (forceDestroy: false), so its BucketNotEmpty error is expected.
+# Anything else still in the stack means the destroy really failed.
+remaining="$(pulumi stack export | jq -r '.deployment.resources[]?.type' \
+    | grep -vE '^(pulumi:pulumi:Stack|pulumi:providers:aws|aws:s3/bucket:Bucket)$' || true)"
+if [[ -n "$remaining" ]]; then
+    die "destroy left resources behind, rerun it: $(echo "$remaining" | sort | uniq -c | tr -s ' \n' ' ')"
 fi
 rm -f "$KNOWN_HOSTS" "$RESULTS_ROOT/.current-run"
+log "down. only the results bucket remains"

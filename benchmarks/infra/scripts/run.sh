@@ -26,8 +26,9 @@ ssh_client "bash -s $SERVER_IP_PRIVATE $ref" < "$SCRIPTS_DIR/client-setup.sh"
 
 RUN_ID="$(date -u +%Y%m%d-%H%M%S)"
 ssh_client 'cat > run-benches.sh' < "$SCRIPTS_DIR/run-benches.sh"
-# nohup so the run survives this laptop's session; exit_code marks the end.
-ssh_client "mkdir -p results/$RUN_ID && RUNS_PER_BENCH=$runs nohup bash -c \
+# nohup so the run survives this laptop's session; exit_code marks the end. Only the nohup
+# command is backgrounded and all three of its fds are redirected, so ssh returns at once.
+ssh_client "mkdir -p results/$RUN_ID; RUNS_PER_BENCH=$runs nohup bash -c \
     'bash run-benches.sh $RUN_ID; echo \$? > results/$RUN_ID/exit_code' \
     > results/$RUN_ID/driver.log 2>&1 < /dev/null &"
 mkdir -p "$RESULTS_ROOT"

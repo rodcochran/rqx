@@ -41,6 +41,10 @@ read_outputs() {
     BUCKET="$(pulumi stack output resultsBucketName)"
 }
 
+# Instance ids in the stack, and "instance-id public-ip" per elastic IP.
+instance_ids() { pulumi stack export | jq -r '.deployment.resources[]? | select(.type=="aws:ec2/instance:Instance") | .id'; }
+eip_instances() { pulumi stack export | jq -r '.deployment.resources[]? | select(.type=="aws:ec2/eip:Eip") | "\(.outputs.instance) \(.outputs.publicIp)"'; }
+
 ssh_client() { ssh "${SSH_OPTS[@]}" "ubuntu@$CLIENT_IP" "$@"; }
 ssh_server() { ssh "${SSH_OPTS[@]}" "ubuntu@$SERVER_IP_PUBLIC" "$@"; }
 
@@ -60,7 +64,7 @@ wait_for_ssh() {
 resolve_run() {
     RUN_ID="${1:-}"
     if [[ -z "$RUN_ID" ]]; then
-        [[ -f "$RESULTS_ROOT/.current-run" ]] || die "no run id given and none recorded; pass one"
+        [[ -s "$RESULTS_ROOT/.current-run" ]] || die "no run id given and none recorded; pass one"
         RUN_ID="$(cat "$RESULTS_ROOT/.current-run")"
     fi
     LOCAL_RESULTS="$RESULTS_ROOT/$RUN_ID"
