@@ -14,7 +14,7 @@ use crate::request_headers::RequestHeaders;
 use crate::response::{PendingResponse, PyResponse};
 use crate::retry::DEFAULT_RAISE_ON_REDIRECT;
 use crate::runtime::RUNTIME;
-use crate::stream::{PyAsyncStreamResponse, PyStreamResponse};
+use crate::stream_context::{PyAsyncStreamContext, PyStreamContext};
 use crate::timeout::PyTimeout;
 use crate::transport::{AsyncHTTPTransport, HTTPTransport, Transport};
 use crate::url::{parse_base_url, resolve_url};
@@ -117,41 +117,20 @@ impl Client {
         Ok(resp)
     }
 
-    /// Build and send a request, leaving the body unread for the stream
-    /// response to consume.
+    /// Send a built request, leaving the body unread for the stream response
+    /// to consume. `elapsed` is the time to headers.
     pub async fn stream(
         &self,
-        method: &str,
-        url: &str,
-        content: Option<&[u8]>,
-        data: Option<HashMap<String, String>>,
-        json: Option<serde_json::Value>,
-        params: Option<QueryParams>,
-        headers: Option<RequestHeaders>,
-        auth: Option<(String, String)>,
-        auth_bearer: Option<String>,
+        request: RequestSpec,
         follow_redirects: Option<bool>,
-        timeout: f64,
     ) -> PyResult<PendingResponse> {
         let start_time = Instant::now();
-        let request = self.build(
-            method,
-            url,
-            content,
-            data,
-            json,
-            params,
-            headers,
-            auth,
-            auth_bearer,
-            timeout,
-        )?;
         let mut pending = self.send(request, follow_redirects).await?;
         pending.parts.elapsed = start_time.elapsed().as_secs_f64();
         Ok(pending)
     }
 
-    fn build(
+    pub(crate) fn build(
         &self,
         method: &str,
         url: &str,
@@ -759,7 +738,6 @@ impl PyClient {
     #[pyo3(signature = (method, url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn stream(
         &self,
-        py: Python<'_>,
         method: &str,
         url: &str,
         content: Option<&[u8]>,
@@ -771,26 +749,26 @@ impl PyClient {
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<PyStreamResponse> {
+    ) -> PyResult<PyStreamContext> {
         let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let pending = block_on_inner(
-            py,
-            self.inner.stream(
-                method,
-                url,
-                content,
-                data,
-                json_value,
-                params,
-                headers,
-                auth,
-                auth_bearer,
-                follow_redirects,
-                t,
-            ),
+        let request = self.inner.build(
+            method,
+            url,
+            content,
+            data,
+            json_value,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            t,
         )?;
-        Ok(PyStreamResponse::from_pending(pending))
+        Ok(PyStreamContext::new(
+            self.inner.clone(),
+            request,
+            follow_redirects,
+        ))
     }
 
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
@@ -1145,9 +1123,8 @@ impl PyAsyncClient {
     }
 
     #[pyo3(signature = (method, url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
-    fn stream<'a>(
+    fn stream(
         &self,
-        py: Python<'a>,
         method: &str,
         url: &str,
         content: Option<&[u8]>,
@@ -1159,31 +1136,26 @@ impl PyAsyncClient {
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<Bound<'a, PyAny>> {
+    ) -> PyResult<PyAsyncStreamContext> {
         let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let method = method.to_string();
-        let url = url.to_string();
-        let content = content.map(<[u8]>::to_vec);
-        let inner = self.inner.clone();
-        RUNTIME.future_into_py(py, async move {
-            let pending = inner
-                .stream(
-                    &method,
-                    &url,
-                    content.as_deref(),
-                    data,
-                    json_value,
-                    params,
-                    headers,
-                    auth,
-                    auth_bearer,
-                    follow_redirects,
-                    t,
-                )
-                .await?;
-            Ok(PyAsyncStreamResponse::from_pending(pending))
-        })
+        let request = self.inner.build(
+            method,
+            url,
+            content,
+            data,
+            json_value,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            t,
+        )?;
+        Ok(PyAsyncStreamContext::new(
+            self.inner.clone(),
+            request,
+            follow_redirects,
+        ))
     }
 
     fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -1205,7 +1177,7 @@ impl PyAsyncClient {
 // Shared sync helper: detach GIL, enter runtime, block on async future.
 // ────────────────────────────────────────────────────────────────────────
 
-fn block_on_inner<F, T>(py: Python<'_>, fut: F) -> PyResult<T>
+pub(crate) fn block_on_inner<F, T>(py: Python<'_>, fut: F) -> PyResult<T>
 where
     F: std::future::Future<Output = PyResult<T>> + Send,
     T: Send,

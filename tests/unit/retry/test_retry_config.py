@@ -225,11 +225,10 @@ async def test_retries_fire_on_stream_under_follow_redirects_async(flaky_server)
     transport = rqx.AsyncHTTPTransport(retries=retries)
     client = rqx.AsyncClient(transport=transport, follow_redirects=True)
 
-    resp = await client.stream(
+    async with client.stream(
         "GET",
         f"{flaky_server}/redirect-to-flaky?request_id=retry_stream_redirect_async",
-    )
-    async with resp:
+    ) as resp:
         assert resp.status_code == 200
         assert resp.num_retries == 2
 

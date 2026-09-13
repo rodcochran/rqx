@@ -178,7 +178,7 @@ async def test_async_per_request_overrides_client_default(flaky_server):
 @pytest.mark.asyncio
 async def test_async_stream_sends_bearer(flaky_server):
     client = rqx.AsyncClient()
-    async with await client.stream(
+    async with client.stream(
         "GET", f"{flaky_server}/echo-auth", auth_bearer=TOKEN
     ) as resp:
         chunks = []

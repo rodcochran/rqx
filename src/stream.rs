@@ -500,21 +500,8 @@ pub struct PyStreamResponse {
 
 #[pymethods]
 impl PyStreamResponse {
-    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf
-    }
-
-    fn __exit__(
-        &mut self,
-        _exc_type: Option<&Bound<'_, PyAny>>,
-        _exc_value: Option<&Bound<'_, PyAny>>,
-        _traceback: Option<&Bound<'_, PyAny>>,
-    ) {
-        self.close();
-    }
-
-    fn close(&mut self) {
-        // drops the response, closes connection
+    /// Drop the body: releases the connection, or the buffer if already read.
+    pub fn close(&mut self) {
         self.body = None;
     }
 
@@ -909,24 +896,6 @@ impl PyAsyncStreamResponse {
         value_to_py(py, value)
     }
 
-    fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        RUNTIME.future_into_py(py, async move { Ok(slf) })
-    }
-
-    fn __aexit__<'py>(
-        &self,
-        py: Python<'py>,
-        _exc_type: Option<&Bound<'_, PyAny>>,
-        _exc_value: Option<&Bound<'_, PyAny>>,
-        _traceback: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let body = Arc::clone(&self.body);
-        RUNTIME.future_into_py(py, async move {
-            *body.lock().unwrap() = None;
-            Ok(false)
-        })
-    }
-
     #[getter]
     fn status_code(&self) -> u16 {
         self.parts.status_code
@@ -1033,6 +1002,11 @@ impl PyAsyncStreamResponse {
 }
 
 impl PyAsyncStreamResponse {
+    /// Same as `aclose`, from Rust: releases the connection or drops the buffer.
+    pub fn drop_body(&self) {
+        *self.body.lock().unwrap() = None;
+    }
+
     /// Take the live response handle for streaming, restoring + erroring if the
     /// body has already been read, streamed, or closed. Shared by the aiter_*.
     fn take_live(&self) -> PyResult<reqwest::Response> {
