@@ -2,12 +2,14 @@ node_modules/
 bin/
 *.tsbuildinfo
 
-# Don't commit per-stack configs by default — they contain your SSH allowed CIDR
-# (which discloses your IP) and any other operator-specific values. Commit
-# selectively if you'd rather share a fixed stack with collaborators.
+# Per-stack configs carry your SSH allowed CIDR (your IP) and AWS profile, so
+# they stay local. Pulumi.yaml (project + shared defaults) and the .example
+# template are committed.
 Pulumi.*.yaml
 !Pulumi.yaml
 
-# Local mirror of S3 bench results — these can get large and they're
-# already preserved in S3.
+# Local copy of bench results — large, and mirrored to S3 by bench.sh.
 results/
+
+.known_hosts.*
+results/.current-run

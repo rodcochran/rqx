@@ -1,0 +1,11 @@
+# Per-operator stack config. `scripts/setup.sh` writes the real Pulumi.dev.yaml
+# for you; this file shows what ends up in it. Copy it to Pulumi.dev.yaml and
+# fill in the values if you would rather do it by hand.
+#
+# Region and instance type default from Pulumi.yaml; set them here to override.
+config:
+  aws:profile: personal
+  rqx-bench-infra:sshAllowedCidr: 203.0.113.5/32
+  rqx-bench-infra:sshPublicKey: ssh-ed25519 AAAA... you@laptop
+  # aws:region: us-west-2
+  # rqx-bench-infra:instanceType: c7i.xlarge

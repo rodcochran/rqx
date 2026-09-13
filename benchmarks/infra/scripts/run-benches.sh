@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Runs on the bench client. Executes b1, b2, b8 N times each, captures all
-# output under ~/results/<run-id>/, then syncs that prefix to S3.
+# Runs on the bench client. Executes b1, b2, b8 N times each and captures all
+# output under ~/results/<run-id>/. The orchestrator scp's that directory down.
 #
-# Usage (via the orchestrator): run-benches.sh <RUN_ID> <BUCKET_NAME>
+# Usage (via the orchestrator): run-benches.sh <RUN_ID>
 set -euo pipefail
 
-RUN_ID="${1:?usage: run-benches.sh <RUN_ID> <BUCKET_NAME>}"
-BUCKET="${2:?usage: run-benches.sh <RUN_ID> <BUCKET_NAME>}"
+RUN_ID="${1:?usage: run-benches.sh <RUN_ID>}"
 RUNS_PER_BENCH="${RUNS_PER_BENCH:-5}"
 
 RESULTS_DIR="$HOME/results/$RUN_ID"
@@ -28,6 +27,8 @@ cd "$HOME/rqx"
     echo "rqx_commit: $(cd "$HOME/rqx" && git rev-parse HEAD)"
     echo "rqx_branch: $(cd "$HOME/rqx" && git rev-parse --abbrev-ref HEAD)"
     echo "rqx_version: $(grep '^version' "$HOME/rqx/Cargo.toml" | head -1 | cut -d'"' -f2)"
+    # What the venv actually imports; should match rqx_version.
+    echo "rqx_installed: $(python -c 'import importlib.metadata as m; print(m.version("rqx"))')"
     echo "python_version: $(python --version)"
     echo "rustc_version: $(rustc --version 2>/dev/null || echo 'rustc not on PATH')"
     echo "runs_per_bench: $RUNS_PER_BENCH"
@@ -60,7 +61,4 @@ bash benchmarks/run_b1.sh --runs "$RUNS_PER_BENCH" --out "$RESULTS_DIR/b1_result
 run_one b2_latency
 run_one b8_concurrency_sweep
 
-echo "[bench] uploading results to s3://${BUCKET}/${RUN_ID}/"
-aws s3 sync "$RESULTS_DIR" "s3://${BUCKET}/${RUN_ID}/"
-
-echo "[bench] done. results at s3://${BUCKET}/${RUN_ID}/ and $RESULTS_DIR"
+echo "[bench] done. results at $RESULTS_DIR"

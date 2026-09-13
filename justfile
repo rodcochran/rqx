@@ -1,6 +1,9 @@
 default:
     @just --list
 
+# Bench recipes live in benchmarks/justfile: `just benchmarks::up`, `just benchmarks::status`, ...
+mod benchmarks
+
 # First-time setup: deps + initial build
 setup: install-python-deps build
 

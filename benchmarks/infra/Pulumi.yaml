@@ -1,3 +1,10 @@
 name: rqx-bench-infra
 runtime: nodejs
-description: Bench infrastructure for rqx — paired c7i.large EC2 instances (client + server) in a single AZ for intra-region HTTP benchmarks. Tear down with `pulumi destroy` after results are captured.
+description: Bench infrastructure for rqx — paired EC2 instances (client + server) in a single AZ for intra-region HTTP benchmarks. Tear down with `pulumi destroy` after results are captured.
+
+# Defaults shared by every stack. Per-operator values (AWS profile, SSH CIDR,
+# SSH key) live in Pulumi.<stack>.yaml, which scripts/setup.sh writes for you
+# and which is gitignored. Override any of these there.
+config:
+  aws:region: us-east-1
+  rqx-bench-infra:instanceType: c7i.large

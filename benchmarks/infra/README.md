@@ -1,97 +1,139 @@
 # rqx bench infrastructure
 
-Pulumi (TypeScript) stack + orchestrator scripts that provision paired EC2 instances, run rqx benchmarks against a real remote HTTP server, capture results to S3, and tear everything down. Designed to be one-command for a full bench session.
+Pulumi (TypeScript) stack plus orchestrator scripts. One command provisions a paired client and server on EC2, runs the release benches against a real remote HTTP server, copies the results to your laptop and to S3, and tears everything down. This is where the numbers in `benchmarks/<version>/report.md` come from.
+
+## Quick start
+
+You need: an AWS account with a CLI profile, `pulumi`, `aws`, `node`, `just`, and an SSH key pair.
+
+```bash
+just benchmarks::setup <your-aws-profile>        # once
+just benchmarks::release <version> <ref>         # up, run, wait, archive + charts, destroy; ~95 min, ~$0.30
+```
+
+`<ref>` is the git ref to bench (a tag, branch, or commit, cloned from GitHub, so it must be pushed) and `<version>` names the archive: results land in `benchmarks/results/aws-<date>-v<version>/` and charts in `benchmarks/<version>/`. For a release: `just benchmarks::release 0.2.0 v0.2.0`. To watch it from another terminal while it runs: `just benchmarks::status`.
+
+`setup` installs the Pulumi program's dependencies, creates the `dev` stack, and writes your AWS profile, your current public IP (as the SSH allow-list) and your public key into `Pulumi.dev.yaml`. That file is gitignored because it carries your IP. `Pulumi.dev.yaml.example` shows its shape if you'd rather write it by hand.
+
+The scripts use Pulumi's local file backend with a blank passphrase, so no Pulumi account is needed and your global `pulumi login` is untouched. Export `PULUMI_BACKEND_URL` and `PULUMI_CONFIG_PASSPHRASE` yourself to use a different backend.
 
 ## What it builds
 
-- 1 VPC, 1 public subnet, 1 IGW, 1 route table (single AZ for low intra-region latency).
-- 2 `c7i.large` Ubuntu 24.04 instances:
-  - **client** — load generator (rqx + httpx + aiohttp). SSH-only inbound.
-  - **server** — nginx + delay-server via `benchmarks/docker-compose.yaml`. All inter-instance TCP allowed from the client SG; locked off from the public internet.
-- EIPs on both for stable SSH endpoints.
-- S3 bucket (`rqx-bench-results-<accountId>`) with public access blocked.
-- IAM role + instance profile attached to the client so it can write to the bucket without access keys.
+- 1 VPC, 1 public subnet, 1 IGW, 1 route table. Single AZ so intra-region latency is as low as it gets.
+- 2 EC2 instances (`c7i.large` by default), Ubuntu 24.04:
+  - **client**: load generator. rqx built from source in release mode, plus httpx, aiohttp and httpr. SSH-only inbound.
+  - **server**: nginx + delay-server from `benchmarks/docker-compose.yaml`. Reachable from the client's security group only.
+- EIPs on both, so SSH endpoints stay stable across stop/start.
+- An S3 bucket, `rqx-bench-results-<accountId>`, public access blocked. Survives `pulumi destroy`, so every run is kept.
 
-Cost: roughly $0.20/hr for both instances + cents/month for S3. Trivial.
+Cost: about $0.20 per hour while the instances are up, cents per month for S3.
 
-## One-time setup
+## Configuration
 
-```bash
-cd benchmarks/infra
-npm install
-pulumi stack init dev
-pulumi config set aws:region us-east-1
-pulumi config set aws:profile personal             # if you have multiple AWS accounts
-pulumi config set sshAllowedCidr "$(curl -s https://api.ipify.org)/32"
-pulumi config set sshPublicKey "$(cat ~/.ssh/id_ed25519.pub)"
-```
+| Key | Where | Default |
+|---|---|---|
+| `aws:profile` | `Pulumi.dev.yaml`, written by `setup.sh` | none |
+| `sshAllowedCidr` | `Pulumi.dev.yaml`, written by `setup.sh` | your IP `/32` |
+| `sshPublicKey` | `Pulumi.dev.yaml`, written by `setup.sh` | `~/.ssh/id_ed25519.pub` |
+| `aws:region` | `Pulumi.yaml`, override per stack | `us-east-1` |
+| `instanceType` | `Pulumi.yaml`, override per stack | `c7i.large` |
 
-`pulumi up` is invoked by the orchestrator script, so you don't need to run it manually unless you want to.
+Override a default with `pulumi config set aws:region us-west-2` after setup, or set it in `Pulumi.dev.yaml` directly.
 
-## Run a bench session
+## The session, step by step
 
-```bash
-./scripts/bench.sh
-```
+One script per step under `scripts/`, each short-lived and safe to rerun. The `just` recipes in `benchmarks/justfile` call them; run them directly if you prefer.
 
-That single command does:
+| Step | Recipe | Script |
+|---|---|---|
+| provision + prepare the server | `just benchmarks::up` | `scripts/up.sh` |
+| build a ref, start the benches detached | `just benchmarks::run v0.2.0 [runs]` | `scripts/run.sh --ref v0.2.0 [--runs N]` |
+| progress + b1 table vs the last archive | `just benchmarks::status` | `scripts/status.sh [run-id]` |
+| block until finished | `just benchmarks::wait` | `scripts/wait.sh [run-id]` |
+| copy down + upload to S3 | `just benchmarks::collect` | `scripts/collect.sh [run-id]` |
+| collect + archive + charts | `just benchmarks::archive 0.2.0` | `scripts/collect.sh --archive 0.2.0` |
+| tear down | `just benchmarks::destroy` | `scripts/destroy.sh` |
+| all of the above for a release | `just benchmarks::release 0.2.0 v0.2.0` | |
 
-1. `pulumi up` — provisions VPC, EC2 client + server, S3 bucket, IAM role.
-2. Waits for SSH to come up on both VMs (cloud-init takes a minute or two).
-3. Runs `server-setup.sh` on the server: clones rqx, starts nginx + delay-server via docker compose, verifies nginx is responding on `:8080`.
-4. Runs `client-setup.sh` on the client: installs Rust + uv, clones rqx, builds the extension in release mode (the long pole — ~10-15 min on a cold cargo cache), installs httpx + aiohttp, and `sed`-patches the target benches to point at the server's private IP.
-5. Runs `run-benches.sh`: drives b1 via `run_b1.sh` (per-client subprocesses, JSONL output) and runs `b2_latency` + `b8_concurrency_sweep` five times each (configurable via `--runs-per-bench`), capturing all output to `~/results/<run-id>/`. Uploads the directory to `s3://rqx-bench-results-<accountId>/<run-id>/`.
-6. Mirrors `s3://...` to `./results/<run-id>/` on your laptop.
-7. Prompts: destroy infra now, or leave it running for follow-up work?
+- `run` clones the ref from GitHub on the client, so it benches pushed code, not your working tree. The benches run under `nohup` on the client and write to `~/results/<run-id>/`, so closing your laptop does not stop them. The run id is remembered locally; `status`, `wait` and `collect` default to it, or take one explicitly.
+- `status` copies the run's directory down each time and prints the state (running, finished, failed with exit code), the current bench and run, and the b1 medians so far next to the newest `benchmarks/results/aws-*` archive via `benchmarks/compare_b1.py`.
+- `collect` uploads from your laptop. An upload failure is a warning; the local copy is what matters. `--archive <version>` also copies the run to `benchmarks/results/aws-<date>-v<version>/` and renders the charts into `benchmarks/<version>/`.
+- To end a run early, `destroy`. Killing your terminal only stops you watching.
 
-## Useful flags
+Timings measured on the v0.1.5 run:
 
-```bash
-./scripts/bench.sh --skip-up           # infra already provisioned; just run benches
-./scripts/bench.sh --skip-destroy      # leave infra up after benches (manual teardown later)
-./scripts/bench.sh --runs-per-bench 3  # cut the wall time for a fast iteration
-```
+| Phase | Time |
+|---|---|
+| `up` | ~1 min plus ~1 min for SSH |
+| `run` setup | ~4 min cold, ~1 min with a warm cargo cache |
+| b1 throughput, 5 runs × 4 clients × 5 concurrencies | ~45 min |
+| b2 latency, 5 runs | ~10 min |
+| b8 concurrency sweep, 5 runs | ~37 min |
+| total | ~95 min |
 
-## Environment overrides
+## Environment
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PULUMI_STACK` | `dev` | Pulumi stack to use |
-| `AWS_PROFILE` | (active) | AWS profile (also set via `pulumi config set aws:profile`) |
-| `SSH_KEY` | `~/.ssh/id_ed25519` | Private key the orchestrator uses to SSH into both VMs |
+| `PULUMI_STACK` | `dev` | stack to use |
+| `PULUMI_BACKEND_URL` | `file://~` | Pulumi state backend |
+| `PULUMI_CONFIG_PASSPHRASE` | empty | passphrase for the local backend's secrets |
+| `AWS_PROFILE` | the stack's `aws:profile` | profile for pulumi and the S3 upload |
+| `SSH_KEY` | `~/.ssh/id_ed25519` | private key for SSH and scp |
 
-## Manual teardown
+## Recipes
 
-If you used `--skip-destroy` or want to clean up later:
+**A/B on the same instances.** Bench ref A, then ref B on the same box so hardware variance cancels:
 
 ```bash
-cd benchmarks/infra
-pulumi destroy
+just benchmarks::up
+just benchmarks::run A 3 && just benchmarks::wait && just benchmarks::collect
+just benchmarks::run B 3 && just benchmarks::wait && just benchmarks::collect
+just benchmarks::destroy
 ```
 
-The S3 bucket has `forceDestroy: false` so prior runs are preserved across teardowns. To purge it entirely, empty the bucket first (`aws s3 rm --recursive s3://rqx-bench-results-<accountId>/`) or toggle `forceDestroy: true` in `index.ts`.
+`client-setup.sh` re-fetches the ref onto the existing clone; trust `rqx_commit` in `metadata.txt`, not `rqx_branch`.
+
+**Setup failed on the client.** The setup scripts are piped over SSH from your checkout, so fix them locally and rerun `run`. No push needed, and the cargo cache from the failed attempt makes the rebuild about a minute.
+
+**A run died.** `status` says "stopped without finishing" and shows the tail of `driver.log`. `collect` still copies whatever finished.
+
+## Teardown
+
+```bash
+just benchmarks::destroy
+```
+
+Kills any run in progress with the instances. The results bucket has `forceDestroy: false`, so Pulumi reports an error for it (`BucketNotEmpty`); `destroy` says so and exits cleanly, every other resource is removed. To delete the bucket too, empty it first with `aws s3 rm --recursive s3://rqx-bench-results-<accountId>/`.
 
 ## Files
 
 ```
 infra/
-├── Pulumi.yaml          # project config
-├── index.ts             # the stack (VPC, EC2, S3, IAM)
+├── Pulumi.yaml               # project + shared defaults (region, instance type)
+├── Pulumi.dev.yaml.example   # shape of the per-operator stack config
+├── index.ts                  # the stack (VPC, EC2, S3)
 ├── package.json
 ├── tsconfig.json
-├── .gitignore
-├── README.md            # this file
+├── README.md
 └── scripts/
-    ├── bench.sh         # the orchestrator — run this
-    ├── server-setup.sh  # remote: nginx + delay-server via docker compose
-    ├── client-setup.sh  # remote: rust + uv + build rqx + patch benches
-    └── run-benches.sh   # remote: b1/b2/b8 × N runs, sync to S3
+    ├── setup.sh              # once: deps + stack + your profile/IP/key
+    ├── common.sh             # shared by the six below (paths, env defaults, ssh, run id)
+    ├── up.sh                 # pulumi up + server setup
+    ├── run.sh                # client setup + start run-benches.sh detached
+    ├── status.sh             # copy down + progress + b1 table
+    ├── wait.sh               # poll until finished
+    ├── collect.sh            # copy down + S3, optional archive + charts
+    ├── destroy.sh            # pulumi destroy
+    ├── server-setup.sh       # remote: nginx + delay-server via docker compose
+    ├── client-setup.sh       # remote: rust + uv + build rqx + patch benches
+    └── run-benches.sh        # remote: b1/b2/b8 × N runs into ~/results/<run-id>/
 ```
 
 ## Gotchas
 
-- **Source IP rotation.** `sshAllowedCidr` is a `/32` of your current public IP. If your IP rotates mid-session (different wifi, VPN flip), SSH starts failing. Fix: `pulumi config set sshAllowedCidr "$(curl -s https://api.ipify.org)/32" && pulumi up`.
-- **Bench scripts hit private IP.** The orchestrator wires bench scripts to the server's *private* IP so traffic stays inside the VPC. Hitting the public IP would route through the IGW and inflate latency.
-- **First run is slow.** Rust release build is ~10-15 min cold. Subsequent runs against the same VM are minutes faster — use `--skip-up` to skip provisioning between iterations.
-- **Don't commit `Pulumi.dev.yaml`.** It contains your IP. Bundled `.gitignore` excludes it.
-- **Bench output already covered by `.gitignore`.** The local `./results/` directory is excluded since results are also in S3.
+- **Your IP changed.** `sshAllowedCidr` is a `/32`. On a different network or VPN, SSH hangs. Fix: rerun `just benchmarks::setup <profile>`, then `just benchmarks::up`.
+- **The client's tool list is explicit.** `client-setup.sh` installs `maturin`, `httpx`, `aiohttp` and `httpr` by name. It does not use the project's dependency groups, so a change to `pyproject.toml` groups does not reach the bench client.
+- **Comparison clients are unpinned.** They're installed from PyPI at setup time and recorded in `metadata.txt`. Check those versions before crediting a delta between runs to rqx; httpr changed its threading model between 0.4 and 0.7.
+- **Same-VPC RTT is sub-millisecond**, so every number is client-CPU-bound. See the methodology section in `benchmarks/README.md`.
+- **Bench scripts hit the private IP.** Traffic stays inside the VPC. The public IP would route through the IGW and inflate latency.

@@ -60,11 +60,7 @@ docs/                    Project spec, report, benchmark output
 
 Performance regressions are easy to introduce in a Rust/Python FFI project — every GIL acquire, every allocation crossing the boundary matters. Before merging anything that touches the hot path, run the relevant bench.
 
-- `benchmarks/b1_{rqx,httpr,httpx,aiohttp}.py` + `run_b1.sh` — throughput sweep, per-client subprocess to keep tokio runtimes and the httpr threadpool from cross-contaminating. `b2_latency.py` through `b10_tls_handshake.py` cover the other dimensions (latency, pool, memory, JSON, retry overhead, network latency, concurrency sweep, payload sweep, TLS handshake).
-- `benchmarks/run_all.sh` — full sweep. Builds in release mode, starts the local delay server, restarts nginx between benches to drain TCP TIME_WAIT (otherwise tail outliers explode). Output lands under `/tmp/reqx_bench_<timestamp>/`.
-- `benchmarks/docker-compose.yaml` — the nginx + delay-server stack the benches hit.
-
-**Caveat:** all numbers in `docs/bench_results/` and `docs/report.md` are from a local nginx + a local delay-server on the same machine running the client. Loopback throughput and a real remote HTTP server stress different parts of the stack (kernel TCP, DNS, TLS resumption, real RTT). Validating these results against a real internet-facing server on dedicated hardware is still TODO — tracked in [#41](https://github.com/rodcochran/rqx/issues/41). Until that runs, treat the existing numbers as relative comparisons against httpx/aiohttp on identical infrastructure, not as absolute production claims.
+[benchmarks/README.md](benchmarks/README.md) describes every bench (the question it answers, how to run it, how to read its output), the local setup, the full sweep, and the methodology. Release numbers come from the AWS run in [benchmarks/infra/README.md](benchmarks/infra/README.md), which needs an AWS account and about 95 minutes; local runs are for relative comparisons while iterating.
 
 If you change something performance-sensitive, please include a fresh local measurement in the PR description.
 
