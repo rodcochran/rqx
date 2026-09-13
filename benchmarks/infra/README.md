@@ -8,8 +8,10 @@ You need: an AWS account with a CLI profile, `pulumi`, `aws`, `node`, `just`, an
 
 ```bash
 just benchmarks::setup <your-aws-profile>        # once
-just benchmarks::release 0.2.0 v0.2.0            # up, run, wait, archive + charts, destroy; ~95 min, ~$0.30
+just benchmarks::release <version> <ref>         # up, run, wait, archive + charts, destroy; ~95 min, ~$0.30
 ```
+
+`<ref>` is the git ref to bench (a tag, branch, or commit, cloned from GitHub, so it must be pushed) and `<version>` names the archive: results land in `benchmarks/results/aws-<date>-v<version>/` and charts in `benchmarks/<version>/`. For a release: `just benchmarks::release 0.2.0 v0.2.0`. To watch it from another terminal while it runs: `just benchmarks::status`.
 
 `setup` installs the Pulumi program's dependencies, creates the `dev` stack, and writes your AWS profile, your current public IP (as the SSH allow-list) and your public key into `Pulumi.dev.yaml`. That file is gitignored because it carries your IP. `Pulumi.dev.yaml.example` shows its shape if you'd rather write it by hand.
 
