@@ -1,6 +1,6 @@
 """Generate static JSON payloads for the large-payload bench.
 
-Writes response-100kb.json (~100 KB) and response-1mb.json (~1 MB) into the
+Writes response-10kb.json (~10 KB), response-100kb.json (~100 KB) and response-1mb.json (~1 MB) into the
 current directory. The payloads are lists of moderately nested records —
 realistic API-response shape, not a single giant string. Parsers have to walk
 real structure.

@@ -53,6 +53,7 @@ release version ref: up
 
 # Start nginx (:8080) for the local benches
 local-up:
+    test -f {{here}}/nginx/response-100kb.json || {{python}} {{here}}/nginx/generate_payloads.py
     docker compose -f {{here}}/docker-compose.yaml up -d
 
 local-down:

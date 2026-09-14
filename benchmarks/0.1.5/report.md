@@ -12,7 +12,7 @@ Run: `20260911-231200` · raw logs in [`../results/aws-20260911-v015/`](../resul
 
 ![Throughput at concurrency=100](throughput.png)
 
-At concurrency=100, rqx serves 19,743 RPS — 26% above httpr, 64% above aiohttp, and ~43× above httpx (httpx's number is anomalously low; see Limitations).
+At concurrency=100, rqx serves 19,743 RPS — 26% above httpr, 64% above aiohttp, and ~43× above httpx (httpx's per-request cost here is its pool bookkeeping; see Limitations).
 
 Median RPS across 5 runs at each concurrency. Spread is min–max as a percentage of the median.
 
@@ -94,7 +94,7 @@ Zero aborts or crashes across 95 b1 cells (aiohttp c=1000 is skipped by design),
 ## Limitations
 
 - **Same kernel and toolchain as 0.1.4, but a different instance pair.** Absolute numbers still move a few percent between runs on identical software; read rqx's delta next to the unchanged clients' deltas, as in the Versus table.
-- **httpx is not tuned for this workload.** One shared client and N workers exceeds its default pool (100 connections, 20 keep-alive) from c=100 up, so its c=500 and c=1000 cells measure its pool queue, not the network. Its c=10 and c=100 numbers are representative; the rest overstate the gap.
+- **httpx's numbers are its connection pool's bookkeeping, not the network.** *Corrected 2026-09-14 ([#188](https://github.com/rodcochran/rqx/issues/188)): an earlier version of this report blamed httpx's default pool limits, but the bench sets `max_connections` and `max_keepalive_connections` to 1,500.* httpcore 1.0 re-scans every pooled connection each time a request is queued or finishes, and polls each idle socket for readability while it does, so per-request CPU grows with the number of open connections. A local cProfile run at c=100 spent about 90% of its CPU inside that scan, with 18 million `is_idle()` calls in five seconds. That is why httpx falls further behind as concurrency rises. It is httpx's real behavior in this configuration, one client sending hundreds of concurrent requests to one host, not a harness artifact.
 - **aiohttp at c=1000 is skipped** because its connector deadlocks under the harness at that concurrency; that is a harness interaction, not a verdict on aiohttp.
 - **Same-VPC RTT is sub-millisecond,** so every number here is client-CPU-bound. Over a real network the throughput gaps shrink and the latency gaps are dominated by the wire.
 - **The S3 upload step failed** (no AWS CLI on the client, https://github.com/rodcochran/rqx/issues/113); results were recovered by `scp`. The first attempt of this session also failed in client setup because the `dev` extra it installed was replaced by dependency groups in 0.1.5; `client-setup.sh` now installs maturin explicitly.

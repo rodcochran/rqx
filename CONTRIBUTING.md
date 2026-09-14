@@ -4,7 +4,7 @@
 
 This project started as an experiment, with the goal of learning. It evolved quickly into a genuine contender for high-concurrency HTTP handling in Python.
 
-The goal is to be maintain feature parity with [httpx](https://github.com/encode/httpx), but with the performance of async Rust. This basically creates 2 natural places for improvements: feature parity and performance, with correctness as table stakes.
+The goal is an API familiar to [httpx](https://github.com/encode/httpx) users, with the performance of async Rust. It is deliberately not a drop-in replacement; the v1.0.0 milestone says what v1 means. That leaves two natural places for improvements, httpx parity and performance, with correctness as table stakes.
 
 There are several tags we use to make that simple: `httpx-feature-parity` and then your run-of-the-mill tags like `bug`, `enhancement`, etc.
 
@@ -29,10 +29,10 @@ This project started out as learning project. I used AI to help me learn some of
 
 ### Prerequisites
 
-Rust is the only requirement for local dev, however would strongly encourage the use of `just`, `uv`, and `rustup` with `clippy`.
+You need Rust and Python. Every command in the docs also assumes `uv` and `just`.
 
 - [Rust toolchain](https://rustup.rs/) (with `clippy`)
-- Python 3.9+
+- Python 3.8+
 - [uv](https://github.com/astral-sh/uv) — venv + dependency management
 - [just](https://github.com/casey/just) — task runner (every doc references it)
 
@@ -43,7 +43,7 @@ just setup    # uv venv + dev deps + maturin develop
 just test     # full test suite (parallel via xdist)
 ```
 
-`just setup` chains `uv venv`, `uv pip install -e ".[dev]"`, `uv lock`, and `maturin develop`. Skip `just` and you can run those steps directly.
+`just setup` chains `uv venv`, `uv sync` (which installs the `dev` dependency group), `uv lock`, and `maturin develop`. Skip `just` and you can run those steps directly.
 
 ## Project layout
 
@@ -51,9 +51,12 @@ just test     # full test suite (parallel via xdist)
 src/                     Rust core — pyo3 classes, transport, retry, etc.
 python/rqx/              Python wrapper — re-exports + module-level functions
 python/rqx/_types.pyi    Type stubs for the compiled extension
-tests/                   pytest suite (sync + async + MTLS + streaming)
-benchmarks/              Performance scripts
-docs/                    Project spec, report, benchmark output
+tests/unit/              pytest suite against local fixture servers
+tests/integration/       against httpbin, started via testcontainers (needs Docker)
+tests/property/          hypothesis property tests
+tests/equivalence/       the same tests run against httpx and rqx
+benchmarks/              bench scripts; per-release reports in benchmarks/<version>/, AWS infra in benchmarks/infra/
+docs/                    project spec, design report, release notes
 ```
 
 ## Benchmarks
@@ -68,7 +71,7 @@ If you change something performance-sensitive, please include a fresh local meas
 
 - Branch from `main`, one PR per logical change.
 - PR description: short Summary, `Closes #N`, then a Testing section in prose describing what was verified. No checklist-style Test plan — say what was actually run and what it proved.
-- Run `just test` locally before opening the PR. CI runs the same suite on Linux.
+- Run `just check` (lint, type check, tests) locally before opening the PR. CI runs the same checks on Linux.
 
 ## Reporting bugs
 
