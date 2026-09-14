@@ -15,8 +15,14 @@ if [ ! -d rqx ]; then
 fi
 
 cd "$HOME/rqx/benchmarks"
-# Only /json is committed; compose also mounts the generated 10 KB and 100 KB bodies.
-[ -f nginx/response-100kb.json ] || python3 nginx/generate_payloads.py
+# Only /json is committed; compose also mounts the generated 10 KB and 100 KB bodies as files.
+# Clear empty directories an earlier `up` left at those paths, then generate unless both exist.
+for size in 10kb 100kb; do
+    if [ -d "nginx/response-$size.json" ]; then rmdir "nginx/response-$size.json"; fi
+done
+if [ ! -f nginx/response-10kb.json ] || [ ! -f nginx/response-100kb.json ]; then
+    python3 nginx/generate_payloads.py
+fi
 # sudo because the ubuntu user's group membership for `docker` isn't always
 # active in the SSH session that runs this script — cloud-init adds ubuntu
 # to the docker group, but the membership only applies to sessions started

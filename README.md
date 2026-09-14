@@ -18,6 +18,8 @@ Read the report for the architectural trade-offs (sync vs async paths, retry pla
 ## Quick look
 
 ```python
+import asyncio
+
 import rqx
 
 # Sync
@@ -36,6 +38,8 @@ async def main():
             async for chunk in stream.aiter_bytes():
                 ...
 
+asyncio.run(main())
+
 # Module-level convenience (one-off requests)
 resp = rqx.get("https://httpbin.org/get")
 
@@ -47,7 +51,7 @@ with rqx.Client(transport=transport) as client:
     resp = client.get("https://example.com/api")
 ```
 
-The API follows [httpx](https://github.com/encode/httpx)'s shape: sync and async clients, transports, streaming, mTLS, base URLs, granular timeouts, and an exception hierarchy with httpx's names. Retries are built in, which httpx doesn't offer. It is not a drop-in replacement: some types and behaviors differ, and the [migration and divergences guide](https://github.com/rodcochran/rqx/issues/116) is planned before v1. See `python/rqx/_types.pyi` for the current surface.
+The API follows [httpx](https://github.com/encode/httpx)'s shape: sync and async clients, transports, streaming, mTLS, base URLs, granular timeouts, and an exception hierarchy with httpx's names. Retries are built in and configurable per failure kind: connect errors, read errors, and status codes, with backoff and `Retry-After`. httpx's transport retries only failed connection attempts. It is not a drop-in replacement: some types and behaviors differ, and the [migration and divergences guide](https://github.com/rodcochran/rqx/issues/116) is planned before v1. See `python/rqx/_types.pyi` for the current surface.
 
 ## Installation
 

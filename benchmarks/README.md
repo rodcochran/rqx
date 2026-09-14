@@ -32,7 +32,7 @@ python benchmarks/nginx/generate_payloads.py     # once: the 10 KB, 100 KB and 1
 docker compose -f benchmarks/docker-compose.yaml up -d    # nginx on :8080
 ```
 
-`just benchmarks::local-up` does the last two steps. The compose file serves three static JSON bodies from `benchmarks/nginx/`: `/json` (1.4 KB, committed), `/json/10kb` and `/json/100kb` (generated). Generate before the first `up`: if the mounted files don't exist, Docker creates empty directories in their place and the generator can no longer write them.
+`just benchmarks::local-up` does the last two steps. The compose file serves three static JSON bodies from `benchmarks/nginx/`: `/json` (1.4 KB, committed), `/json/10kb` and `/json/100kb` (generated). Generate before the first `up`: if the mounted files don't exist, Docker creates empty directories in their place and the generator can no longer write them. `local-up` checks for both files and clears any such empty directories first.
 
 Two benches need more than the compose stack:
 

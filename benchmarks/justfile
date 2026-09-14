@@ -53,7 +53,10 @@ release version ref: up
 
 # Start nginx (:8080) for the local benches
 local-up:
-    test -f {{here}}/nginx/response-100kb.json || {{python}} {{here}}/nginx/generate_payloads.py
+    # Compose mounts both generated bodies as files. An earlier `up` without them leaves empty
+    # directories at those paths; clear those, then generate unless both files are present.
+    for size in 10kb 100kb; do [ -d {{here}}/nginx/response-$size.json ] && rmdir {{here}}/nginx/response-$size.json; true; done
+    [ -f {{here}}/nginx/response-10kb.json ] && [ -f {{here}}/nginx/response-100kb.json ] || {{python}} {{here}}/nginx/generate_payloads.py
     docker compose -f {{here}}/docker-compose.yaml up -d
 
 local-down:
