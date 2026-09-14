@@ -28,10 +28,11 @@ All commands below run from the repository root.
 uv sync                                          # dev tooling
 uv pip install -e ".[benchmarks]" httpx aiohttp httpr
 maturin develop --release                        # always release mode for numbers
+python benchmarks/nginx/generate_payloads.py     # once: the 10 KB, 100 KB and 1 MB bodies
 docker compose -f benchmarks/docker-compose.yaml up -d    # nginx on :8080
 ```
 
-The compose file serves three static JSON bodies from `benchmarks/nginx/`: `/json` (1.4 KB), `/json/10kb` and `/json/100kb`. Run `python generate_payloads.py` once inside `benchmarks/nginx/` to create the 100 KB and 1 MB files.
+`just benchmarks::local-up` does the last two steps. The compose file serves three static JSON bodies from `benchmarks/nginx/`: `/json` (1.4 KB, committed), `/json/10kb` and `/json/100kb` (generated). Generate before the first `up`: if the mounted files don't exist, Docker creates empty directories in their place and the generator can no longer write them. `local-up` checks for both files and clears any such empty directories first.
 
 Two benches need more than the compose stack:
 
@@ -55,9 +56,9 @@ Two benches need more than the compose stack:
 
 `b1` runs each (client, concurrency, run) in its own Python process: fresh event loop, fresh imports, fresh tokio runtime, no executor state left over from another client. That is why it has a driver script instead of a single file. It also skips aiohttp at c=1000, where its connector deadlocks under this harness, and tolerates a client crashing mid-sweep by recording a `skipped` row rather than losing the run.
 
-Every bench warms up before measuring. b1, b7, b8, b9 and b10 are time-bounded (a few seconds of warmup, then a fixed measurement window), so sample size scales with throughput. b2 through b6 use fixed request counts.
+b1, b7, b8, b9 and b10 are time-bounded, a few seconds of warmup then a fixed measurement window, so sample size scales with throughput. b2 through b6 use fixed request counts. b1 and b8 warm up on the client they measure, so the measured window starts with a warm pool.
 
-`stream_ab/` is a separate harness for one question, whether removing a copy on the streaming path was measurable. Its README explains its paired-comparison method.
+`stream_ab/` is a separate harness for streaming changes: it builds two commits from source in a Linux container and compares them head to head (`just bench-stream`). It was written for the copy removed in #139 and caught the async chunking regression in #107. Its README explains the paired-comparison method.
 
 ## The full local sweep
 
@@ -88,7 +89,7 @@ Read the spread before the median. `analyze_b1.py` prints min and max next to th
 
 **Comparators are unpinned.** They're installed from PyPI at setup time. httpr changed how its async client dispatches work between 0.4 and 0.7, and its numbers moved accordingly; the version in `metadata.txt` is the only way to tell that apart from an rqx change.
 
-**Same-machine A/B.** For a regression check, bench ref A then ref B on the same instances (`--skip-up` on the second run). Three b1 runs is enough to see a real regression; five is the release setting.
+**Same-machine A/B.** For a regression check, bench ref A then ref B on the same instances: `just benchmarks::up` once, then `just benchmarks::run A 3` and `just benchmarks::run B 3`. Three b1 runs is enough to see a real regression; five is the release setting.
 
 **What the AWS numbers measure.** Same-VPC round trip is under a millisecond, so even the throughput and latency benches are client-CPU-bound. That's the point: it makes response-surface and dispatch changes visible. It also means throughput gaps shrink over a real network, where the wire dominates.
 
@@ -96,7 +97,7 @@ Read the spread before the median. `analyze_b1.py` prints min and max next to th
 
 - **Loopback on macOS.** Docker Desktop's virtual network is the bottleneck above about 10 KB payloads and it crashes under sustained 1 MB traffic. Use the host nginx config for those.
 - **`TIME_WAIT` accumulation.** See the sweep section. Symptom: a p999 or max in the seconds while p99 is in the milliseconds.
-- **OS scheduling.** On a laptop, anything else running (browser, indexer, another bench) moves single-digit percent. Even on a dedicated AWS instance the five b1 runs of the v0.1.5 session spread like this (max minus min over the median):
+- **OS scheduling.** On a laptop, anything else running (browser, indexer, another bench) moves single-digit percent. Even on an AWS instance running nothing else, the five b1 runs of the v0.1.5 session spread like this (max minus min over the median):
 
   | c | rqx | httpr | httpx | aiohttp |
   |---|---|---|---|---|
@@ -104,15 +105,15 @@ Read the spread before the median. `analyze_b1.py` prints min and max next to th
   | 100 | 1.5% | 3.4% | 4.6% | 3.3% |
   | 500 | 6.3% | 3.5% | 27.3% | 1.4% |
 
-  A delta inside that band is noise. The httpx c=500 figure is its pool queue, not the network, see below.
-- **httpx's default pool.** One shared client with N workers exceeds its default pool (100 connections, 20 keep-alive) from c=100 up. Its c=500 and c=1000 cells measure its pool queue, not the network. b1 and b2 raise every client's pool limit to 1 500 for this reason; the sweep benches note where a client is at its default.
+  A delta inside that band is noise. httpx's wide spread at c=500 comes from its pool bookkeeping, see below.
+- **httpx's pool bookkeeping.** b1, b2 and b8 set the rqx, httpx and aiohttp pool limits to 1,500, so none of them queues for a connection. httpr exposes no pool setting, so it runs on its library default, and those benches size its thread pool to 1,500 instead, since its async client runs each request on an executor thread. httpx still falls behind as concurrency rises because httpcore 1.0 re-scans every pooled connection, polling each idle socket, whenever a request is queued or finishes; at c=100 that scan is most of its CPU. The measurement is real, but it reflects httpx serving hundreds of concurrent requests from one client, not httpx in general. The shared limit was checked locally: httpx's default limits (100 connections, 20 keep-alive) were no faster at c=10 or c=100 and slower at c=500, and a limit sized to the concurrency was about 40% faster at c=500 but still more than 20× behind rqx, so the 1,500 setting stays for the clients that have one. Details in the [0.2.0 report](0.2.0/report.md#limitations).
 - **aiohttp at c=1000** is skipped in b1 because its connector deadlocks under this harness. That's a harness interaction, not a verdict on aiohttp.
 - **Ambient proxies.** Both httpx and rqx honor `HTTP_PROXY` and friends. Unset them before benching.
 
 ## Limitations
 
 - A local run tells you whether a change made rqx faster or slower relative to the other clients on your machine. It does not tell you what any of them do in production.
-- The AWS run adds a real network hop and dedicated hardware, but a single AZ is still the best case: no DNS, no TLS to a distant peer, no packet loss. Gaps measured here are upper bounds on what a user sees.
-- Streaming memory is not benchmarked here; it's pinned by a test instead. hyper reads the socket only when the body is polled, so a slow consumer stalls the server through TCP flow control, and `chunk_size` bounds what the iterator holds. `tests/unit/streaming/test_memory_bound.py` streams 128 MB through a deliberately slow consumer and asserts peak RSS growth stays under 64 MB (1 MB pieces cost about 30 MB of buffers and Python bytes in flight; unbounded reading would show as the whole body).
+- The AWS run adds a real network hop and separate client and server machines, but a single AZ is still the best case: no DNS, no TLS to a distant peer, no packet loss. Gaps measured here are upper bounds on what a user sees.
+- Streaming memory is not benchmarked here; it's pinned by a test instead. hyper reads the socket only when the body is polled, so a slow consumer stalls the server through TCP flow control. The iterator holds at most one network chunk, plus `chunk_size` bytes when one is passed. `tests/unit/streaming/test_memory_bound.py` streams 128 MB through a deliberately slow consumer and asserts peak RSS growth stays under 64 MB (1 MB pieces cost about 30 MB of buffers and Python bytes in flight; unbounded reading would show as the whole body).
 - Every bench here uses plaintext HTTP/1.1 with keep-alive except b10. TLS session cost and HTTP/2 multiplexing are not measured in the release numbers.
 - Absolute numbers move a few percent between instance pairs on identical software. Compare within a run, and compare releases by their deltas against the controls, as the release reports do.

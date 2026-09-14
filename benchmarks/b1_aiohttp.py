@@ -2,34 +2,33 @@ import argparse
 import asyncio
 import json
 import resource
+import sys
 import time
 
 import aiohttp
 
 TARGET_URL = "http://localhost:8080/json"
 MAX_CONNECTIONS = 1500
+# ru_maxrss is bytes on macOS and KiB on Linux.
+MAXRSS_UNIT = 1 if sys.platform == "darwin" else 1024
 
 
-async def bench(concurrency, duration):
-    connector = aiohttp.TCPConnector(
-        limit=MAX_CONNECTIONS,
-        limit_per_host=MAX_CONNECTIONS,
-    )
-    async with aiohttp.ClientSession(connector=connector) as session:
-        count = 0
+async def run(session, concurrency, duration):
+    """Requests completed by `concurrency` workers sharing `session` over `duration` seconds."""
+    count = 0
 
-        async def worker():
-            nonlocal count
-            deadline = time.monotonic() + duration
-            while time.monotonic() < deadline:
-                try:
-                    async with session.get(TARGET_URL) as resp:
-                        await resp.read()
-                    count += 1
-                except Exception:
-                    pass
+    async def worker():
+        nonlocal count
+        deadline = time.monotonic() + duration
+        while time.monotonic() < deadline:
+            try:
+                async with session.get(TARGET_URL) as resp:
+                    await resp.read()
+                count += 1
+            except Exception:
+                pass
 
-        await asyncio.gather(*[worker() for _ in range(concurrency)])
+    await asyncio.gather(*[worker() for _ in range(concurrency)])
     return count
 
 
@@ -41,10 +40,18 @@ async def main():
     p.add_argument("--run", type=int, default=1)
     args = p.parse_args()
 
-    await bench(args.c, args.warmup)
-    count = await bench(args.c, args.measure)
+    connector = aiohttp.TCPConnector(
+        limit=MAX_CONNECTIONS,
+        limit_per_host=MAX_CONNECTIONS,
+    )
+    async with aiohttp.ClientSession(connector=connector) as client:
+        # Warm up and measure on the same client, so the measured window starts with a warm pool.
+        await run(client, args.c, args.warmup)
+        count = await run(client, args.c, args.measure)
 
-    peak_rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    peak_rss_mb = (
+        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * MAXRSS_UNIT / (1 << 20)
+    )
     print(
         json.dumps(
             {
@@ -52,7 +59,7 @@ async def main():
                 "concurrency": args.c,
                 "run": args.run,
                 "rps": count / args.measure,
-                "peak_rss_mb": peak_rss_kb / 1024,
+                "peak_rss_mb": peak_rss_mb,
                 "measure_seconds": args.measure,
                 "count": count,
             }

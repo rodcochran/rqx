@@ -1,8 +1,8 @@
 # rqx
 
-A Rust-backed Python HTTP client with an httpx-compatible API.
+A Rust-backed Python HTTP client with an httpx-familiar API.
 
-rqx replaces httpx's pure-Python internals with a Rust core built on [`reqwest`](https://github.com/seanmonstar/reqwest) and [`tokio`](https://github.com/tokio-rs/tokio). The goal: keep the API your code already targets, but eliminate the structural performance ceilings of pure-Python HTTP under concurrent load.
+rqx replaces httpx's pure-Python internals with a Rust core built on [`reqwest`](https://github.com/seanmonstar/reqwest) and [`tokio`](https://github.com/tokio-rs/tokio). The goal: an API that httpx users already know, without the performance ceilings of pure-Python HTTP under concurrent load.
 
 ## Origin
 
@@ -18,6 +18,8 @@ Read the report for the architectural trade-offs (sync vs async paths, retry pla
 ## Quick look
 
 ```python
+import asyncio
+
 import rqx
 
 # Sync
@@ -26,9 +28,17 @@ with rqx.Client() as client:
     print(resp.json())
 
 # Async
-async with rqx.AsyncClient() as client:
-    resp = await client.get("https://httpbin.org/get")
-    print(resp.json())
+async def main():
+    async with rqx.AsyncClient() as client:
+        resp = await client.get("https://httpbin.org/get")
+        print(resp.json())
+
+        # Streaming: the request is sent on entering the block, the connection released on leaving it
+        async with client.stream("GET", "https://httpbin.org/bytes/1024") as stream:
+            async for chunk in stream.aiter_bytes():
+                ...
+
+asyncio.run(main())
 
 # Module-level convenience (one-off requests)
 resp = rqx.get("https://httpbin.org/get")
@@ -41,7 +51,7 @@ with rqx.Client(transport=transport) as client:
     resp = client.get("https://example.com/api")
 ```
 
-The API targets feature parity with [httpx](https://github.com/encode/httpx) — clients, transports, retries, streaming, mTLS, base URLs, granular timeouts, and the full exception hierarchy. See `python/rqx/_types.pyi` for the current surface.
+The API follows [httpx](https://github.com/encode/httpx)'s shape: sync and async clients, transports, streaming, mTLS, base URLs, granular timeouts, and an exception hierarchy with httpx's names. Retries are built in and configurable per failure kind: connect errors, read errors, and status codes, with backoff and `Retry-After`. httpx's transport retries only failed connection attempts. It is not a drop-in replacement: some types and behaviors differ, and the [migration and divergences guide](https://github.com/rodcochran/rqx/issues/116) is planned before v1. See `python/rqx/_types.pyi` for the current surface.
 
 ## Installation
 
@@ -60,7 +70,7 @@ just test         # full test suite
 
 ## Benchmarks
 
-Measured on a paired AWS c7i.large client/server (2 vCPU each, dedicated CPU) in `us-east-1`, hitting nginx over an intra-VPC private IP. Each bar is the median of 5 runs; each (client, concurrency, run) executes in its own Python subprocess to keep clients from contaminating each other's measurements.
+Measured on a paired AWS c7i.large client/server (2 vCPU each, non-burstable) in `us-east-1`, hitting nginx over an intra-VPC private IP. Each bar is the median of 5 runs; each (client, concurrency, run) executes in its own Python subprocess to keep clients from contaminating each other's measurements.
 
 Charts below are from the 0.2.0 run (2026-09-12). Full methodology, per-concurrency tables, and limitations: [benchmarks/0.2.0/report.md](benchmarks/0.2.0/report.md). Earlier runs are kept at [benchmarks/0.1.5/report.md](benchmarks/0.1.5/report.md), [benchmarks/0.1.4/report.md](benchmarks/0.1.4/report.md), [benchmarks/0.1.3/report.md](benchmarks/0.1.3/report.md), and [docs/launch_report.md](docs/launch_report.md) for comparison.
 
@@ -78,7 +88,7 @@ httpx is the modern successor to requests, aiohttp is the de-facto async HTTP li
 
 ## Contributing
 
-This started as a learning project and stayed one. Contributions are welcome — especially around the httpx-parity surface (URL/QueryParams classes, MockTransport, event hooks, full streaming surface). See open issues for the working set, particularly anything labeled `good first issue`, and [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions, and how to run the benchmarks.
+This started as a learning project and stayed one. Contributions are welcome, especially additions from httpx's surface that don't change existing behavior, such as `Limits`, `mounts=`, and multipart `files=`. See open issues for the working set, particularly anything labeled `good first issue`, and [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions, and how to run the benchmarks.
 
 ## Acknowledgements
 
