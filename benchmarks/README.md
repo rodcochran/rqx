@@ -113,5 +113,6 @@ Read the spread before the median. `analyze_b1.py` prints min and max next to th
 
 - A local run tells you whether a change made rqx faster or slower relative to the other clients on your machine. It does not tell you what any of them do in production.
 - The AWS run adds a real network hop and dedicated hardware, but a single AZ is still the best case: no DNS, no TLS to a distant peer, no packet loss. Gaps measured here are upper bounds on what a user sees.
+- Streaming memory is not benchmarked here; it's pinned by a test instead. hyper reads the socket only when the body is polled, so a slow consumer stalls the server through TCP flow control, and `chunk_size` bounds what the iterator holds. `tests/unit/streaming/test_memory_bound.py` streams 128 MB through a deliberately slow consumer and asserts peak RSS growth stays under 32 MB.
 - Every bench here uses plaintext HTTP/1.1 with keep-alive except b10. TLS session cost and HTTP/2 multiplexing are not measured in the release numbers.
 - Absolute numbers move a few percent between instance pairs on identical software. Compare within a run, and compare releases by their deltas against the controls, as the release reports do.

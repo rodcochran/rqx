@@ -330,6 +330,18 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             return
 
         # /streamable — final destination after /redirect-once. Returns a known body.
+        # /large/<mb> — a generated body of <mb> MiB, written in 1 MiB pieces so the
+        # server never holds it; for the memory-bound tests.
+        if path.startswith("/large/"):
+            self._send_large(int(path.removeprefix("/large/")))
+            return
+
+        # /bytes/<n> — exactly n bytes of a repeating 0..255 pattern; for the
+        # chunking tests, where the caller checks sizes and reassembly.
+        if path.startswith("/bytes/"):
+            self._send_bytes(int(path.removeprefix("/bytes/")))
+            return
+
         if path == "/streamable":
             body = b'{"streamed": true}'
             self.send_response(200)
@@ -564,6 +576,26 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_large(self, mib):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(mib << 20))
+        self.end_headers()
+        piece = b"x" * (1 << 20)
+        try:
+            for _ in range(mib):
+                self.wfile.write(piece)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _send_bytes(self, n):
+        body = bytes(range(256)) * (n // 256) + bytes(range(n % 256))
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(n))
         self.end_headers()
         self.wfile.write(body)
 

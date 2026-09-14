@@ -68,6 +68,7 @@ markers = [
     "integration: starts an httpbin container via testcontainers (needs Docker)",
     "equivalence: same body run against httpx and rqx",
     "rqx_diverges(issue, reason): known divergence from httpx; strict xfail for the rqx case",
+    "slow: takes seconds; memory-bound streaming checks",
 ]
 
 [tool.ty.rules]
