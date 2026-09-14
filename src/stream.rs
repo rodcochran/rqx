@@ -1,5 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use bytes::{Bytes, BytesMut};
@@ -11,6 +12,7 @@ use pyo3::sync::PyOnceLock;
 use pyo3::types::PyBytes;
 use pyo3::{Bound, IntoPyObject, PyErr};
 use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::Notify;
 
 use super::client::block_on_inner;
 use super::exceptions::*;
@@ -27,26 +29,45 @@ use super::runtime::RUNTIME;
 type ChunkStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
 
 /// The body while an iterator reads it. The response holds one handle and the
-/// iterator another, so closing the response ends the iterator too.
+/// iterator another, so closing the response ends the iterator too, including
+/// a read that is waiting on the network.
 #[derive(Clone)]
-pub struct LiveStream(Arc<TokioMutex<Option<ChunkStream>>>);
+pub struct LiveStream(Arc<LiveStreamInner>);
+
+struct LiveStreamInner {
+    stream: TokioMutex<Option<ChunkStream>>,
+    closed: AtomicBool,
+    // Wakes a read that is waiting on the network when the response is closed.
+    close_signal: Notify,
+}
 
 impl LiveStream {
     fn new(response: reqwest::Response) -> Self {
-        Self(Arc::new(TokioMutex::new(Some(Box::pin(
-            response.bytes_stream(),
-        )))))
+        Self(Arc::new(LiveStreamInner {
+            stream: TokioMutex::new(Some(Box::pin(response.bytes_stream()))),
+            closed: AtomicBool::new(false),
+            close_signal: Notify::new(),
+        }))
     }
 
     /// The next chunk, `None` at the end. A closed response or a failed read
     /// drops the stream, so the connection is released without waiting for
     /// the iterator to be dropped.
     async fn next_chunk(&self) -> PyResult<Option<Bytes>> {
-        let mut slot = self.0.lock().await;
+        let mut slot = self.0.stream.lock().await;
+        self.check_open()?;
         let Some(stream) = slot.as_mut() else {
             return Err(RqxError::new_err("response closed"));
         };
-        match stream.next().await {
+        let next = tokio::select! {
+            biased;
+            _ = self.0.close_signal.notified() => {
+                *slot = None;
+                return Err(RqxError::new_err("response closed"));
+            }
+            next = stream.next() => next,
+        };
+        match next {
             Some(Ok(bytes)) => Ok(Some(bytes)),
             Some(Err(e)) => {
                 *slot = None;
@@ -59,30 +80,43 @@ impl LiveStream {
         }
     }
 
+    /// Mark closed and wake a pending read, then drop the stream. The flag and
+    /// the wake-up come first so a read waiting on the network gives up the
+    /// lock instead of holding this call until data arrives.
     async fn close(&self) {
-        *self.0.lock().await = None;
+        self.mark_closed();
+        *self.0.stream.lock().await = None;
     }
 
     /// For the sync response, which closes from the Python thread, off the runtime.
     fn close_blocking(&self) {
-        *self.0.blocking_lock() = None;
+        self.mark_closed();
+        *self.0.stream.blocking_lock() = None;
+    }
+
+    fn mark_closed(&self) {
+        self.0.closed.store(true, Ordering::Release);
+        self.0.close_signal.notify_one();
     }
 
     /// Raise if the response was closed under the iterator; buffered pieces are
     /// not served after a close, only after the stream's own end.
     fn check_open(&self) -> PyResult<()> {
-        if self.is_closed() {
+        if self.0.closed.load(Ordering::Acquire) {
             return Err(RqxError::new_err("response closed"));
         }
         Ok(())
     }
 
-    /// A poll in flight holds the lock; that counts as open.
+    /// Closed, or read to the end. A poll in flight holds the lock; that counts as open.
     fn is_closed(&self) -> bool {
-        self.0
-            .try_lock()
-            .map(|slot| slot.is_none())
-            .unwrap_or(false)
+        self.0.closed.load(Ordering::Acquire)
+            || self
+                .0
+                .stream
+                .try_lock()
+                .map(|slot| slot.is_none())
+                .unwrap_or(false)
     }
 }
 
@@ -269,10 +303,12 @@ impl ByteChunker {
 }
 
 /// Regroups decoded text into pieces of exactly `size` characters; the last
-/// piece is whatever remains. A piece never splits a character.
+/// piece is whatever remains. A piece never splits a character. Consumed text
+/// is dropped once per `feed`, not per piece, so small sizes stay linear.
 struct TextChunker {
     size: usize,
     pending: String,
+    consumed: usize,
 }
 
 impl TextChunker {
@@ -280,21 +316,33 @@ impl TextChunker {
         Self {
             size,
             pending: String::new(),
+            consumed: 0,
         }
     }
 
     fn feed(&mut self, text: &str) {
+        if self.consumed > 0 {
+            self.pending.drain(..self.consumed);
+            self.consumed = 0;
+        }
         self.pending.push_str(text);
     }
 
+    /// The next full piece, if `size` characters are buffered.
     fn next_full(&mut self) -> Option<String> {
-        let end = self.pending.char_indices().nth(self.size).map(|(i, _)| i)?;
-        let rest = self.pending.split_off(end);
-        Some(std::mem::replace(&mut self.pending, rest))
+        let unread = &self.pending[self.consumed..];
+        let (last_start, last) = unread.char_indices().nth(self.size - 1)?;
+        let end = last_start + last.len_utf8();
+        let piece = unread[..end].to_string();
+        self.consumed += end;
+        Some(piece)
     }
 
     fn flush(&mut self) -> Option<String> {
-        (!self.pending.is_empty()).then(|| std::mem::take(&mut self.pending))
+        let rest = self.pending[self.consumed..].to_string();
+        self.pending.clear();
+        self.consumed = 0;
+        (!rest.is_empty()).then_some(rest)
     }
 }
 
@@ -1266,6 +1314,20 @@ mod tests {
         assert_eq!(chunker.next_full().as_deref(), Some("€🙂"));
         assert_eq!(chunker.next_full(), None);
         assert_eq!(chunker.flush().as_deref(), Some("b"));
+        assert_eq!(chunker.flush(), None);
+    }
+
+    #[test]
+    fn text_chunker_yields_a_piece_of_exactly_size_without_waiting_for_more() {
+        // A live stream that sends exactly `size` characters and pauses must not stall.
+        let mut chunker = TextChunker::new(3);
+        chunker.feed("a€🙂");
+        assert_eq!(chunker.next_full().as_deref(), Some("a€🙂"));
+        assert_eq!(chunker.next_full(), None);
+        chunker.feed("bc");
+        assert_eq!(chunker.next_full(), None);
+        chunker.feed("d");
+        assert_eq!(chunker.next_full().as_deref(), Some("bcd"));
         assert_eq!(chunker.flush(), None);
     }
 

@@ -683,11 +683,13 @@ async def _http2_app(scope, receive, send):
 
 class CannedServer:
     """Answers every connection with the same bytes, then closes it. With
-    `reset=True` the close is a TCP reset instead of a normal FIN."""
+    `reset=True` the close is a TCP reset instead of a normal FIN; with
+    `stall=True` the connection stays open, body unfinished, until the client hangs up."""
 
-    def __init__(self, *, payload: bytes, reset: bool = False):
+    def __init__(self, *, payload: bytes, reset: bool = False, stall: bool = False):
         self.payload = payload
         self.reset = reset
+        self.stall = stall
         self.sock = socket.socket()
         self.sock.bind(("127.0.0.1", 0))
         self.sock.listen(8)
@@ -709,6 +711,11 @@ class CannedServer:
             with conn:
                 conn.recv(65536)
                 conn.sendall(self.payload)
+                if self.stall:
+                    # Leave the connection open with the body unfinished until the client goes away.
+                    while conn.recv(1):
+                        pass
+                    continue
                 if self.reset:
                     conn.setsockopt(
                         socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)

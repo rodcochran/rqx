@@ -200,3 +200,26 @@ async def test_async_stream_error_closes_the_response(canned_server):
                 async for _ in resp.aiter_bytes():
                     pass
             assert resp.is_closed is True
+
+
+@pytest.mark.asyncio
+async def test_async_close_interrupts_a_read_waiting_on_the_network(canned_server):
+    """aclose() must not wait behind a read that the server is stalling."""
+    import asyncio
+
+    url = canned_server(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nhello", stall=True
+    )
+    async with rqx.AsyncClient() as client:
+        async with client.stream("GET", url) as resp:
+            chunks = resp.aiter_bytes(5)
+            assert await chunks.__anext__() == b"hello"
+            pending = asyncio.ensure_future(
+                chunks.__anext__()
+            )  # now waiting on the network
+            await asyncio.sleep(0.2)
+            assert not pending.done()
+            await asyncio.wait_for(resp.aclose(), timeout=2)
+            with pytest.raises(rqx.RqxError, match="closed"):
+                await asyncio.wait_for(pending, timeout=2)
+            assert resp.is_closed is True

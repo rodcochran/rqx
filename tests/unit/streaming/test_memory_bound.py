@@ -4,6 +4,7 @@ what the iterator holds (https://github.com/rodcochran/rqx/issues/107)."""
 
 import asyncio
 import resource
+import sys
 import time
 
 import pytest
@@ -19,8 +20,12 @@ SLOW_CHUNKS = 20  # ~1 s of sleeping while the server has the whole body ready
 ALLOWED_GROWTH_MIB = 64
 
 
+# ru_maxrss is bytes on macOS and KiB on Linux.
+MAXRSS_UNIT = 1 if sys.platform == "darwin" else 1024
+
+
 def peak_rss_mib() -> float:
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1 << 20)
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * MAXRSS_UNIT / (1 << 20)
 
 
 @pytest.mark.slow

@@ -44,8 +44,11 @@ class Experiment:
             ],
             capture_output=True,
             text=True,
-            check=True,
         )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"measurement failed ({build}, {config.name}, round {round_number}):\n{result.stderr}"
+            )
         return result.stdout.strip()
 
     def run(self) -> None:

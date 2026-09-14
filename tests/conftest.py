@@ -67,8 +67,8 @@ def canned_server():
     """Start servers that reply with fixed bytes; returns the URL of each."""
     servers = []
 
-    def start(payload: bytes, *, reset: bool = False) -> str:
-        server = CannedServer(payload=payload, reset=reset).start()
+    def start(payload: bytes, *, reset: bool = False, stall: bool = False) -> str:
+        server = CannedServer(payload=payload, reset=reset, stall=stall).start()
         servers.append(server)
         return server.url
 
