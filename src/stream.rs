@@ -255,14 +255,15 @@ impl LineDecoder {
 /// is whatever remains. Whole pieces are split off the incoming chunk without
 /// copying; only the bytes needed to complete a piece are copied into `carry`,
 /// one reused buffer, so memory stays at about `size` plus one network chunk.
+/// Without a size, chunks pass through as the network delivered them.
 struct ByteChunker {
-    size: usize,
+    size: Option<usize>,
     carry: BytesMut,
     head: Bytes,
 }
 
 impl ByteChunker {
-    fn new(size: usize) -> Self {
+    fn new(size: Option<usize>) -> Self {
         Self {
             size,
             carry: BytesMut::new(),
@@ -271,8 +272,10 @@ impl ByteChunker {
     }
 
     fn feed(&mut self, mut bytes: Bytes) {
-        if !self.carry.is_empty() {
-            let take = (self.size - self.carry.len()).min(bytes.len());
+        if let Some(size) = self.size
+            && !self.carry.is_empty()
+        {
+            let take = (size - self.carry.len()).min(bytes.len());
             self.carry.extend_from_slice(&bytes.split_to(take));
         }
         self.head = bytes;
@@ -280,11 +283,14 @@ impl ByteChunker {
 
     /// The next full piece, if one is buffered.
     fn next_full(&mut self) -> Option<Bytes> {
-        if self.carry.len() >= self.size {
-            return Some(self.carry.split_to(self.size).freeze());
+        let Some(size) = self.size else {
+            return (!self.head.is_empty()).then(|| std::mem::take(&mut self.head));
+        };
+        if self.carry.len() >= size {
+            return Some(self.carry.split_to(size).freeze());
         }
-        if self.head.len() >= self.size && self.carry.is_empty() {
-            return Some(self.head.split_to(self.size));
+        if self.head.len() >= size && self.carry.is_empty() {
+            return Some(self.head.split_to(size));
         }
         // Too short on both sides: park the head so the next chunk completes it.
         if !self.head.is_empty() {
@@ -305,14 +311,15 @@ impl ByteChunker {
 /// Regroups decoded text into pieces of exactly `size` characters; the last
 /// piece is whatever remains. A piece never splits a character. Consumed text
 /// is dropped once per `feed`, not per piece, so small sizes stay linear.
+/// Without a size, text passes through as each network chunk decodes.
 struct TextChunker {
-    size: usize,
+    size: Option<usize>,
     pending: String,
     consumed: usize,
 }
 
 impl TextChunker {
-    fn new(size: usize) -> Self {
+    fn new(size: Option<usize>) -> Self {
         Self {
             size,
             pending: String::new(),
@@ -331,7 +338,11 @@ impl TextChunker {
     /// The next full piece, if `size` characters are buffered.
     fn next_full(&mut self) -> Option<String> {
         let unread = &self.pending[self.consumed..];
-        let (last_start, last) = unread.char_indices().nth(self.size - 1)?;
+        let Some(size) = self.size else {
+            self.consumed = self.pending.len();
+            return (!unread.is_empty()).then(|| unread.to_string());
+        };
+        let (last_start, last) = unread.char_indices().nth(size - 1)?;
         let end = last_start + last.len_utf8();
         let piece = unread[..end].to_string();
         self.consumed += end;
@@ -703,10 +714,10 @@ impl PyStreamResponse {
         }
     }
 
-    /// Iterate over the body in pieces of exactly `chunk_size` bytes; the last
-    /// piece is whatever remains.
-    #[pyo3(signature = (chunk_size=8192))]
-    fn iter_bytes(&mut self, chunk_size: usize) -> PyResult<PyByteIterator> {
+    /// Iterate over the body as the network delivers it, or in pieces of exactly
+    /// `chunk_size` bytes with the remainder last.
+    #[pyo3(signature = (chunk_size=None))]
+    fn iter_bytes(&mut self, chunk_size: Option<usize>) -> PyResult<PyByteIterator> {
         let chunker = ByteChunker::new(Self::checked_chunk_size(chunk_size)?);
         let stream = self.start_stream()?;
         Ok(PyByteIterator {
@@ -716,10 +727,10 @@ impl PyStreamResponse {
         })
     }
 
-    /// Iterate over the decoded body in pieces of exactly `chunk_size`
-    /// characters; the last piece is whatever remains.
-    #[pyo3(signature = (chunk_size=8192))]
-    fn iter_text(&mut self, chunk_size: usize) -> PyResult<PyTextIterator> {
+    /// Iterate over the decoded body as it arrives, or in pieces of exactly
+    /// `chunk_size` characters with the remainder last.
+    #[pyo3(signature = (chunk_size=None))]
+    fn iter_text(&mut self, chunk_size: Option<usize>) -> PyResult<PyTextIterator> {
         let chunker = TextChunker::new(Self::checked_chunk_size(chunk_size)?);
         let stream = self.start_stream()?;
         Ok(PyTextIterator {
@@ -921,8 +932,8 @@ impl PyStreamResponse {
 }
 
 impl PyStreamResponse {
-    fn checked_chunk_size(chunk_size: usize) -> PyResult<usize> {
-        if chunk_size == 0 {
+    fn checked_chunk_size(chunk_size: Option<usize>) -> PyResult<Option<usize>> {
+        if chunk_size == Some(0) {
             return Err(PyValueError::new_err("chunk_size must be at least 1"));
         }
         Ok(chunk_size)
@@ -973,10 +984,10 @@ pub struct PyAsyncStreamResponse {
 
 #[pymethods]
 impl PyAsyncStreamResponse {
-    /// Iterate over the body in pieces of exactly `chunk_size` bytes; the last
-    /// piece is whatever remains.
-    #[pyo3(signature = (chunk_size=8192))]
-    fn aiter_bytes(&mut self, chunk_size: usize) -> PyResult<PyAsyncByteIterator> {
+    /// Iterate over the body as the network delivers it, or in pieces of exactly
+    /// `chunk_size` bytes with the remainder last.
+    #[pyo3(signature = (chunk_size=None))]
+    fn aiter_bytes(&mut self, chunk_size: Option<usize>) -> PyResult<PyAsyncByteIterator> {
         let chunker = ByteChunker::new(PyStreamResponse::checked_chunk_size(chunk_size)?);
         let stream = self.start_stream()?;
         Ok(PyAsyncByteIterator {
@@ -988,10 +999,10 @@ impl PyAsyncStreamResponse {
         })
     }
 
-    /// Iterate over the decoded body in pieces of exactly `chunk_size`
-    /// characters; the last piece is whatever remains.
-    #[pyo3(signature = (chunk_size=8192))]
-    fn aiter_text(&mut self, chunk_size: usize) -> PyResult<PyAsyncTextIterator> {
+    /// Iterate over the decoded body as it arrives, or in pieces of exactly
+    /// `chunk_size` characters with the remainder last.
+    #[pyo3(signature = (chunk_size=None))]
+    fn aiter_text(&mut self, chunk_size: Option<usize>) -> PyResult<PyAsyncTextIterator> {
         let chunker = TextChunker::new(PyStreamResponse::checked_chunk_size(chunk_size)?);
         let stream = self.start_stream()?;
         Ok(PyAsyncTextIterator {
@@ -1269,7 +1280,7 @@ mod tests {
 
     /// Feed `chunks` through a chunker of `size` and collect what it yields.
     fn rechunk(size: usize, chunks: &[&[u8]]) -> Vec<Vec<u8>> {
-        let mut chunker = ByteChunker::new(size);
+        let mut chunker = ByteChunker::new(Some(size));
         let mut out = Vec::new();
         for chunk in chunks {
             chunker.feed(Bytes::copy_from_slice(chunk));
@@ -1301,6 +1312,20 @@ mod tests {
     }
 
     #[test]
+    fn chunkers_without_a_size_pass_chunks_through() {
+        let mut bytes = ByteChunker::new(None);
+        bytes.feed(Bytes::from_static(b"abc"));
+        assert_eq!(bytes.next_full().as_deref(), Some(&b"abc"[..]));
+        assert_eq!(bytes.next_full(), None);
+        assert_eq!(bytes.flush(), None);
+        let mut text = TextChunker::new(None);
+        text.feed("héllo");
+        assert_eq!(text.next_full().as_deref(), Some("héllo"));
+        assert_eq!(text.next_full(), None);
+        assert_eq!(text.flush(), None);
+    }
+
+    #[test]
     fn byte_chunker_empty_body_yields_nothing() {
         assert!(rechunk(16, &[]).is_empty());
         assert!(rechunk(16, &[b""]).is_empty());
@@ -1308,7 +1333,7 @@ mod tests {
 
     #[test]
     fn text_chunker_counts_characters() {
-        let mut chunker = TextChunker::new(2);
+        let mut chunker = TextChunker::new(Some(2));
         chunker.feed("aé€🙂b");
         assert_eq!(chunker.next_full().as_deref(), Some("aé"));
         assert_eq!(chunker.next_full().as_deref(), Some("€🙂"));
@@ -1320,7 +1345,7 @@ mod tests {
     #[test]
     fn text_chunker_yields_a_piece_of_exactly_size_without_waiting_for_more() {
         // A live stream that sends exactly `size` characters and pauses must not stall.
-        let mut chunker = TextChunker::new(3);
+        let mut chunker = TextChunker::new(Some(3));
         chunker.feed("a€🙂");
         assert_eq!(chunker.next_full().as_deref(), Some("a€🙂"));
         assert_eq!(chunker.next_full(), None);

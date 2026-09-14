@@ -1,5 +1,6 @@
-"""`chunk_size` is honored: byte chunks are exactly that size except the last,
-text chunks count characters, lines don't take one (https://github.com/rodcochran/rqx/issues/107)."""
+"""`chunk_size` is honored when given: byte chunks are exactly that size except
+the last, text chunks count characters, lines don't take one. Without it, chunks
+pass through as the network delivered them (https://github.com/rodcochran/rqx/issues/107)."""
 
 import pytest
 
@@ -39,10 +40,14 @@ async def test_aiter_bytes_yields_exact_chunks(flaky_server, chunk_size):
     check_chunks(chunks, chunk_size, pattern(BODY_LEN))
 
 
-def test_iter_bytes_default_chunk_size_is_8192(flaky_server):
+def test_default_passes_network_chunks_through(flaky_server):
+    """No chunk_size means no regrouping, like httpx: fewer, larger pieces and no per-piece cost."""
     with rqx.Client().stream("GET", f"{flaky_server}/bytes/{BODY_LEN}") as resp:
         chunks = list(resp.iter_bytes())
-    check_chunks(chunks, 8192, pattern(BODY_LEN))
+    assert b"".join(chunks) == pattern(BODY_LEN)
+    assert len(chunks) < BODY_LEN // 8192, (
+        "expected network-sized pieces, not 8 KiB ones"
+    )
 
 
 def test_empty_body_yields_nothing(flaky_server):

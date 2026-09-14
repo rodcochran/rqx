@@ -223,3 +223,32 @@ async def test_async_close_interrupts_a_read_waiting_on_the_network(canned_serve
             with pytest.raises(rqx.RqxError, match="closed"):
                 await asyncio.wait_for(pending, timeout=2)
             assert resp.is_closed is True
+
+
+def test_close_interrupts_a_read_waiting_on_the_network(canned_server):
+    """close() from another thread must not wait behind a read the server is stalling."""
+    import threading
+
+    url = canned_server(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nhello", stall=True
+    )
+    with rqx.Client().stream("GET", url) as resp:
+        chunks = resp.iter_bytes(5)
+        assert next(chunks) == b"hello"
+        outcome = []
+        worker = threading.Thread(target=lambda: outcome.append(_call(next, chunks)))
+        worker.start()  # now waiting on the network, GIL released
+        worker.join(timeout=0.2)
+        assert worker.is_alive()
+        resp.close()
+        worker.join(timeout=2)
+        assert not worker.is_alive(), "close() did not interrupt the pending read"
+        assert isinstance(outcome[0], rqx.RqxError) and "closed" in str(outcome[0])
+        assert resp.is_closed is True
+
+
+def _call(fn, *args):
+    try:
+        return fn(*args)
+    except Exception as e:  # noqa: BLE001 - the test inspects whatever was raised
+        return e
