@@ -40,14 +40,14 @@ async def test_aiter_bytes_yields_exact_chunks(flaky_server, chunk_size):
     check_chunks(chunks, chunk_size, pattern(BODY_LEN))
 
 
-def test_default_passes_network_chunks_through(flaky_server):
-    """No chunk_size means no regrouping, like httpx: fewer, larger pieces and no per-piece cost."""
+def test_default_reassembles_without_a_chunk_size(flaky_server):
+    """No chunk_size means no regrouping, like httpx. Piece boundaries then belong
+    to the transport, so only reassembly is asserted here; the pass-through itself
+    is pinned by the Rust unit test `chunkers_without_a_size_pass_chunks_through`."""
     with rqx.Client().stream("GET", f"{flaky_server}/bytes/{BODY_LEN}") as resp:
         chunks = list(resp.iter_bytes())
+    assert chunks
     assert b"".join(chunks) == pattern(BODY_LEN)
-    assert len(chunks) < BODY_LEN // 8192, (
-        "expected network-sized pieces, not 8 KiB ones"
-    )
 
 
 def test_empty_body_yields_nothing(flaky_server):
