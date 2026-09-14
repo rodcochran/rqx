@@ -1,5 +1,6 @@
 import asyncio
 import resource
+import sys
 import tracemalloc
 
 import aiohttp
@@ -13,9 +14,13 @@ CONCURRENCY = 100
 REQUESTS_PER_WORKER = TOTAL_REQUESTS // CONCURRENCY
 
 
+# ru_maxrss is bytes on macOS and KiB on Linux.
+MAXRSS_UNIT = 1 if sys.platform == "darwin" else 1024
+
+
 def get_rss_mb():
-    """Get current RSS in MB"""
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
+    """Peak RSS in MB."""
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * MAXRSS_UNIT / (1 << 20)
 
 
 async def bench_rqx():

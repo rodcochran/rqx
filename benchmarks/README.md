@@ -56,7 +56,7 @@ Two benches need more than the compose stack:
 
 `b1` runs each (client, concurrency, run) in its own Python process: fresh event loop, fresh imports, fresh tokio runtime, no executor state left over from another client. That is why it has a driver script instead of a single file. It also skips aiohttp at c=1000, where its connector deadlocks under this harness, and tolerates a client crashing mid-sweep by recording a `skipped` row rather than losing the run.
 
-b1, b7, b8, b9 and b10 are time-bounded, a few seconds of warmup then a fixed measurement window, so sample size scales with throughput. b2 through b6 use fixed request counts. b1's warmup runs on its own client, so it warms the process (imports, runtime, allocator) but the measured client starts with an empty pool; b8 warms up on the client it measures.
+b1, b7, b8, b9 and b10 are time-bounded, a few seconds of warmup then a fixed measurement window, so sample size scales with throughput. b2 through b6 use fixed request counts. b1 and b8 warm up on the client they measure, so the measured window starts with a warm pool.
 
 `stream_ab/` is a separate harness for streaming changes: it builds two commits from source in a Linux container and compares them head to head (`just bench-stream`). It was written for the copy removed in #139 and caught the async chunking regression in #107. Its README explains the paired-comparison method.
 
@@ -106,7 +106,7 @@ Read the spread before the median. `analyze_b1.py` prints min and max next to th
   | 500 | 6.3% | 3.5% | 27.3% | 1.4% |
 
   A delta inside that band is noise. httpx's wide spread at c=500 comes from its pool bookkeeping, see below.
-- **httpx's pool bookkeeping.** b1, b2 and b8 set every client's pool limit to 1,500, so no client queues for a connection. httpx still falls behind as concurrency rises because httpcore 1.0 re-scans every pooled connection, polling each idle socket, whenever a request is queued or finishes; at c=100 that scan is most of its CPU. The measurement is real, but it reflects httpx serving hundreds of concurrent requests from one client, not httpx in general. Details in the [0.2.0 report](0.2.0/report.md#limitations).
+- **httpx's pool bookkeeping.** b1, b2 and b8 set every client's pool limit to 1,500, so no client queues for a connection. httpx still falls behind as concurrency rises because httpcore 1.0 re-scans every pooled connection, polling each idle socket, whenever a request is queued or finishes; at c=100 that scan is most of its CPU. The measurement is real, but it reflects httpx serving hundreds of concurrent requests from one client, not httpx in general. The shared limit was checked locally: httpx's default limits (100 connections, 20 keep-alive) were no faster at c=10 or c=100 and slower at c=500, and a limit sized to the concurrency was about 40% faster at c=500 but still more than 20× behind rqx, so every client keeps the same 1,500 setting. Details in the [0.2.0 report](0.2.0/report.md#limitations).
 - **aiohttp at c=1000** is skipped in b1 because its connector deadlocks under this harness. That's a harness interaction, not a verdict on aiohttp.
 - **Ambient proxies.** Both httpx and rqx honor `HTTP_PROXY` and friends. Unset them before benching.
 
