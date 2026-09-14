@@ -133,3 +133,70 @@ async def test_async_response_is_not_a_context_manager(flaky_server):
         async with client.stream("GET", f"{flaky_server}/streamable") as resp:
             assert not hasattr(resp, "__aenter__")
             assert not hasattr(resp, "__aexit__")
+
+
+# ----- closing the response reaches its iterators -----
+
+SHORT_BODY = b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nhello"
+
+
+def test_iterator_kept_past_the_block_raises_on_next(flaky_server):
+    with rqx.Client().stream("GET", f"{flaky_server}/bigtext") as resp:
+        chunks = resp.iter_bytes()
+        first = next(chunks)
+    assert first
+    assert resp.is_closed is True
+    with pytest.raises(rqx.RqxError, match="closed"):
+        next(chunks)
+
+
+def test_close_mid_iteration_stops_the_iterator(flaky_server):
+    with rqx.Client().stream("GET", f"{flaky_server}/bigtext") as resp:
+        lines = resp.iter_text()
+        next(lines)
+        resp.close()
+        assert resp.is_closed is True
+        with pytest.raises(rqx.RqxError, match="closed"):
+            next(lines)
+
+
+def test_stream_error_closes_the_response(canned_server):
+    """A failed stream releases its connection without waiting for the iterator to be dropped."""
+    with rqx.Client().stream("GET", canned_server(SHORT_BODY)) as resp:
+        with pytest.raises(rqx.RemoteProtocolError):
+            list(resp.iter_bytes())
+        assert resp.is_closed is True
+
+
+@pytest.mark.asyncio
+async def test_async_iterator_kept_past_the_block_raises_on_next(flaky_server):
+    async with rqx.AsyncClient() as client:
+        async with client.stream("GET", f"{flaky_server}/bigtext") as resp:
+            chunks = resp.aiter_bytes()
+            first = await chunks.__anext__()
+        assert first
+        assert resp.is_closed is True
+        with pytest.raises(rqx.RqxError, match="closed"):
+            await chunks.__anext__()
+
+
+@pytest.mark.asyncio
+async def test_async_close_mid_iteration_stops_the_iterator(flaky_server):
+    async with rqx.AsyncClient() as client:
+        async with client.stream("GET", f"{flaky_server}/bigtext") as resp:
+            text = resp.aiter_text()
+            await text.__anext__()
+            await resp.aclose()
+            assert resp.is_closed is True
+            with pytest.raises(rqx.RqxError, match="closed"):
+                await text.__anext__()
+
+
+@pytest.mark.asyncio
+async def test_async_stream_error_closes_the_response(canned_server):
+    async with rqx.AsyncClient() as client:
+        async with client.stream("GET", canned_server(SHORT_BODY)) as resp:
+            with pytest.raises(rqx.RemoteProtocolError):
+                async for _ in resp.aiter_bytes():
+                    pass
+            assert resp.is_closed is True

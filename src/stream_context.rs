@@ -114,7 +114,10 @@ impl PyAsyncStreamContext {
         RUNTIME.future_into_py(py, async move {
             let response = slot.lock().unwrap().take();
             if let Some(response) = response {
-                Python::attach(|py| response.borrow(py).drop_body());
+                let body = Python::attach(|py| response.borrow(py).take_body());
+                if let Some(body) = body {
+                    body.close().await;
+                }
             }
             Ok(false)
         })

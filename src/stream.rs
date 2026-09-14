@@ -11,6 +11,7 @@ use pyo3::types::PyBytes;
 use pyo3::{Bound, IntoPyObject, PyErr};
 use tokio::sync::Mutex as TokioMutex;
 
+use super::client::block_on_inner;
 use super::exceptions::*;
 use super::headers::PyHeaders;
 use super::py_json::value_to_py;
@@ -23,6 +24,57 @@ use super::runtime::RUNTIME;
 /// so it must not move once polled (hence Pin), and `+ Send` lets it cross
 /// thread boundaries when shared via `Arc`.
 type ChunkStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
+
+/// The body while an iterator reads it. The response holds one handle and the
+/// iterator another, so closing the response ends the iterator too.
+#[derive(Clone)]
+pub struct LiveStream(Arc<TokioMutex<Option<ChunkStream>>>);
+
+impl LiveStream {
+    fn new(response: reqwest::Response) -> Self {
+        Self(Arc::new(TokioMutex::new(Some(Box::pin(
+            response.bytes_stream(),
+        )))))
+    }
+
+    /// The next chunk, `None` at the end. A closed response or a failed read
+    /// drops the stream, so the connection is released without waiting for
+    /// the iterator to be dropped.
+    async fn next_chunk(&self) -> PyResult<Option<Bytes>> {
+        let mut slot = self.0.lock().await;
+        let Some(stream) = slot.as_mut() else {
+            return Err(RqxError::new_err("response closed"));
+        };
+        match stream.next().await {
+            Some(Ok(bytes)) => Ok(Some(bytes)),
+            Some(Err(e)) => {
+                *slot = None;
+                Err(map_reqwest_error(e))
+            }
+            None => {
+                *slot = None;
+                Ok(None)
+            }
+        }
+    }
+
+    async fn close(&self) {
+        *self.0.lock().await = None;
+    }
+
+    /// For the sync response, which closes from the Python thread, off the runtime.
+    fn close_blocking(&self) {
+        *self.0.blocking_lock() = None;
+    }
+
+    /// A poll in flight holds the lock; that counts as open.
+    fn is_closed(&self) -> bool {
+        self.0
+            .try_lock()
+            .map(|slot| slot.is_none())
+            .unwrap_or(false)
+    }
+}
 
 /// A streaming text decoder: an `encoding_rs::Decoder` plus the capacity
 /// handling its `decode_to_string` requires (that method writes into the
@@ -157,7 +209,7 @@ impl LineDecoder {
 
 #[pyclass]
 struct PyByteIterator {
-    stream: Arc<TokioMutex<ChunkStream>>,
+    stream: LiveStream,
     // Currently accepted from the Python `iter_bytes(chunk_size=...)` call but
     // not applied: reqwest's `Response::bytes_stream()` yields chunks as they
     // arrive from the network, not at caller-chosen boundaries. Matching
@@ -176,30 +228,15 @@ impl PyByteIterator {
 
     fn __next__(slf: PyRef<'_, Self>) -> PyResult<Option<Py<PyBytes>>> {
         let py = slf.py();
-        let stream = Arc::clone(&slf.stream);
-
-        let chunk = py.detach(|| {
-            RUNTIME.block_on(async {
-                // .lock().await on TokioMutex — yields on contention
-                // instead of blocking the OS thread. Guard is still held
-                // across the next await, but now it's an async-aware
-                // guard, which is what clippy wants.
-                let mut guard = stream.lock().await;
-                guard.as_mut().next().await
-            })
-        })?;
-
-        match chunk {
-            Some(Ok(bytes)) => Ok(Some(PyBytes::new(py, &bytes).unbind())),
-            Some(Err(e)) => Err(map_reqwest_error(e)),
-            None => Ok(None),
-        }
+        let stream = slf.stream.clone();
+        let chunk = block_on_inner(py, stream.next_chunk())?;
+        Ok(chunk.map(|bytes| PyBytes::new(py, &bytes).unbind()))
     }
 }
 
 #[pyclass]
 struct PyTextIterator {
-    stream: Arc<TokioMutex<ChunkStream>>,
+    stream: LiveStream,
     // Currently accepted from the Python `iter_bytes(chunk_size=...)` call but
     // not applied: reqwest's `Response::bytes_stream()` yields chunks as they
     // arrive from the network, not at caller-chosen boundaries. Matching
@@ -224,22 +261,10 @@ impl PyTextIterator {
         }
 
         let py = slf.py();
-        let stream = Arc::clone(&slf.stream);
+        let stream = slf.stream.clone();
 
         loop {
-            let chunk = py.detach(|| {
-                RUNTIME.block_on(async {
-                    // .lock().await on TokioMutex yields on contention
-                    // instead of blocking the OS thread.
-                    let mut guard = stream.lock().await;
-                    guard.as_mut().next().await.transpose()
-                })
-            })?;
-
-            let chunk = match chunk {
-                Ok(c) => c,
-                Err(e) => return Err(map_reqwest_error(e)),
-            };
+            let chunk = block_on_inner(py, stream.next_chunk())?;
 
             match chunk {
                 // A chunk may complete no character (the decoder holds the
@@ -263,7 +288,7 @@ impl PyTextIterator {
 
 #[pyclass]
 struct PyLineIterator {
-    stream: Arc<TokioMutex<ChunkStream>>,
+    stream: LiveStream,
     #[allow(dead_code)]
     chunk_size: u32,
     decoder: TextDecoder,
@@ -282,7 +307,7 @@ impl PyLineIterator {
 
     fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<String>> {
         let py = slf.py();
-        let stream = Arc::clone(&slf.stream);
+        let stream = slf.stream.clone();
 
         loop {
             // Drain already-decoded lines before touching the network.
@@ -293,17 +318,7 @@ impl PyLineIterator {
                 return Ok(None);
             }
 
-            let chunk = py.detach(|| {
-                RUNTIME.block_on(async {
-                    let mut guard = stream.lock().await;
-                    guard.as_mut().next().await.transpose()
-                })
-            })?;
-
-            let chunk = match chunk {
-                Ok(c) => c,
-                Err(e) => return Err(map_reqwest_error(e)),
-            };
+            let chunk = block_on_inner(py, stream.next_chunk())?;
 
             match chunk {
                 Some(src) => {
@@ -346,7 +361,7 @@ impl<'py> IntoPyObject<'py> for PyBytesChunk {
 
 #[pyclass]
 struct PyAsyncByteIterator {
-    stream: Arc<TokioMutex<ChunkStream>>,
+    stream: LiveStream,
     // See PyByteIterator.chunk_size — same situation on the async path.
     #[allow(dead_code)]
     chunk_size: u32,
@@ -359,13 +374,10 @@ impl PyAsyncByteIterator {
     }
 
     fn __anext__<'py>(slf: PyRef<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
-        let stream = Arc::clone(&slf.stream);
-
+        let stream = slf.stream.clone();
         RUNTIME.future_into_py(slf.py(), async move {
-            let mut guard = stream.lock().await;
-            match guard.as_mut().next().await {
-                Some(Ok(bytes)) => Ok(Some(PyBytesChunk(bytes))),
-                Some(Err(e)) => Err(map_reqwest_error(e)),
+            match stream.next_chunk().await? {
+                Some(bytes) => Ok(Some(PyBytesChunk(bytes))),
                 None => Err(pyo3::exceptions::PyStopAsyncIteration::new_err(())),
             }
         })
@@ -373,7 +385,7 @@ impl PyAsyncByteIterator {
 }
 
 struct AsyncTextState {
-    stream: ChunkStream,
+    stream: LiveStream,
     decoder: TextDecoder,
     finished: bool,
 }
@@ -400,16 +412,16 @@ impl PyAsyncTextIterator {
                 return Err(pyo3::exceptions::PyStopAsyncIteration::new_err(()));
             }
             loop {
-                match s.stream.as_mut().next().await {
+                let chunk = s.stream.next_chunk().await?;
+                match chunk {
                     // A chunk may complete no character (decoder holds the
                     // bytes), so keep pulling until decoding yields text.
-                    Some(Ok(src)) => {
+                    Some(src) => {
                         let text = s.decoder.decode(&src, false);
                         if !text.is_empty() {
                             return Ok(text);
                         }
                     }
-                    Some(Err(e)) => return Err(map_reqwest_error(e)),
                     None => {
                         s.finished = true;
                         let text = s.decoder.decode(&[], true);
@@ -426,7 +438,7 @@ impl PyAsyncTextIterator {
 }
 
 struct AsyncLineState {
-    stream: ChunkStream,
+    stream: LiveStream,
     decoder: TextDecoder,
     lines: LineDecoder,
     pending: VecDeque<String>,
@@ -457,13 +469,13 @@ impl PyAsyncLineIterator {
                 if s.finished {
                     return Err(pyo3::exceptions::PyStopAsyncIteration::new_err(()));
                 }
-                match s.stream.as_mut().next().await {
-                    Some(Ok(src)) => {
+                let chunk = s.stream.next_chunk().await?;
+                match chunk {
+                    Some(src) => {
                         let text = s.decoder.decode(&src, false);
                         let lines = s.lines.feed(&text);
                         s.pending.extend(lines);
                     }
-                    Some(Err(e)) => return Err(map_reqwest_error(e)),
                     None => {
                         // EOF: flush the byte decoder, feed the final text, then
                         // flush the line buffer — same two flushes as the sync path.
@@ -487,7 +499,30 @@ Response object
 
 pub enum Body {
     Live(reqwest::Response),
+    Streaming(LiveStream),
     Buffered(Bytes),
+}
+
+impl Body {
+    /// Release whatever the body holds; a stream being read is ended for its iterator too.
+    pub async fn close(self) {
+        if let Body::Streaming(stream) = self {
+            stream.close().await;
+        }
+    }
+
+    fn close_blocking(self) {
+        if let Body::Streaming(stream) = self {
+            stream.close_blocking();
+        }
+    }
+
+    fn is_closed(&self) -> bool {
+        match self {
+            Body::Streaming(stream) => stream.is_closed(),
+            Body::Live(_) | Body::Buffered(_) => false,
+        }
+    }
 }
 
 #[pyclass]
@@ -501,8 +536,11 @@ pub struct PyStreamResponse {
 #[pymethods]
 impl PyStreamResponse {
     /// Drop the body: releases the connection, or the buffer if already read.
+    /// An iterator still reading it raises on its next chunk.
     pub fn close(&mut self) {
-        self.body = None;
+        if let Some(body) = self.body.take() {
+            body.close_blocking();
+        }
     }
 
     /// Iterate over response bytes as they arrive.
@@ -515,35 +553,16 @@ impl PyStreamResponse {
     /// we haven't wired up yet.
     #[pyo3(signature = (chunk_size=8192))]
     fn iter_bytes(&mut self, chunk_size: u32) -> PyResult<PyByteIterator> {
-        let response = match self.body.take() {
-            Some(Body::Live(r)) => r,
-            Some(other) => {
-                // Buffered — restore it, then error
-                self.body = Some(other);
-                return Err(RqxError::new_err("response already read into memory"));
-            }
-            None => return Err(RqxError::new_err("response already consumed or closed")),
-        };
-        return Ok(PyByteIterator {
-            stream: Arc::new(TokioMutex::new(Box::pin(response.bytes_stream()))),
-            chunk_size,
-        });
+        let stream = self.start_stream()?;
+        Ok(PyByteIterator { stream, chunk_size })
     }
 
     #[pyo3(signature = (chunk_size=8192))]
     fn iter_text(&mut self, chunk_size: u32) -> PyResult<PyTextIterator> {
-        let response = match self.body.take() {
-            Some(Body::Live(r)) => r,
-            Some(other) => {
-                // Buffered — restore it, then error
-                self.body = Some(other);
-                return Err(RqxError::new_err("response already read into memory"));
-            }
-            None => return Err(RqxError::new_err("response already consumed or closed")),
-        };
+        let stream = self.start_stream()?;
 
         Ok(PyTextIterator {
-            stream: Arc::new(TokioMutex::new(Box::pin(response.bytes_stream()))),
+            stream,
             chunk_size,
             decoder: TextDecoder::new(self.parts.resolved_encoding()),
             finished: false,
@@ -552,16 +571,9 @@ impl PyStreamResponse {
 
     #[pyo3(signature = (chunk_size=8192))]
     fn iter_lines(&mut self, chunk_size: u32) -> PyResult<PyLineIterator> {
-        let response = match self.body.take() {
-            Some(Body::Live(r)) => r,
-            Some(other) => {
-                self.body = Some(other);
-                return Err(RqxError::new_err("response already read into memory"));
-            }
-            None => return Err(RqxError::new_err("response already consumed or closed")),
-        };
+        let stream = self.start_stream()?;
         Ok(PyLineIterator {
-            stream: Arc::new(TokioMutex::new(Box::pin(response.bytes_stream()))),
+            stream,
             chunk_size,
             decoder: TextDecoder::new(self.parts.resolved_encoding()),
             lines: LineDecoder::default(),
@@ -578,6 +590,10 @@ impl PyStreamResponse {
                     .map_err(map_reqwest_error)?;
                 self.body = Some(Body::Buffered(bytes));
             }
+            Some(Body::Streaming(stream)) => {
+                self.body = Some(Body::Streaming(stream));
+                return Err(RqxError::new_err("response already consumed"));
+            }
             Some(buffered) => self.body = Some(buffered), // already Buffered — restore unchanged
             None => return Err(RqxError::new_err("response already consumed or closed")),
         }
@@ -591,7 +607,9 @@ impl PyStreamResponse {
                 .content_cache
                 .get_or_init(py, || PyBytes::new(py, bytes).unbind())
                 .clone_ref(py)),
-            Some(Body::Live(_)) => Err(RqxError::new_err("response not read; call read() first")),
+            Some(Body::Live(_) | Body::Streaming(_)) => {
+                Err(RqxError::new_err("response not read; call read() first"))
+            }
             None => Err(RqxError::new_err("response consumed or closed")),
         }
     }
@@ -604,7 +622,9 @@ impl PyStreamResponse {
                 let (decoded, _, _) = encoding.decode(bytes);
                 Ok(decoded.into_owned())
             }
-            Some(Body::Live(_)) => Err(RqxError::new_err("response not read; call read() first")),
+            Some(Body::Live(_) | Body::Streaming(_)) => {
+                Err(RqxError::new_err("response not read; call read() first"))
+            }
             None => Err(RqxError::new_err("response consumed or closed")),
         }
     }
@@ -628,7 +648,9 @@ impl PyStreamResponse {
 
                 value_to_py(py, value)
             }
-            Some(Body::Live(_)) => Err(RqxError::new_err("response not read; call read() first")),
+            Some(Body::Live(_) | Body::Streaming(_)) => {
+                Err(RqxError::new_err("response not read; call read() first"))
+            }
             None => Err(RqxError::new_err("response consumed or closed")),
         }
     }
@@ -729,7 +751,7 @@ impl PyStreamResponse {
 
     #[getter]
     fn is_closed(&self) -> bool {
-        self.body.is_none()
+        self.body.as_ref().is_none_or(Body::is_closed)
     }
 
     #[getter]
@@ -739,6 +761,26 @@ impl PyStreamResponse {
 }
 
 impl PyStreamResponse {
+    /// Hand the live body to an iterator, keeping a handle so `close` reaches it.
+    fn start_stream(&mut self) -> PyResult<LiveStream> {
+        match self.body.take() {
+            Some(Body::Live(response)) => {
+                let stream = LiveStream::new(response);
+                self.body = Some(Body::Streaming(stream.clone()));
+                Ok(stream)
+            }
+            Some(Body::Streaming(stream)) => {
+                self.body = Some(Body::Streaming(stream));
+                Err(RqxError::new_err("response already consumed"))
+            }
+            Some(buffered) => {
+                self.body = Some(buffered);
+                Err(RqxError::new_err("response already read into memory"))
+            }
+            None => Err(RqxError::new_err("response already consumed or closed")),
+        }
+    }
+
     pub fn from_pending(pending: PendingResponse) -> PyStreamResponse {
         let (parts, response) = pending.into_parts();
         PyStreamResponse {
@@ -772,19 +814,16 @@ impl PyAsyncStreamResponse {
     /// full explanation.
     #[pyo3(signature = (chunk_size=8192))]
     fn aiter_bytes(&mut self, chunk_size: u32) -> PyResult<PyAsyncByteIterator> {
-        let response = self.take_live()?;
-        Ok(PyAsyncByteIterator {
-            stream: Arc::new(TokioMutex::new(Box::pin(response.bytes_stream()))),
-            chunk_size,
-        })
+        let stream = self.start_stream()?;
+        Ok(PyAsyncByteIterator { stream, chunk_size })
     }
 
     #[pyo3(signature = (chunk_size=8192))]
     fn aiter_text(&mut self, chunk_size: u32) -> PyResult<PyAsyncTextIterator> {
-        let response = self.take_live()?;
+        let stream = self.start_stream()?;
         Ok(PyAsyncTextIterator {
             state: Arc::new(TokioMutex::new(AsyncTextState {
-                stream: Box::pin(response.bytes_stream()),
+                stream,
                 decoder: TextDecoder::new(self.parts.resolved_encoding()),
                 finished: false,
             })),
@@ -794,10 +833,10 @@ impl PyAsyncStreamResponse {
 
     #[pyo3(signature = (chunk_size=8192))]
     fn aiter_lines(&mut self, chunk_size: u32) -> PyResult<PyAsyncLineIterator> {
-        let response = self.take_live()?;
+        let stream = self.start_stream()?;
         Ok(PyAsyncLineIterator {
             state: Arc::new(TokioMutex::new(AsyncLineState {
-                stream: Box::pin(response.bytes_stream()),
+                stream,
                 decoder: TextDecoder::new(self.parts.resolved_encoding()),
                 lines: LineDecoder::default(),
                 pending: VecDeque::new(),
@@ -824,6 +863,10 @@ impl PyAsyncStreamResponse {
                         drop(guard);
                         return Python::attach(|py| Ok(PyBytes::new(py, &b).unbind()));
                     }
+                    Some(Body::Streaming(stream)) => {
+                        *guard = Some(Body::Streaming(stream));
+                        return Err(RqxError::new_err("response already consumed"));
+                    }
                     None => {
                         return Err(RqxError::new_err("response already consumed or closed"));
                     }
@@ -835,11 +878,15 @@ impl PyAsyncStreamResponse {
         })
     }
 
-    /// Release the connection (or drop the buffer) early.
+    /// Release the connection (or drop the buffer) early. An iterator still
+    /// reading it raises on its next chunk.
     fn aclose<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let body = Arc::clone(&self.body);
         RUNTIME.future_into_py(py, async move {
-            *body.lock().unwrap() = None;
+            let taken = body.lock().unwrap().take();
+            if let Some(taken) = taken {
+                taken.close().await;
+            }
             Ok(())
         })
     }
@@ -848,7 +895,7 @@ impl PyAsyncStreamResponse {
     fn content(&self, py: Python<'_>) -> PyResult<Py<PyBytes>> {
         let bytes = match &*self.body.lock().unwrap() {
             Some(Body::Buffered(b)) => b.clone(),
-            Some(Body::Live(_)) => {
+            Some(Body::Live(_) | Body::Streaming(_)) => {
                 return Err(RqxError::new_err("response not read; call aread() first"));
             }
             None => return Err(RqxError::new_err("response consumed or closed")),
@@ -863,7 +910,7 @@ impl PyAsyncStreamResponse {
     fn text(&self) -> PyResult<String> {
         let bytes = match &*self.body.lock().unwrap() {
             Some(Body::Buffered(b)) => b.clone(),
-            Some(Body::Live(_)) => {
+            Some(Body::Live(_) | Body::Streaming(_)) => {
                 return Err(RqxError::new_err("response not read; call aread() first"));
             }
             None => return Err(RqxError::new_err("response consumed or closed")),
@@ -875,7 +922,7 @@ impl PyAsyncStreamResponse {
     fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let bytes = match &*self.body.lock().unwrap() {
             Some(Body::Buffered(b)) => b.clone(),
-            Some(Body::Live(_)) => {
+            Some(Body::Live(_) | Body::Streaming(_)) => {
                 return Err(RqxError::new_err("response not read; call aread() first"));
             }
             None => return Err(RqxError::new_err("response consumed or closed")),
@@ -992,7 +1039,11 @@ impl PyAsyncStreamResponse {
 
     #[getter]
     fn is_closed(&self) -> bool {
-        self.body.lock().unwrap().is_none()
+        self.body
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_none_or(Body::is_closed)
     }
 
     #[getter]
@@ -1002,19 +1053,26 @@ impl PyAsyncStreamResponse {
 }
 
 impl PyAsyncStreamResponse {
-    /// Same as `aclose`, from Rust: releases the connection or drops the buffer.
-    pub fn drop_body(&self) {
-        *self.body.lock().unwrap() = None;
+    /// Take the body out for closing from Rust; the caller awaits `Body::close`.
+    pub fn take_body(&self) -> Option<Body> {
+        self.body.lock().unwrap().take()
     }
 
-    /// Take the live response handle for streaming, restoring + erroring if the
-    /// body has already been read, streamed, or closed. Shared by the aiter_*.
-    fn take_live(&self) -> PyResult<reqwest::Response> {
+    /// Hand the live body to an iterator, keeping a handle so closing reaches it.
+    fn start_stream(&self) -> PyResult<LiveStream> {
         let mut guard = self.body.lock().unwrap();
         match guard.take() {
-            Some(Body::Live(r)) => Ok(r),
-            Some(other) => {
-                *guard = Some(other);
+            Some(Body::Live(response)) => {
+                let stream = LiveStream::new(response);
+                *guard = Some(Body::Streaming(stream.clone()));
+                Ok(stream)
+            }
+            Some(Body::Streaming(stream)) => {
+                *guard = Some(Body::Streaming(stream));
+                Err(RqxError::new_err("response already consumed"))
+            }
+            Some(buffered) => {
+                *guard = Some(buffered);
                 Err(RqxError::new_err("response already read into memory"))
             }
             None => Err(RqxError::new_err("response already consumed or closed")),
