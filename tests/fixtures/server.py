@@ -330,6 +330,18 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             return
 
         # /streamable — final destination after /redirect-once. Returns a known body.
+        # /large/<mb> — a generated body of <mb> MiB, written in 1 MiB pieces so the
+        # server never holds it; for the memory-bound tests.
+        if path.startswith("/large/"):
+            self._send_large(int(path.removeprefix("/large/")))
+            return
+
+        # /bytes/<n> — exactly n bytes of a repeating 0..255 pattern; for the
+        # chunking tests, where the caller checks sizes and reassembly.
+        if path.startswith("/bytes/"):
+            self._send_bytes(int(path.removeprefix("/bytes/")))
+            return
+
         if path == "/streamable":
             body = b'{"streamed": true}'
             self.send_response(200)
@@ -567,6 +579,26 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_large(self, mib):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(mib << 20))
+        self.end_headers()
+        piece = b"x" * (1 << 20)
+        try:
+            for _ in range(mib):
+                self.wfile.write(piece)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _send_bytes(self, n):
+        body = bytes(range(256)) * (n // 256) + bytes(range(n % 256))
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(n))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _send_compressed(self, algorithm):
         payload = json.dumps({"compressed": True, "algorithm": algorithm}).encode()
 
@@ -651,11 +683,13 @@ async def _http2_app(scope, receive, send):
 
 class CannedServer:
     """Answers every connection with the same bytes, then closes it. With
-    `reset=True` the close is a TCP reset instead of a normal FIN."""
+    `reset=True` the close is a TCP reset instead of a normal FIN; with
+    `stall=True` the connection stays open, body unfinished, until the client hangs up."""
 
-    def __init__(self, *, payload: bytes, reset: bool = False):
+    def __init__(self, *, payload: bytes, reset: bool = False, stall: bool = False):
         self.payload = payload
         self.reset = reset
+        self.stall = stall
         self.sock = socket.socket()
         self.sock.bind(("127.0.0.1", 0))
         self.sock.listen(8)
@@ -677,6 +711,11 @@ class CannedServer:
             with conn:
                 conn.recv(65536)
                 conn.sendall(self.payload)
+                if self.stall:
+                    # Leave the connection open with the body unfinished until the client goes away.
+                    while conn.recv(1):
+                        pass
+                    continue
                 if self.reset:
                     conn.setsockopt(
                         socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)

@@ -69,9 +69,9 @@ class Streamer:
     async def _async_worker(self, client) -> int:
         total = 0
         for _ in range(self.per_worker):
-            response = await client.stream("GET", self.url)
-            async for chunk in response.aiter_bytes():
-                total += len(chunk)
+            async with client.stream("GET", self.url) as response:
+                async for chunk in response.aiter_bytes():
+                    total += len(chunk)
         return total
 
     async def _gather(self) -> int:

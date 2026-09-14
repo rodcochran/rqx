@@ -1,15 +1,18 @@
 use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use encoding_rs::{Decoder, Encoding};
 use futures::{Stream, StreamExt};
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::{Py, PyAny, PyRef, PyRefMut, PyResult, Python, pyclass, pymethods};
 use pyo3::sync::PyOnceLock;
 use pyo3::types::PyBytes;
 use pyo3::{Bound, IntoPyObject, PyErr};
 use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::Notify;
 
 use super::client::block_on_inner;
 use super::exceptions::*;
@@ -26,26 +29,45 @@ use super::runtime::RUNTIME;
 type ChunkStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
 
 /// The body while an iterator reads it. The response holds one handle and the
-/// iterator another, so closing the response ends the iterator too.
+/// iterator another, so closing the response ends the iterator too, including
+/// a read that is waiting on the network.
 #[derive(Clone)]
-pub struct LiveStream(Arc<TokioMutex<Option<ChunkStream>>>);
+pub struct LiveStream(Arc<LiveStreamInner>);
+
+struct LiveStreamInner {
+    stream: TokioMutex<Option<ChunkStream>>,
+    closed: AtomicBool,
+    // Wakes a read that is waiting on the network when the response is closed.
+    close_signal: Notify,
+}
 
 impl LiveStream {
     fn new(response: reqwest::Response) -> Self {
-        Self(Arc::new(TokioMutex::new(Some(Box::pin(
-            response.bytes_stream(),
-        )))))
+        Self(Arc::new(LiveStreamInner {
+            stream: TokioMutex::new(Some(Box::pin(response.bytes_stream()))),
+            closed: AtomicBool::new(false),
+            close_signal: Notify::new(),
+        }))
     }
 
     /// The next chunk, `None` at the end. A closed response or a failed read
     /// drops the stream, so the connection is released without waiting for
     /// the iterator to be dropped.
     async fn next_chunk(&self) -> PyResult<Option<Bytes>> {
-        let mut slot = self.0.lock().await;
+        let mut slot = self.0.stream.lock().await;
+        self.check_open()?;
         let Some(stream) = slot.as_mut() else {
             return Err(RqxError::new_err("response closed"));
         };
-        match stream.next().await {
+        let next = tokio::select! {
+            biased;
+            _ = self.0.close_signal.notified() => {
+                *slot = None;
+                return Err(RqxError::new_err("response closed"));
+            }
+            next = stream.next() => next,
+        };
+        match next {
             Some(Ok(bytes)) => Ok(Some(bytes)),
             Some(Err(e)) => {
                 *slot = None;
@@ -58,21 +80,43 @@ impl LiveStream {
         }
     }
 
+    /// Mark closed and wake a pending read, then drop the stream. The flag and
+    /// the wake-up come first so a read waiting on the network gives up the
+    /// lock instead of holding this call until data arrives.
     async fn close(&self) {
-        *self.0.lock().await = None;
+        self.mark_closed();
+        *self.0.stream.lock().await = None;
     }
 
     /// For the sync response, which closes from the Python thread, off the runtime.
     fn close_blocking(&self) {
-        *self.0.blocking_lock() = None;
+        self.mark_closed();
+        *self.0.stream.blocking_lock() = None;
     }
 
-    /// A poll in flight holds the lock; that counts as open.
+    fn mark_closed(&self) {
+        self.0.closed.store(true, Ordering::Release);
+        self.0.close_signal.notify_one();
+    }
+
+    /// Raise if the response was closed under the iterator; buffered pieces are
+    /// not served after a close, only after the stream's own end.
+    fn check_open(&self) -> PyResult<()> {
+        if self.0.closed.load(Ordering::Acquire) {
+            return Err(RqxError::new_err("response closed"));
+        }
+        Ok(())
+    }
+
+    /// Closed, or read to the end. A poll in flight holds the lock; that counts as open.
     fn is_closed(&self) -> bool {
-        self.0
-            .try_lock()
-            .map(|slot| slot.is_none())
-            .unwrap_or(false)
+        self.0.closed.load(Ordering::Acquire)
+            || self
+                .0
+                .stream
+                .try_lock()
+                .map(|slot| slot.is_none())
+                .unwrap_or(false)
     }
 }
 
@@ -207,45 +251,154 @@ impl LineDecoder {
     }
 }
 
+/// Regroups network chunks into pieces of exactly `size` bytes; the last piece
+/// is whatever remains. Whole pieces are split off the incoming chunk without
+/// copying; only the bytes needed to complete a piece are copied into `carry`,
+/// one reused buffer, so memory stays at about `size` plus one network chunk.
+/// Without a size, chunks pass through as the network delivered them.
+struct ByteChunker {
+    size: Option<usize>,
+    carry: BytesMut,
+    head: Bytes,
+}
+
+impl ByteChunker {
+    fn new(size: Option<usize>) -> Self {
+        Self {
+            size,
+            carry: BytesMut::new(),
+            head: Bytes::new(),
+        }
+    }
+
+    fn feed(&mut self, mut bytes: Bytes) {
+        if let Some(size) = self.size
+            && !self.carry.is_empty()
+        {
+            let take = (size - self.carry.len()).min(bytes.len());
+            self.carry.extend_from_slice(&bytes.split_to(take));
+        }
+        self.head = bytes;
+    }
+
+    /// The next full piece, if one is buffered.
+    fn next_full(&mut self) -> Option<Bytes> {
+        let Some(size) = self.size else {
+            return (!self.head.is_empty()).then(|| std::mem::take(&mut self.head));
+        };
+        if self.carry.len() >= size {
+            return Some(self.carry.split_to(size).freeze());
+        }
+        if self.head.len() >= size && self.carry.is_empty() {
+            return Some(self.head.split_to(size));
+        }
+        // Too short on both sides: park the head so the next chunk completes it.
+        if !self.head.is_empty() {
+            self.carry.extend_from_slice(&self.head);
+            self.head = Bytes::new();
+        }
+        None
+    }
+
+    /// Whatever is left once the stream has ended.
+    fn flush(&mut self) -> Option<Bytes> {
+        self.carry.extend_from_slice(&self.head);
+        self.head = Bytes::new();
+        (!self.carry.is_empty()).then(|| self.carry.split().freeze())
+    }
+}
+
+/// Regroups decoded text into pieces of exactly `size` characters; the last
+/// piece is whatever remains. A piece never splits a character. Consumed text
+/// is dropped once per `feed`, not per piece, so small sizes stay linear.
+/// Without a size, text passes through as each network chunk decodes.
+struct TextChunker {
+    size: Option<usize>,
+    pending: String,
+    consumed: usize,
+}
+
+impl TextChunker {
+    fn new(size: Option<usize>) -> Self {
+        Self {
+            size,
+            pending: String::new(),
+            consumed: 0,
+        }
+    }
+
+    fn feed(&mut self, text: &str) {
+        if self.consumed > 0 {
+            self.pending.drain(..self.consumed);
+            self.consumed = 0;
+        }
+        self.pending.push_str(text);
+    }
+
+    /// The next full piece, if `size` characters are buffered.
+    fn next_full(&mut self) -> Option<String> {
+        let unread = &self.pending[self.consumed..];
+        let Some(size) = self.size else {
+            self.consumed = self.pending.len();
+            return (!unread.is_empty()).then(|| unread.to_string());
+        };
+        let (last_start, last) = unread.char_indices().nth(size - 1)?;
+        let end = last_start + last.len_utf8();
+        let piece = unread[..end].to_string();
+        self.consumed += end;
+        Some(piece)
+    }
+
+    fn flush(&mut self) -> Option<String> {
+        let rest = self.pending[self.consumed..].to_string();
+        self.pending.clear();
+        self.consumed = 0;
+        (!rest.is_empty()).then_some(rest)
+    }
+}
+
 #[pyclass]
 struct PyByteIterator {
     stream: LiveStream,
-    // Currently accepted from the Python `iter_bytes(chunk_size=...)` call but
-    // not applied: reqwest's `Response::bytes_stream()` yields chunks as they
-    // arrive from the network, not at caller-chosen boundaries. Matching
-    // `chunk_size` semantics would require buffering here (accumulate bytes
-    // until we have `chunk_size` of them, then yield). Kept on the struct so
-    // the plumbing is in place when we implement that.
-    #[allow(dead_code)]
-    chunk_size: u32,
+    chunker: ByteChunker,
+    finished: bool,
 }
 
 #[pymethods]
 impl PyByteIterator {
-    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+    fn __iter__(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
         slf
     }
 
-    fn __next__(slf: PyRef<'_, Self>) -> PyResult<Option<Py<PyBytes>>> {
+    fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<Py<PyBytes>>> {
         let py = slf.py();
         let stream = slf.stream.clone();
-        let chunk = block_on_inner(py, stream.next_chunk())?;
-        Ok(chunk.map(|bytes| PyBytes::new(py, &bytes).unbind()))
+        loop {
+            if !slf.finished {
+                stream.check_open()?;
+            }
+            if let Some(piece) = slf.chunker.next_full() {
+                return Ok(Some(PyBytes::new(py, &piece).unbind()));
+            }
+            if slf.finished {
+                return Ok(slf
+                    .chunker
+                    .flush()
+                    .map(|piece| PyBytes::new(py, &piece).unbind()));
+            }
+            match block_on_inner(py, stream.next_chunk())? {
+                Some(bytes) => slf.chunker.feed(bytes),
+                None => slf.finished = true,
+            }
+        }
     }
 }
 
 #[pyclass]
 struct PyTextIterator {
     stream: LiveStream,
-    // Currently accepted from the Python `iter_bytes(chunk_size=...)` call but
-    // not applied: reqwest's `Response::bytes_stream()` yields chunks as they
-    // arrive from the network, not at caller-chosen boundaries. Matching
-    // `chunk_size` semantics would require buffering here (accumulate bytes
-    // until we have `chunk_size` of them, then yield). Kept on the struct so
-    // the plumbing is in place when we implement that.
-    #[allow(dead_code)]
-    chunk_size: u32,
     decoder: TextDecoder,
+    chunker: TextChunker,
     finished: bool,
 }
 
@@ -256,30 +409,28 @@ impl PyTextIterator {
     }
 
     fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<String>> {
-        if slf.finished {
-            return Ok(None);
-        }
-
         let py = slf.py();
         let stream = slf.stream.clone();
-
         loop {
-            let chunk = block_on_inner(py, stream.next_chunk())?;
-
-            match chunk {
-                // A chunk may complete no character (the decoder holds the
-                // partial bytes), so loop until decoding yields some text.
+            if !slf.finished {
+                stream.check_open()?;
+            }
+            if let Some(piece) = slf.chunker.next_full() {
+                return Ok(Some(piece));
+            }
+            if slf.finished {
+                return Ok(slf.chunker.flush());
+            }
+            match block_on_inner(py, stream.next_chunk())? {
                 Some(src) => {
                     let text = slf.decoder.decode(&src, false);
-                    if !text.is_empty() {
-                        return Ok(Some(text));
-                    }
+                    slf.chunker.feed(&text);
                 }
-                // End of stream — flush any character the decoder still holds.
+                // End of stream: flush any character the decoder still holds.
                 None => {
                     slf.finished = true;
                     let text = slf.decoder.decode(&[], true);
-                    return Ok((!text.is_empty()).then_some(text));
+                    slf.chunker.feed(&text);
                 }
             }
         }
@@ -289,8 +440,6 @@ impl PyTextIterator {
 #[pyclass]
 struct PyLineIterator {
     stream: LiveStream,
-    #[allow(dead_code)]
-    chunk_size: u32,
     decoder: TextDecoder,
     lines: LineDecoder,
     // Complete lines decoded from a chunk but not yet yielded — one chunk can
@@ -310,6 +459,9 @@ impl PyLineIterator {
         let stream = slf.stream.clone();
 
         loop {
+            if !slf.finished {
+                stream.check_open()?;
+            }
             // Drain already-decoded lines before touching the network.
             if let Some(line) = slf.pending.pop_front() {
                 return Ok(Some(line));
@@ -359,12 +511,15 @@ impl<'py> IntoPyObject<'py> for PyBytesChunk {
     }
 }
 
+struct AsyncByteState {
+    stream: LiveStream,
+    chunker: ByteChunker,
+    finished: bool,
+}
+
 #[pyclass]
 struct PyAsyncByteIterator {
-    stream: LiveStream,
-    // See PyByteIterator.chunk_size — same situation on the async path.
-    #[allow(dead_code)]
-    chunk_size: u32,
+    state: Arc<TokioMutex<AsyncByteState>>,
 }
 
 #[pymethods]
@@ -374,11 +529,26 @@ impl PyAsyncByteIterator {
     }
 
     fn __anext__<'py>(slf: PyRef<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
-        let stream = slf.stream.clone();
+        let state = Arc::clone(&slf.state);
         RUNTIME.future_into_py(slf.py(), async move {
-            match stream.next_chunk().await? {
-                Some(bytes) => Ok(Some(PyBytesChunk(bytes))),
-                None => Err(pyo3::exceptions::PyStopAsyncIteration::new_err(())),
+            let mut s = state.lock().await;
+            loop {
+                if !s.finished {
+                    s.stream.check_open()?;
+                }
+                if let Some(piece) = s.chunker.next_full() {
+                    return Ok(Some(PyBytesChunk(piece)));
+                }
+                if s.finished {
+                    return match s.chunker.flush() {
+                        Some(piece) => Ok(Some(PyBytesChunk(piece))),
+                        None => Err(pyo3::exceptions::PyStopAsyncIteration::new_err(())),
+                    };
+                }
+                match s.stream.next_chunk().await? {
+                    Some(bytes) => s.chunker.feed(bytes),
+                    None => s.finished = true,
+                }
             }
         })
     }
@@ -387,14 +557,13 @@ impl PyAsyncByteIterator {
 struct AsyncTextState {
     stream: LiveStream,
     decoder: TextDecoder,
+    chunker: TextChunker,
     finished: bool,
 }
 
 #[pyclass]
 struct PyAsyncTextIterator {
     state: Arc<TokioMutex<AsyncTextState>>,
-    #[allow(dead_code)]
-    chunk_size: u32,
 }
 
 #[pymethods]
@@ -408,28 +577,29 @@ impl PyAsyncTextIterator {
         RUNTIME.future_into_py(slf.py(), async move {
             // Held across the chunk-pull await, so a tokio mutex (not std).
             let mut s = state.lock().await;
-            if s.finished {
-                return Err(pyo3::exceptions::PyStopAsyncIteration::new_err(()));
-            }
             loop {
+                if !s.finished {
+                    s.stream.check_open()?;
+                }
+                if let Some(piece) = s.chunker.next_full() {
+                    return Ok(piece);
+                }
+                if s.finished {
+                    return match s.chunker.flush() {
+                        Some(piece) => Ok(piece),
+                        None => Err(pyo3::exceptions::PyStopAsyncIteration::new_err(())),
+                    };
+                }
                 let chunk = s.stream.next_chunk().await?;
                 match chunk {
-                    // A chunk may complete no character (decoder holds the
-                    // bytes), so keep pulling until decoding yields text.
                     Some(src) => {
                         let text = s.decoder.decode(&src, false);
-                        if !text.is_empty() {
-                            return Ok(text);
-                        }
+                        s.chunker.feed(&text);
                     }
                     None => {
                         s.finished = true;
                         let text = s.decoder.decode(&[], true);
-                        return if text.is_empty() {
-                            Err(pyo3::exceptions::PyStopAsyncIteration::new_err(()))
-                        } else {
-                            Ok(text)
-                        };
+                        s.chunker.feed(&text);
                     }
                 }
             }
@@ -448,8 +618,6 @@ struct AsyncLineState {
 #[pyclass]
 struct PyAsyncLineIterator {
     state: Arc<TokioMutex<AsyncLineState>>,
-    #[allow(dead_code)]
-    chunk_size: u32,
 }
 
 #[pymethods]
@@ -463,6 +631,9 @@ impl PyAsyncLineIterator {
         RUNTIME.future_into_py(slf.py(), async move {
             let mut s = state.lock().await;
             loop {
+                if !s.finished {
+                    s.stream.check_open()?;
+                }
                 if let Some(line) = s.pending.pop_front() {
                     return Ok(line);
                 }
@@ -543,38 +714,38 @@ impl PyStreamResponse {
         }
     }
 
-    /// Iterate over response bytes as they arrive.
-    ///
-    /// NOTE: `chunk_size` is currently accepted for API compatibility but is
-    /// not enforced — chunks are yielded with whatever boundaries reqwest
-    /// delivers from the network, typically 8–64 KB depending on the socket
-    /// and server behavior. If you need fixed-size chunks, buffer on the
-    /// caller side. Honoring `chunk_size` requires internal buffering that
-    /// we haven't wired up yet.
-    #[pyo3(signature = (chunk_size=8192))]
-    fn iter_bytes(&mut self, chunk_size: u32) -> PyResult<PyByteIterator> {
+    /// Iterate over the body as the network delivers it, or in pieces of exactly
+    /// `chunk_size` bytes with the remainder last.
+    #[pyo3(signature = (chunk_size=None))]
+    fn iter_bytes(&mut self, chunk_size: Option<usize>) -> PyResult<PyByteIterator> {
+        let chunker = ByteChunker::new(Self::checked_chunk_size(chunk_size)?);
         let stream = self.start_stream()?;
-        Ok(PyByteIterator { stream, chunk_size })
-    }
-
-    #[pyo3(signature = (chunk_size=8192))]
-    fn iter_text(&mut self, chunk_size: u32) -> PyResult<PyTextIterator> {
-        let stream = self.start_stream()?;
-
-        Ok(PyTextIterator {
+        Ok(PyByteIterator {
             stream,
-            chunk_size,
-            decoder: TextDecoder::new(self.parts.resolved_encoding()),
+            chunker,
             finished: false,
         })
     }
 
-    #[pyo3(signature = (chunk_size=8192))]
-    fn iter_lines(&mut self, chunk_size: u32) -> PyResult<PyLineIterator> {
+    /// Iterate over the decoded body as it arrives, or in pieces of exactly
+    /// `chunk_size` characters with the remainder last.
+    #[pyo3(signature = (chunk_size=None))]
+    fn iter_text(&mut self, chunk_size: Option<usize>) -> PyResult<PyTextIterator> {
+        let chunker = TextChunker::new(Self::checked_chunk_size(chunk_size)?);
+        let stream = self.start_stream()?;
+        Ok(PyTextIterator {
+            stream,
+            decoder: TextDecoder::new(self.parts.resolved_encoding()),
+            chunker,
+            finished: false,
+        })
+    }
+
+    /// Iterate over the decoded body line by line, terminators removed.
+    fn iter_lines(&mut self) -> PyResult<PyLineIterator> {
         let stream = self.start_stream()?;
         Ok(PyLineIterator {
             stream,
-            chunk_size,
             decoder: TextDecoder::new(self.parts.resolved_encoding()),
             lines: LineDecoder::default(),
             pending: VecDeque::new(),
@@ -761,6 +932,13 @@ impl PyStreamResponse {
 }
 
 impl PyStreamResponse {
+    fn checked_chunk_size(chunk_size: Option<usize>) -> PyResult<Option<usize>> {
+        if chunk_size == Some(0) {
+            return Err(PyValueError::new_err("chunk_size must be at least 1"));
+        }
+        Ok(chunk_size)
+    }
+
     /// Hand the live body to an iterator, keeping a handle so `close` reaches it.
     fn start_stream(&mut self) -> PyResult<LiveStream> {
         match self.body.take() {
@@ -806,33 +984,39 @@ pub struct PyAsyncStreamResponse {
 
 #[pymethods]
 impl PyAsyncStreamResponse {
-    /// Async iterate over response bytes as they arrive.
-    ///
-    /// NOTE: `chunk_size` is currently accepted for API compatibility but is
-    /// not enforced — chunks are yielded with whatever boundaries reqwest
-    /// delivers from the network. See PyStreamResponse::iter_bytes for the
-    /// full explanation.
-    #[pyo3(signature = (chunk_size=8192))]
-    fn aiter_bytes(&mut self, chunk_size: u32) -> PyResult<PyAsyncByteIterator> {
+    /// Iterate over the body as the network delivers it, or in pieces of exactly
+    /// `chunk_size` bytes with the remainder last.
+    #[pyo3(signature = (chunk_size=None))]
+    fn aiter_bytes(&mut self, chunk_size: Option<usize>) -> PyResult<PyAsyncByteIterator> {
+        let chunker = ByteChunker::new(PyStreamResponse::checked_chunk_size(chunk_size)?);
         let stream = self.start_stream()?;
-        Ok(PyAsyncByteIterator { stream, chunk_size })
+        Ok(PyAsyncByteIterator {
+            state: Arc::new(TokioMutex::new(AsyncByteState {
+                stream,
+                chunker,
+                finished: false,
+            })),
+        })
     }
 
-    #[pyo3(signature = (chunk_size=8192))]
-    fn aiter_text(&mut self, chunk_size: u32) -> PyResult<PyAsyncTextIterator> {
+    /// Iterate over the decoded body as it arrives, or in pieces of exactly
+    /// `chunk_size` characters with the remainder last.
+    #[pyo3(signature = (chunk_size=None))]
+    fn aiter_text(&mut self, chunk_size: Option<usize>) -> PyResult<PyAsyncTextIterator> {
+        let chunker = TextChunker::new(PyStreamResponse::checked_chunk_size(chunk_size)?);
         let stream = self.start_stream()?;
         Ok(PyAsyncTextIterator {
             state: Arc::new(TokioMutex::new(AsyncTextState {
                 stream,
                 decoder: TextDecoder::new(self.parts.resolved_encoding()),
+                chunker,
                 finished: false,
             })),
-            chunk_size,
         })
     }
 
-    #[pyo3(signature = (chunk_size=8192))]
-    fn aiter_lines(&mut self, chunk_size: u32) -> PyResult<PyAsyncLineIterator> {
+    /// Iterate over the decoded body line by line, terminators removed.
+    fn aiter_lines(&mut self) -> PyResult<PyAsyncLineIterator> {
         let stream = self.start_stream()?;
         Ok(PyAsyncLineIterator {
             state: Arc::new(TokioMutex::new(AsyncLineState {
@@ -842,7 +1026,6 @@ impl PyAsyncStreamResponse {
                 pending: VecDeque::new(),
                 finished: false,
             })),
-            chunk_size,
         })
     }
 
@@ -1092,7 +1275,86 @@ impl PyAsyncStreamResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::LineDecoder;
+    use super::{ByteChunker, LineDecoder, TextChunker};
+    use bytes::Bytes;
+
+    /// Feed `chunks` through a chunker of `size` and collect what it yields.
+    fn rechunk(size: usize, chunks: &[&[u8]]) -> Vec<Vec<u8>> {
+        let mut chunker = ByteChunker::new(Some(size));
+        let mut out = Vec::new();
+        for chunk in chunks {
+            chunker.feed(Bytes::copy_from_slice(chunk));
+            while let Some(piece) = chunker.next_full() {
+                out.push(piece.to_vec());
+            }
+        }
+        if let Some(rest) = chunker.flush() {
+            out.push(rest.to_vec());
+        }
+        out
+    }
+
+    #[test]
+    fn byte_chunker_yields_exact_pieces_and_a_remainder() {
+        let body: Vec<u8> = (0..=255u8).cycle().take(1000).collect();
+        for size in [1usize, 3, 7, 64, 333, 999, 1000, 1001] {
+            for cut in [1usize, 5, 128, 512, 1000] {
+                let chunks: Vec<&[u8]> = body.chunks(cut).collect();
+                let pieces = rechunk(size, &chunks);
+                assert!(
+                    pieces[..pieces.len() - 1].iter().all(|p| p.len() == size),
+                    "size {size} cut {cut}"
+                );
+                assert!(!pieces.last().unwrap().is_empty() && pieces.last().unwrap().len() <= size);
+                assert_eq!(pieces.concat(), body, "size {size} cut {cut}");
+            }
+        }
+    }
+
+    #[test]
+    fn chunkers_without_a_size_pass_chunks_through() {
+        let mut bytes = ByteChunker::new(None);
+        bytes.feed(Bytes::from_static(b"abc"));
+        assert_eq!(bytes.next_full().as_deref(), Some(&b"abc"[..]));
+        assert_eq!(bytes.next_full(), None);
+        assert_eq!(bytes.flush(), None);
+        let mut text = TextChunker::new(None);
+        text.feed("héllo");
+        assert_eq!(text.next_full().as_deref(), Some("héllo"));
+        assert_eq!(text.next_full(), None);
+        assert_eq!(text.flush(), None);
+    }
+
+    #[test]
+    fn byte_chunker_empty_body_yields_nothing() {
+        assert!(rechunk(16, &[]).is_empty());
+        assert!(rechunk(16, &[b""]).is_empty());
+    }
+
+    #[test]
+    fn text_chunker_counts_characters() {
+        let mut chunker = TextChunker::new(Some(2));
+        chunker.feed("aé€🙂b");
+        assert_eq!(chunker.next_full().as_deref(), Some("aé"));
+        assert_eq!(chunker.next_full().as_deref(), Some("€🙂"));
+        assert_eq!(chunker.next_full(), None);
+        assert_eq!(chunker.flush().as_deref(), Some("b"));
+        assert_eq!(chunker.flush(), None);
+    }
+
+    #[test]
+    fn text_chunker_yields_a_piece_of_exactly_size_without_waiting_for_more() {
+        // A live stream that sends exactly `size` characters and pauses must not stall.
+        let mut chunker = TextChunker::new(Some(3));
+        chunker.feed("a€🙂");
+        assert_eq!(chunker.next_full().as_deref(), Some("a€🙂"));
+        assert_eq!(chunker.next_full(), None);
+        chunker.feed("bc");
+        assert_eq!(chunker.next_full(), None);
+        chunker.feed("d");
+        assert_eq!(chunker.next_full().as_deref(), Some("bcd"));
+        assert_eq!(chunker.flush(), None);
+    }
 
     #[test]
     fn split_lines_matches_splitlines() {

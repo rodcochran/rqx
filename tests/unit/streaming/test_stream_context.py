@@ -200,3 +200,55 @@ async def test_async_stream_error_closes_the_response(canned_server):
                 async for _ in resp.aiter_bytes():
                     pass
             assert resp.is_closed is True
+
+
+@pytest.mark.asyncio
+async def test_async_close_interrupts_a_read_waiting_on_the_network(canned_server):
+    """aclose() must not wait behind a read that the server is stalling."""
+    import asyncio
+
+    url = canned_server(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nhello", stall=True
+    )
+    async with rqx.AsyncClient() as client:
+        async with client.stream("GET", url) as resp:
+            chunks = resp.aiter_bytes(5)
+            assert await chunks.__anext__() == b"hello"
+            pending = asyncio.ensure_future(
+                chunks.__anext__()
+            )  # now waiting on the network
+            await asyncio.sleep(0.2)
+            assert not pending.done()
+            await asyncio.wait_for(resp.aclose(), timeout=2)
+            with pytest.raises(rqx.RqxError, match="closed"):
+                await asyncio.wait_for(pending, timeout=2)
+            assert resp.is_closed is True
+
+
+def test_close_interrupts_a_read_waiting_on_the_network(canned_server):
+    """close() from another thread must not wait behind a read the server is stalling."""
+    import threading
+
+    url = canned_server(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nhello", stall=True
+    )
+    with rqx.Client().stream("GET", url) as resp:
+        chunks = resp.iter_bytes(5)
+        assert next(chunks) == b"hello"
+        outcome = []
+        worker = threading.Thread(target=lambda: outcome.append(_call(next, chunks)))
+        worker.start()  # now waiting on the network, GIL released
+        worker.join(timeout=0.2)
+        assert worker.is_alive()
+        resp.close()
+        worker.join(timeout=2)
+        assert not worker.is_alive(), "close() did not interrupt the pending read"
+        assert isinstance(outcome[0], rqx.RqxError) and "closed" in str(outcome[0])
+        assert resp.is_closed is True
+
+
+def _call(fn, *args):
+    try:
+        return fn(*args)
+    except Exception as e:  # noqa: BLE001 - the test inspects whatever was raised
+        return e
