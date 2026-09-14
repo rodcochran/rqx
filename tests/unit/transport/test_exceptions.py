@@ -163,22 +163,22 @@ async def test_stream_iterators_share_the_mapping_async(canned_server):
     url = canned_server(SHORT_BODY)
     corrupt = canned_server(CORRUPT_ENCODINGS["gzip"])
     async with rqx.AsyncClient() as client:
-        resp = await client.stream("GET", url)
-        with pytest.raises(rqx.RemoteProtocolError):
-            async for _ in resp.aiter_bytes():
-                pass
-        resp = await client.stream("GET", url)
-        with pytest.raises(rqx.RemoteProtocolError):
-            async for _ in resp.aiter_text():
-                pass
-        resp = await client.stream("GET", url)
-        with pytest.raises(rqx.RemoteProtocolError):
-            async for _ in resp.aiter_lines():
-                pass
-        resp = await client.stream("GET", corrupt)
-        with pytest.raises(rqx.DecodingError):
-            async for _ in resp.aiter_bytes():
-                pass
+        async with client.stream("GET", url) as resp:
+            with pytest.raises(rqx.RemoteProtocolError):
+                async for _ in resp.aiter_bytes():
+                    pass
+        async with client.stream("GET", url) as resp:
+            with pytest.raises(rqx.RemoteProtocolError):
+                async for _ in resp.aiter_text():
+                    pass
+        async with client.stream("GET", url) as resp:
+            with pytest.raises(rqx.RemoteProtocolError):
+                async for _ in resp.aiter_lines():
+                    pass
+        async with client.stream("GET", corrupt) as resp:
+            with pytest.raises(rqx.DecodingError):
+                async for _ in resp.aiter_bytes():
+                    pass
 
 
 # ----- issue #182: URLs -----

@@ -118,7 +118,7 @@ def test_stream_response_is_redirect_with_location(flaky_server):
 async def test_async_stream_response_has_status_props(flaky_server):
     """PyAsyncStreamResponse exposes the same boolean props."""
     client = rqx.AsyncClient()
-    async with await client.stream("GET", f"{flaky_server}/streamable") as resp:
+    async with client.stream("GET", f"{flaky_server}/streamable") as resp:
         assert resp.is_success is True
         assert resp.is_redirect is False
         assert resp.is_error is False

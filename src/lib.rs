@@ -21,6 +21,7 @@ mod response;
 mod retry;
 mod runtime;
 mod stream;
+mod stream_context;
 mod timeout;
 mod transport;
 mod url;
@@ -32,6 +33,7 @@ use response::PyResponse;
 use retry::PyRetry;
 use runtime::RUNTIME;
 use stream::{PyAsyncStreamResponse, PyStreamResponse};
+use stream_context::{PyAsyncStreamContext, PyStreamContext};
 use timeout::PyTimeout;
 use transport::{AsyncHTTPTransport, HTTPTransport};
 
@@ -79,6 +81,8 @@ fn _rqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyResponse>()?;
     m.add_class::<PyStreamResponse>()?;
     m.add_class::<PyAsyncStreamResponse>()?;
+    m.add_class::<PyStreamContext>()?;
+    m.add_class::<PyAsyncStreamContext>()?;
     m.add("RqxError", m.py().get_type::<RqxError>())?;
     m.add("HTTPError", m.py().get_type::<HTTPError>())?;
     m.add("RequestError", m.py().get_type::<RequestError>())?;

@@ -24,6 +24,9 @@ class Lib:
     def client(self, **kwargs):
         return self.module.Client(**kwargs)
 
+    def async_client(self, **kwargs):
+        return self.module.AsyncClient(**kwargs)
+
     def proxied_client(self, proxy_url: str):
         proxy = proxy_url.rstrip("/")
         if self.name == "httpx":

@@ -623,8 +623,8 @@ async def test_cookies_basic(httpbin):
 @pytest.mark.asyncio
 async def test_async_stream(httpbin):
     async with rqx.AsyncClient() as client:
-        resp = await client.stream("GET", f"{httpbin}/stream/5")
-        chunks = []
-        async for chunk in resp.aiter_bytes(1024):
-            chunks.append(chunk)
-        assert len(chunks) > 0
+        async with client.stream("GET", f"{httpbin}/stream/5") as resp:
+            chunks = []
+            async for chunk in resp.aiter_bytes(1024):
+                chunks.append(chunk)
+            assert len(chunks) > 0
