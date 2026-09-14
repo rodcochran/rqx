@@ -142,8 +142,8 @@ impl ResponseParts {
         (400..600).contains(&self.status_code)
     }
 
-    /// `raise_for_status()`'s error for any status outside 2xx, worded like httpx's.
-    /// The caller attaches the response as `.response`.
+    /// `raise_for_status()`'s error for any status outside 2xx, with httpx's exact
+    /// message. The caller attaches the response as `.response`.
     pub fn status_error(&self) -> Option<PyErr> {
         if self.is_success() {
             return None;
@@ -159,10 +159,17 @@ impl ResponseParts {
             .ok()
             .and_then(|s| s.canonical_reason())
             .unwrap_or("");
-        Some(HTTPStatusError::new_err(format!(
-            "{kind} '{} {reason}' for url '{}'",
-            self.status_code, self.url
-        )))
+        let code = self.status_code;
+        let mut message = format!("{kind} '{code} {reason}' for url '{}'\n", self.url);
+        let location = self.headers.get(http::header::LOCATION);
+        if let (301 | 302 | 303 | 307 | 308, Some(location)) = (code, location) {
+            let location = String::from_utf8_lossy(location.as_bytes());
+            message.push_str(&format!("Redirect location: '{location}'\n"));
+        }
+        message.push_str(&format!(
+            "For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/{code}"
+        ));
+        Some(HTTPStatusError::new_err(message))
     }
 
     /// `json()`'s error for a body serde_json rejects, positioned the way the stdlib

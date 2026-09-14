@@ -76,3 +76,25 @@ def test_invalid_json_raises_json_decode_error(lib, canned_server):
     resp = lib.client().get(canned_server(head.encode() + body))
     with pytest.raises(json.JSONDecodeError):
         resp.json()
+
+
+@pytest.mark.parametrize(
+    ("method", "path"), [("DELETE", "/no-such-route"), ("GET", "/redirect-once")]
+)
+def test_status_error_message_matches(lib, flaky_server, method, path):
+    """Same text as httpx, including the redirect location and the MDN line."""
+    resp = lib.client().request(method, f"{flaky_server}{path}")
+    with pytest.raises(lib.module.HTTPStatusError) as caught:
+        resp.raise_for_status()
+    expected = {
+        "/no-such-route": (
+            f"Client error '404 Not Found' for url '{flaky_server}/no-such-route'\n"
+            "For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404"
+        ),
+        "/redirect-once": (
+            f"Redirect response '302 Found' for url '{flaky_server}/redirect-once'\n"
+            "Redirect location: '/streamable'\n"
+            "For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/302"
+        ),
+    }[path]
+    assert str(caught.value) == expected
