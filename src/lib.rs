@@ -113,5 +113,6 @@ fn _rqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ConnectError", m.py().get_type::<ConnectError>())?;
     m.add("ReadError", m.py().get_type::<ReadError>())?;
     m.add("WriteError", m.py().get_type::<WriteError>())?;
+    StdlibBackedExceptions::register(m)?;
     Ok(())
 }

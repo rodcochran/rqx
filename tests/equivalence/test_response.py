@@ -1,6 +1,9 @@
 """Response surface: status, text, json(), classification, final URL."""
 
+import json
 import uuid
+
+import pytest
 
 
 def test_status_text_and_json_on_a_plain_200(lib, flaky_server):
@@ -45,3 +48,31 @@ def test_final_url_after_following_a_redirect(lib, flaky_server):
     resp = lib.client(follow_redirects=True).get(f"{flaky_server}/redirect-once")
     assert resp.status_code == 200
     assert str(resp.url) == f"{flaky_server}/streamable"
+
+
+# ----- https://github.com/rodcochran/rqx/issues/189 -----
+
+
+def test_raise_for_status_returns_the_response(lib, flaky_server):
+    resp = lib.client().get(f"{flaky_server}/streamable")
+    assert resp.raise_for_status() is resp
+
+
+def test_status_error_carries_the_response(lib, flaky_server):
+    resp = lib.client().delete(f"{flaky_server}/no-such-route")
+    with pytest.raises(lib.module.HTTPStatusError) as caught:
+        resp.raise_for_status()
+    assert caught.value.response.status_code == 404
+
+
+def test_elapsed_is_a_timedelta(lib, flaky_server):
+    resp = lib.client().get(f"{flaky_server}/streamable")
+    assert resp.elapsed.total_seconds() >= 0
+
+
+def test_invalid_json_raises_json_decode_error(lib, canned_server):
+    body = b"<html>"
+    head = f"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {len(body)}\r\n\r\n"
+    resp = lib.client().get(canned_server(head.encode() + body))
+    with pytest.raises(json.JSONDecodeError):
+        resp.json()

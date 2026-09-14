@@ -2,12 +2,15 @@ use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
 use encoding_rs::{Decoder, Encoding};
 use futures::{Stream, StreamExt};
 use pyo3::exceptions::PyValueError;
-use pyo3::prelude::{Py, PyAny, PyRef, PyRefMut, PyResult, Python, pyclass, pymethods};
+use pyo3::prelude::{
+    Py, PyAny, PyAnyMethods, PyRef, PyRefMut, PyResult, Python, pyclass, pymethods,
+};
 use pyo3::sync::PyOnceLock;
 use pyo3::types::PyBytes;
 use pyo3::{Bound, IntoPyObject, PyErr};
@@ -57,13 +60,13 @@ impl LiveStream {
         let mut slot = self.0.stream.lock().await;
         self.check_open()?;
         let Some(stream) = slot.as_mut() else {
-            return Err(RqxError::new_err("response closed"));
+            return Err(StreamClosed::new_err("response closed"));
         };
         let next = tokio::select! {
             biased;
             _ = self.0.close_signal.notified() => {
                 *slot = None;
-                return Err(RqxError::new_err("response closed"));
+                return Err(StreamClosed::new_err("response closed"));
             }
             next = stream.next() => next,
         };
@@ -103,7 +106,7 @@ impl LiveStream {
     /// not served after a close, only after the stream's own end.
     fn check_open(&self) -> PyResult<()> {
         if self.0.closed.load(Ordering::Acquire) {
-            return Err(RqxError::new_err("response closed"));
+            return Err(StreamClosed::new_err("response closed"));
         }
         Ok(())
     }
@@ -763,10 +766,10 @@ impl PyStreamResponse {
             }
             Some(Body::Streaming(stream)) => {
                 self.body = Some(Body::Streaming(stream));
-                return Err(RqxError::new_err("response already consumed"));
+                return Err(StreamConsumed::new_err("response already consumed"));
             }
             Some(buffered) => self.body = Some(buffered), // already Buffered — restore unchanged
-            None => return Err(RqxError::new_err("response already consumed or closed")),
+            None => return Err(StreamClosed::new_err("response closed")),
         }
         self.content(py) // single, cached materialization — shared with the .content getter
     }
@@ -778,10 +781,10 @@ impl PyStreamResponse {
                 .content_cache
                 .get_or_init(py, || PyBytes::new(py, bytes).unbind())
                 .clone_ref(py)),
-            Some(Body::Live(_) | Body::Streaming(_)) => {
-                Err(RqxError::new_err("response not read; call read() first"))
-            }
-            None => Err(RqxError::new_err("response consumed or closed")),
+            Some(Body::Live(_) | Body::Streaming(_)) => Err(ResponseNotRead::new_err(
+                "response not read; call read() first",
+            )),
+            None => Err(StreamClosed::new_err("response closed")),
         }
     }
 
@@ -793,36 +796,24 @@ impl PyStreamResponse {
                 let (decoded, _, _) = encoding.decode(bytes);
                 Ok(decoded.into_owned())
             }
-            Some(Body::Live(_) | Body::Streaming(_)) => {
-                Err(RqxError::new_err("response not read; call read() first"))
-            }
-            None => Err(RqxError::new_err("response consumed or closed")),
+            Some(Body::Live(_) | Body::Streaming(_)) => Err(ResponseNotRead::new_err(
+                "response not read; call read() first",
+            )),
+            None => Err(StreamClosed::new_err("response closed")),
         }
     }
 
     fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         match &self.body {
             Some(Body::Buffered(bytes)) => {
-                let value = match serde_json::from_slice(bytes) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        let content_type = self.parts.content_type().unwrap_or("<none>");
-                        let preview_len = bytes.len().min(100);
-                        let preview = String::from_utf8_lossy(&bytes[..preview_len]);
-                        let ellipsis = if bytes.len() > 100 { "..." } else { "" };
-                        return Err(RqxError::new_err(format!(
-                            "response is not JSON (HTTP {}, content-type: {}): {:?}{} ({})",
-                            self.parts.status_code, content_type, preview, ellipsis, e
-                        )));
-                    }
-                };
-
+                let value = serde_json::from_slice(bytes)
+                    .map_err(|e| self.parts.json_decode_error(bytes, &e))?;
                 value_to_py(py, value)
             }
-            Some(Body::Live(_) | Body::Streaming(_)) => {
-                Err(RqxError::new_err("response not read; call read() first"))
-            }
-            None => Err(RqxError::new_err("response consumed or closed")),
+            Some(Body::Live(_) | Body::Streaming(_)) => Err(ResponseNotRead::new_err(
+                "response not read; call read() first",
+            )),
+            None => Err(StreamClosed::new_err("response closed")),
         }
     }
 
@@ -849,8 +840,18 @@ impl PyStreamResponse {
     }
 
     #[getter]
-    fn elapsed(&self) -> f64 {
+    fn elapsed(&self) -> Duration {
         self.parts.elapsed
+    }
+
+    /// The response itself when the status is 2xx; otherwise HTTPStatusError with
+    /// the response attached as `.response`.
+    fn raise_for_status(slf: Bound<'_, Self>) -> PyResult<Bound<'_, Self>> {
+        let Some(error) = slf.borrow().parts.status_error() else {
+            return Ok(slf);
+        };
+        error.value(slf.py()).setattr("response", &slf)?;
+        Err(error)
     }
 
     #[getter]
@@ -949,13 +950,15 @@ impl PyStreamResponse {
             }
             Some(Body::Streaming(stream)) => {
                 self.body = Some(Body::Streaming(stream));
-                Err(RqxError::new_err("response already consumed"))
+                Err(StreamConsumed::new_err("response already consumed"))
             }
             Some(buffered) => {
                 self.body = Some(buffered);
-                Err(RqxError::new_err("response already read into memory"))
+                Err(StreamConsumed::new_err(
+                    "response already read into memory; use .content, .text or .json()",
+                ))
             }
-            None => Err(RqxError::new_err("response already consumed or closed")),
+            None => Err(StreamClosed::new_err("response closed")),
         }
     }
 
@@ -1048,10 +1051,10 @@ impl PyAsyncStreamResponse {
                     }
                     Some(Body::Streaming(stream)) => {
                         *guard = Some(Body::Streaming(stream));
-                        return Err(RqxError::new_err("response already consumed"));
+                        return Err(StreamConsumed::new_err("response already consumed"));
                     }
                     None => {
-                        return Err(RqxError::new_err("response already consumed or closed"));
+                        return Err(StreamClosed::new_err("response closed"));
                     }
                 }
             };
@@ -1079,9 +1082,11 @@ impl PyAsyncStreamResponse {
         let bytes = match &*self.body.lock().unwrap() {
             Some(Body::Buffered(b)) => b.clone(),
             Some(Body::Live(_) | Body::Streaming(_)) => {
-                return Err(RqxError::new_err("response not read; call aread() first"));
+                return Err(ResponseNotRead::new_err(
+                    "response not read; call aread() first",
+                ));
             }
-            None => return Err(RqxError::new_err("response consumed or closed")),
+            None => return Err(StreamClosed::new_err("response closed")),
         };
         Ok(self
             .content_cache
@@ -1094,9 +1099,11 @@ impl PyAsyncStreamResponse {
         let bytes = match &*self.body.lock().unwrap() {
             Some(Body::Buffered(b)) => b.clone(),
             Some(Body::Live(_) | Body::Streaming(_)) => {
-                return Err(RqxError::new_err("response not read; call aread() first"));
+                return Err(ResponseNotRead::new_err(
+                    "response not read; call aread() first",
+                ));
             }
-            None => return Err(RqxError::new_err("response consumed or closed")),
+            None => return Err(StreamClosed::new_err("response closed")),
         };
         let (decoded, _, _) = self.parts.resolved_encoding().decode(&bytes);
         Ok(decoded.into_owned())
@@ -1106,23 +1113,14 @@ impl PyAsyncStreamResponse {
         let bytes = match &*self.body.lock().unwrap() {
             Some(Body::Buffered(b)) => b.clone(),
             Some(Body::Live(_) | Body::Streaming(_)) => {
-                return Err(RqxError::new_err("response not read; call aread() first"));
+                return Err(ResponseNotRead::new_err(
+                    "response not read; call aread() first",
+                ));
             }
-            None => return Err(RqxError::new_err("response consumed or closed")),
+            None => return Err(StreamClosed::new_err("response closed")),
         };
-        let value = match serde_json::from_slice(&bytes) {
-            Ok(v) => v,
-            Err(e) => {
-                let content_type = self.parts.content_type().unwrap_or("<none>");
-                let preview_len = bytes.len().min(100);
-                let preview = String::from_utf8_lossy(&bytes[..preview_len]);
-                let ellipsis = if bytes.len() > 100 { "..." } else { "" };
-                return Err(RqxError::new_err(format!(
-                    "response is not JSON (HTTP {}, content-type: {}): {:?}{} ({})",
-                    self.parts.status_code, content_type, preview, ellipsis, e
-                )));
-            }
-        };
+        let value =
+            serde_json::from_slice(&bytes).map_err(|e| self.parts.json_decode_error(&bytes, &e))?;
         value_to_py(py, value)
     }
 
@@ -1149,8 +1147,18 @@ impl PyAsyncStreamResponse {
     }
 
     #[getter]
-    fn elapsed(&self) -> f64 {
+    fn elapsed(&self) -> Duration {
         self.parts.elapsed
+    }
+
+    /// The response itself when the status is 2xx; otherwise HTTPStatusError with
+    /// the response attached as `.response`.
+    fn raise_for_status(slf: Bound<'_, Self>) -> PyResult<Bound<'_, Self>> {
+        let Some(error) = slf.borrow().parts.status_error() else {
+            return Ok(slf);
+        };
+        error.value(slf.py()).setattr("response", &slf)?;
+        Err(error)
     }
 
     #[getter]
@@ -1252,13 +1260,15 @@ impl PyAsyncStreamResponse {
             }
             Some(Body::Streaming(stream)) => {
                 *guard = Some(Body::Streaming(stream));
-                Err(RqxError::new_err("response already consumed"))
+                Err(StreamConsumed::new_err("response already consumed"))
             }
             Some(buffered) => {
                 *guard = Some(buffered);
-                Err(RqxError::new_err("response already read into memory"))
+                Err(StreamConsumed::new_err(
+                    "response already read into memory; use .content, .text or .json()",
+                ))
             }
-            None => Err(RqxError::new_err("response already consumed or closed")),
+            None => Err(StreamClosed::new_err("response closed")),
         }
     }
 

@@ -298,9 +298,9 @@ async def test_get_total_elapsed_time(httpbin):
     client = rqx.AsyncClient()
     resp = await client.get(f"{httpbin}/delay/{delay_time}")
     assert resp.elapsed is not None
-    assert resp.elapsed > delay_time
+    assert resp.elapsed.total_seconds() > delay_time
     print("")
-    print(f"Elapsed time:\n{resp.elapsed:.2f}s")
+    print(f"Elapsed time:\n{resp.elapsed.total_seconds():.2f}s")
 
 
 @pytest.mark.asyncio

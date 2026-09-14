@@ -1,17 +1,18 @@
 use bytes::Bytes;
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::time::Duration;
 
 use encoding_rs::Encoding;
 use http::StatusCode;
 use http::header::{HeaderMap, HeaderValue};
 use mime::Mime;
-use pyo3::prelude::{Py, PyAny, PyResult, Python, pyclass, pymethods};
+use pyo3::prelude::{Bound, Py, PyAny, PyAnyMethods, PyErr, PyResult, Python, pyclass, pymethods};
 use pyo3::sync::PyOnceLock;
 use pyo3::types::PyBytes;
 use reqwest::Response;
 
-use super::exceptions::{HTTPStatusError, RqxError, map_reqwest_error};
+use super::exceptions::{HTTPStatusError, JSONDecodeError, map_reqwest_error};
 use super::headers::PyHeaders;
 use super::py_json::value_to_py;
 
@@ -65,7 +66,7 @@ pub struct ResponseParts {
     pub(crate) status_code: u16,
     pub(crate) headers: HeaderMap, // will materialize into PyHeaders
     pub(crate) url: String,
-    pub(crate) elapsed: f64,     // is f32 precise enough?
+    pub(crate) elapsed: Duration,
     pub(crate) num_retries: u32, // can't be negative, can use u32?
     pub(crate) retry_history: Vec<(String, f64)>,
     pub(crate) http_version: String,
@@ -140,6 +141,57 @@ impl ResponseParts {
     pub fn is_error(&self) -> bool {
         (400..600).contains(&self.status_code)
     }
+
+    /// `raise_for_status()`'s error for any status outside 2xx, worded like httpx's.
+    /// The caller attaches the response as `.response`.
+    pub fn status_error(&self) -> Option<PyErr> {
+        if self.is_success() {
+            return None;
+        }
+        let kind = match self.status_code / 100 {
+            1 => "Informational response",
+            3 => "Redirect response",
+            4 => "Client error",
+            5 => "Server error",
+            _ => "Invalid status code",
+        };
+        let reason = StatusCode::from_u16(self.status_code)
+            .ok()
+            .and_then(|s| s.canonical_reason())
+            .unwrap_or("");
+        Some(HTTPStatusError::new_err(format!(
+            "{kind} '{} {reason}' for url '{}'",
+            self.status_code, self.url
+        )))
+    }
+
+    /// `json()`'s error for a body serde_json rejects, positioned the way the stdlib
+    /// parser positions it: `pos` counts characters, not bytes.
+    pub fn json_decode_error(&self, body: &[u8], error: &serde_json::Error) -> PyErr {
+        let doc = String::from_utf8_lossy(body).into_owned();
+        let byte_offset = if error.line() == 0 {
+            0
+        } else {
+            let line_start: usize = body
+                .split(|b| *b == b'\n')
+                .take(error.line() - 1)
+                .map(|line| line.len() + 1)
+                .sum();
+            (line_start + error.column().saturating_sub(1)).min(body.len())
+        };
+        let pos = String::from_utf8_lossy(&body[..byte_offset])
+            .chars()
+            .count();
+        let full = error.to_string();
+        let position = format!(" at line {} column {}", error.line(), error.column());
+        let reason = full.strip_suffix(&position).unwrap_or(&full);
+        let content_type = self.content_type().unwrap_or("<none>");
+        let message = format!(
+            "response is not JSON (HTTP {}, content-type: {content_type}): {reason}",
+            self.status_code
+        );
+        JSONDecodeError::new_err((message, doc, pos))
+    }
 }
 
 impl ResponseParts {
@@ -148,7 +200,7 @@ impl ResponseParts {
             status_code: response.status().as_u16(),
             headers: response.headers().clone(),
             url: response.url().to_string(),
-            elapsed: 0.0,
+            elapsed: Duration::ZERO,
             num_retries: 0,
             retry_history: Vec::new(),
             http_version: format!("{:?}", response.version()),
@@ -194,7 +246,7 @@ impl PyResponse {
     }
 
     #[getter]
-    fn elapsed(&self) -> f64 {
+    fn elapsed(&self) -> Duration {
         self.parts.elapsed
     }
 
@@ -267,38 +319,19 @@ impl PyResponse {
     /// json.loads round-trip (which was measurably slower than calling json.loads
     /// directly — see benchmarks/b5_json_parsing.py / docs/improvements.md).
     fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let value = match serde_json::from_slice(&self.body) {
-            Ok(v) => v,
-            Err(e) => {
-                let content_type = self.parts.content_type().unwrap_or("<none>");
-                let preview_len = self.body.len().min(100);
-                let preview = String::from_utf8_lossy(&self.body[..preview_len]);
-                let ellipsis = if self.body.len() > 100 { "..." } else { "" };
-                return Err(RqxError::new_err(format!(
-                    "response is not JSON (HTTP {}, content-type: {}): {:?}{} ({})",
-                    self.parts.status_code, content_type, preview, ellipsis, e
-                )));
-            }
-        };
-
+        let value = serde_json::from_slice(&self.body)
+            .map_err(|e| self.parts.json_decode_error(&self.body, &e))?;
         value_to_py(py, value)
     }
 
-    fn raise_for_status(&self) -> PyResult<()> {
-        let s_result = StatusCode::from_u16(self.parts.status_code);
-        match s_result {
-            Ok(s) => {
-                if !s.is_success() {
-                    Err(HTTPStatusError::new_err(format!(
-                        "{} error",
-                        self.parts.status_code
-                    )))
-                } else {
-                    Ok(())
-                }
-            }
-            Err(e) => Err(RqxError::new_err(format!("invalid Status Code: {e}"))),
-        }
+    /// The response itself when the status is 2xx; otherwise HTTPStatusError with
+    /// the response attached as `.response`.
+    fn raise_for_status(slf: Bound<'_, Self>) -> PyResult<Bound<'_, Self>> {
+        let Some(error) = slf.borrow().parts.status_error() else {
+            return Ok(slf);
+        };
+        error.value(slf.py()).setattr("response", &slf)?;
+        Err(error)
     }
 
     #[getter]

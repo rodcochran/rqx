@@ -98,7 +98,6 @@ impl Client {
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> PyResult<PyResponse> {
-        let start_time = Instant::now();
         let request = self.build(
             method,
             url,
@@ -111,10 +110,8 @@ impl Client {
             auth_bearer,
             timeout,
         )?;
-        let mut resp = self.send(request, follow_redirects).await?.read().await?;
-        // For a buffered response, elapsed covers the body read too.
-        resp.parts.elapsed = start_time.elapsed().as_secs_f64();
-        Ok(resp)
+        // `stream` stamps `elapsed` when the headers arrive; reading the body doesn't move it.
+        self.stream(request, follow_redirects).await?.read().await
     }
 
     /// Send a built request, leaving the body unread for the stream response
@@ -126,7 +123,7 @@ impl Client {
     ) -> PyResult<PendingResponse> {
         let start_time = Instant::now();
         let mut pending = self.send(request, follow_redirects).await?;
-        pending.parts.elapsed = start_time.elapsed().as_secs_f64();
+        pending.parts.elapsed = start_time.elapsed();
         Ok(pending)
     }
 
