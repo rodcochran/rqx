@@ -42,7 +42,7 @@ def test_stub_hierarchy_matches_runtime():
 
     stub = pathlib.Path(rqx.__file__).with_name("_types.pyi").read_text()
     classes = {
-        node.name: [base.id for base in node.bases]
+        node.name: [ast.unparse(base).rsplit(".", 1)[-1] for base in node.bases]
         for node in ast.parse(stub).body
         if isinstance(node, ast.ClassDef)
     }
@@ -56,7 +56,7 @@ def test_stub_hierarchy_matches_runtime():
             break
         declared |= more
     declared.discard("Exception")
-    assert "ConnectTimeout" in declared and "RqxError" in declared
+    assert {"ConnectTimeout", "RqxError", "StreamClosed", "JSONDecodeError"} <= declared
     for name in sorted(declared):
         runtime = [base.__name__ for base in getattr(rqx, name).__bases__]
         assert runtime == classes[name], (

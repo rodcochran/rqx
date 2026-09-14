@@ -5,6 +5,8 @@ Mirrors test_stream_surface.py for the async path: aread() buffers in place
 afterward — same httpx shape, where only read is async (no atext/ajson).
 """
 
+from datetime import timedelta
+
 import pytest
 
 import rqx
@@ -169,7 +171,7 @@ async def test_aiter_lines_splits_and_strips_terminators(flaky_server):
 async def test_elapsed_is_set_before_body_is_read(flaky_server):
     client = rqx.AsyncClient()
     async with client.stream("GET", f"{flaky_server}/sleep/0.2") as resp:
-        assert resp.elapsed >= 0.2
+        assert resp.elapsed >= timedelta(seconds=0.2)
         elapsed_at_headers = resp.elapsed
         await resp.aread()
         assert resp.elapsed == elapsed_at_headers

@@ -9,6 +9,8 @@ Uses the local `flaky_server` fixture for deterministic bodies:
   - /latin1     -> text/plain; charset=iso-8859-1, "café" as 0xE9
 """
 
+from datetime import timedelta
+
 import pytest
 
 import rqx
@@ -301,7 +303,7 @@ def test_stream_headers_are_cached(flaky_server):
 def test_elapsed_is_set_before_body_is_read(flaky_server):
     client = rqx.Client()
     with client.stream("GET", f"{flaky_server}/sleep/0.2") as resp:
-        assert resp.elapsed >= 0.2
+        assert resp.elapsed >= timedelta(seconds=0.2)
         elapsed_at_headers = resp.elapsed
         resp.read()
         assert resp.elapsed == elapsed_at_headers

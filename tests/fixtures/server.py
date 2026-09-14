@@ -200,6 +200,20 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self._send_compressed(algorithm)
             return
 
+        # /slow-body/<seconds> — headers at once, the body after a pause. Pins that
+        # `elapsed` stops when the headers arrive, not when the body finishes.
+        if path.startswith("/slow-body/"):
+            seconds = float(path.removeprefix("/slow-body/"))
+            body = b'{"slow": true}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.flush()
+            time.sleep(seconds)
+            self.wfile.write(body)
+            return
+
         # /sleep/<seconds> — server waits then returns 200. Used to test ReadTimeout.
         if path.startswith("/sleep/"):
             seconds = float(path.removeprefix("/sleep/"))

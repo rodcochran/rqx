@@ -1,7 +1,9 @@
 use std::error::Error as _;
 
-use pyo3::PyErr;
-use pyo3::create_exception;
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::{Bound, PyAny, PyAnyMethods, PyModule, PyModuleMethods, PyResult};
+use pyo3::types::{PyDict, PyType};
+use pyo3::{PyErr, create_exception, import_exception};
 
 /*
 
@@ -26,8 +28,16 @@ rqx.RqxError
     │   │   └── rqx.UnsupportedProtocol      (URL scheme is not http/https)
     │   ├── rqx.DecodingError            (Content-Encoding the decoder rejected)
     │   └── rqx.TooManyRedirects
-    ├── rqx.HTTPStatusError          (raised by raise_for_status())
+    ├── rqx.HTTPStatusError          (raised by raise_for_status(); carries .response)
     └── rqx.MaxRetriesExceeded       (raised when retries are exhausted)
+
+Also under rqx.RqxError, each with a stdlib base as well (built in `StdlibBackedExceptions`):
+
+rqx.JSONDecodeError                  (response.json(); also a json.JSONDecodeError)
+rqx.StreamError                      (misusing a stream; also a RuntimeError)
+├── rqx.StreamConsumed               (read or iterated twice)
+├── rqx.StreamClosed                 (used after close)
+└── rqx.ResponseNotRead              (.content / .text / .json() before read)
 */
 
 // Level 1
@@ -62,6 +72,71 @@ create_exception!(rqx, PoolTimeout, TimeoutException);
 create_exception!(rqx, ConnectError, NetworkError);
 create_exception!(rqx, ReadError, NetworkError);
 create_exception!(rqx, WriteError, NetworkError);
+
+// Classes with a stdlib base as well as an rqx one. `create_exception!` takes a single
+// base, so these are built with `type()` when the module loads and raised through
+// `import_exception!`, which looks them up on `rqx._rqx` the first time one is raised.
+import_exception!(rqx._rqx, JSONDecodeError);
+import_exception!(rqx._rqx, StreamError);
+import_exception!(rqx._rqx, StreamConsumed);
+import_exception!(rqx._rqx, StreamClosed);
+import_exception!(rqx._rqx, ResponseNotRead);
+
+pub struct StdlibBackedExceptions;
+
+impl StdlibBackedExceptions {
+    pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
+        let py = m.py();
+        let rqx_error = py.get_type::<RqxError>().into_any();
+        let stdlib_json_error = py.import("json")?.getattr("JSONDecodeError")?;
+        let runtime_error = py.get_type::<PyRuntimeError>().into_any();
+
+        Self::define(
+            m,
+            "JSONDecodeError",
+            (rqx_error.clone(), stdlib_json_error),
+            "response.json() found a body that isn't JSON. Also a json.JSONDecodeError.",
+        )?;
+        let stream_error = Self::define(
+            m,
+            "StreamError",
+            (rqx_error, runtime_error),
+            "A streamed response was used in a way it can't be. Also a RuntimeError.",
+        )?;
+        for (name, doc) in [
+            (
+                "StreamConsumed",
+                "The body was already read or iterated; it can be consumed once.",
+            ),
+            (
+                "StreamClosed",
+                "The response was closed before the body was read.",
+            ),
+            (
+                "ResponseNotRead",
+                "The body hasn't been read; call read() or aread() first.",
+            ),
+        ] {
+            Self::define(m, name, (stream_error.clone(),), doc)?;
+        }
+        Ok(())
+    }
+
+    fn define<'py>(
+        m: &Bound<'py, PyModule>,
+        name: &str,
+        bases: impl pyo3::IntoPyObject<'py>,
+        doc: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let py = m.py();
+        let namespace = PyDict::new(py);
+        namespace.set_item("__module__", "rqx")?;
+        namespace.set_item("__doc__", doc)?;
+        let class = py.get_type::<PyType>().call1((name, bases, namespace))?;
+        m.add(name, &class)?;
+        Ok(class)
+    }
+}
 
 // hyper-util keeps its tunnel error type private, so its text is all there is to match.
 const TUNNEL_REFUSED: [&str; 2] = [
