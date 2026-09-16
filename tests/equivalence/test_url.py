@@ -126,6 +126,23 @@ def test_idna_host(lib):
     assert str(url) == "http://xn--nicode-2ya.com/a"
 
 
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "//münich.example/x",
+        "//user@münich.example:8080/x",
+        "//münich.example",
+        "/münich/x",
+        "münich/x",
+    ],
+)
+def test_unicode_in_a_relative_reference(lib, reference):
+    """An authority is IDNA-encoded, a path is percent-encoded — a
+    network-path reference carries both."""
+    assert str(lib.module.URL(reference)) == str(httpx.URL(reference))
+    assert lib.module.URL(reference).host == httpx.URL(reference).host
+
+
 def test_query_params_group_values_under_the_first_key(lib):
     params = lib.module.QueryParams("b=1&a=2&b=3")
     assert str(params) == "b=1&b=3&a=2"

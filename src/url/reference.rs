@@ -53,7 +53,50 @@ impl UrlReference {
         }
     }
 
+    /// An authority is IDNA, not percent-encoding, so a network-path
+    /// reference has its host encoded separately from its path.
     fn encode_relative(input: &str) -> String {
+        if let Some(rest) = input.strip_prefix("//") {
+            let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+            let (authority, tail) = rest.split_at(end);
+            return format!(
+                "//{}{}",
+                Self::encode_authority(authority),
+                Self::encode_path(tail)
+            );
+        }
+        Self::encode_path(input)
+    }
+
+    fn encode_authority(authority: &str) -> String {
+        let (userinfo, host_port) = match authority.rsplit_once('@') {
+            Some((userinfo, host_port)) => (Some(userinfo), host_port),
+            None => (None, authority),
+        };
+        let (host, port) = match host_port.rsplit_once(':') {
+            Some((host, port)) if port.bytes().all(|b| b.is_ascii_digit()) => (host, Some(port)),
+            _ => (host_port, None),
+        };
+
+        let mut encoded = String::new();
+        if let Some(userinfo) = userinfo {
+            encoded.push_str(&PercentEncoded::<_, UriSpec>::from_user(userinfo).to_string());
+            encoded.push('@');
+        }
+        match idna::domain_to_ascii(host) {
+            Ok(ascii) => encoded.push_str(&ascii),
+            Err(_) => {
+                encoded.push_str(&PercentEncoded::<_, UriSpec>::from_reg_name(host).to_string())
+            }
+        }
+        if let Some(port) = port {
+            encoded.push(':');
+            encoded.push_str(port);
+        }
+        encoded
+    }
+
+    fn encode_path(input: &str) -> String {
         let (head, fragment) = match input.split_once('#') {
             Some((head, fragment)) => (head, Some(fragment)),
             None => (input, None),
