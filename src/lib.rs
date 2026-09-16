@@ -29,6 +29,7 @@ mod url;
 use client::{PyAsyncClient, PyClient};
 use exceptions::*;
 use headers::PyHeaders;
+use query_params::PyQueryParams;
 use response::PyResponse;
 use retry::PyRetry;
 use runtime::RUNTIME;
@@ -36,6 +37,7 @@ use stream::{PyAsyncStreamResponse, PyStreamResponse};
 use stream_context::{PyAsyncStreamContext, PyStreamContext};
 use timeout::PyTimeout;
 use transport::{AsyncHTTPTransport, HTTPTransport};
+use url::PyURL;
 
 /// `atexit` hook: shut the tokio runtime down before the interpreter starts
 /// finalizing, so no tokio thread tries to attach to Python after that point
@@ -77,6 +79,8 @@ fn _rqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<HTTPTransport>()?;
     m.add_class::<AsyncHTTPTransport>()?;
     m.add_class::<PyHeaders>()?;
+    m.add_class::<PyURL>()?;
+    m.add_class::<PyQueryParams>()?;
     m.add_class::<PyTimeout>()?;
     m.add_class::<PyResponse>()?;
     m.add_class::<PyStreamResponse>()?;

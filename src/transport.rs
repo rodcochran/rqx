@@ -51,7 +51,9 @@ impl Transport {
         if self.retries.is_some() {
             self.send_with_retries(spec).await
         } else {
-            Ok(PendingResponse::new(self.send_raw(spec.build()?).await?))
+            Ok(PendingResponse::new(
+                self.send_raw(spec.clone_request()?).await?,
+            ))
         }
     }
 
@@ -140,7 +142,7 @@ impl Transport {
             }
 
             let attempt_start = Instant::now();
-            let failure = match self.execute(spec.build()?).await {
+            let failure = match self.execute(spec.clone_request()?).await {
                 Ok(resp) => {
                     if !is_retryable_method {
                         return Ok(PendingResponse::new(resp));

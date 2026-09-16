@@ -23,6 +23,7 @@ use super::headers::PyHeaders;
 use super::py_json::value_to_py;
 use super::response::{PendingResponse, ResponseParts};
 use super::runtime::RUNTIME;
+use super::url::PyURL;
 
 /// Streaming HTTP body source. `Pin<Box<dyn ...>>` is standard practice for
 /// storing an erased, async-trait-object Stream: `dyn Stream` is unsized
@@ -835,8 +836,8 @@ impl PyStreamResponse {
     }
 
     #[getter]
-    fn url(&self) -> &str {
-        &self.parts.url
+    fn url(&self, py: Python<'_>) -> PyResult<Py<PyURL>> {
+        self.parts.py_url(py)
     }
 
     #[getter]
@@ -1142,8 +1143,8 @@ impl PyAsyncStreamResponse {
     }
 
     #[getter]
-    fn url(&self) -> &str {
-        &self.parts.url
+    fn url(&self, py: Python<'_>) -> PyResult<Py<PyURL>> {
+        self.parts.py_url(py)
     }
 
     #[getter]

@@ -79,7 +79,7 @@ def test_relative_location_resolves_against_current_hop(flaky_server):
     resp = _client().get(f"{flaky_server}/nested/hop1")
     assert resp.status_code == 200
     assert resp.text == "final"
-    assert resp.url.endswith("/nested/final")
+    assert str(resp.url).endswith("/nested/final")
 
 
 @pytest.mark.asyncio

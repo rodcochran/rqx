@@ -1,6 +1,6 @@
 use std::error::Error as _;
 
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::{Bound, PyAny, PyAnyMethods, PyModule, PyModuleMethods, PyResult};
 use pyo3::types::{PyDict, PyType};
 use pyo3::{PyErr, create_exception, import_exception};
@@ -33,6 +33,7 @@ rqx.RqxError
 
 Also under rqx.RqxError, each with a stdlib base as well (built in `StdlibBackedExceptions`):
 
+rqx.InvalidURL                       (a URL that can't be parsed; also a ValueError)
 rqx.JSONDecodeError                  (response.json(); also a json.JSONDecodeError)
 rqx.StreamError                      (misusing a stream; also a RuntimeError)
 ├── rqx.StreamConsumed               (read or iterated twice)
@@ -76,6 +77,7 @@ create_exception!(rqx, WriteError, NetworkError);
 // Classes with a stdlib base as well as an rqx one. `create_exception!` takes a single
 // base, so these are built with `type()` when the module loads and raised through
 // `import_exception!`, which looks them up on `rqx._rqx` the first time one is raised.
+import_exception!(rqx._rqx, InvalidURL);
 import_exception!(rqx._rqx, JSONDecodeError);
 import_exception!(rqx._rqx, StreamError);
 import_exception!(rqx._rqx, StreamConsumed);
@@ -89,8 +91,15 @@ impl StdlibBackedExceptions {
         let py = m.py();
         let rqx_error = py.get_type::<RqxError>().into_any();
         let stdlib_json_error = py.import("json")?.getattr("JSONDecodeError")?;
+        let value_error = py.get_type::<PyValueError>().into_any();
         let runtime_error = py.get_type::<PyRuntimeError>().into_any();
 
+        Self::define(
+            m,
+            "InvalidURL",
+            (rqx_error.clone(), value_error),
+            "A URL that couldn't be parsed. Also a ValueError.",
+        )?;
         Self::define(
             m,
             "JSONDecodeError",
