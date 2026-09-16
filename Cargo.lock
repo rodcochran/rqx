@@ -1238,6 +1238,7 @@ dependencies = [
  "http",
  "hyper",
  "idna",
+ "iri-string",
  "mime",
  "percent-encoding",
  "pyo3",

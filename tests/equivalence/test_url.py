@@ -6,6 +6,7 @@ here is a behavior httpx exhibits today, so anything rqx gets wrong shows up
 as a one-sided failure.
 """
 
+import httpx
 import pytest
 
 ISSUE_59 = "https://github.com/rodcochran/rqx/issues/59"
@@ -36,6 +37,28 @@ def test_path_is_decoded_and_raw_path_is_not(lib):
 def test_absolute_and_relative(lib):
     assert lib.module.URL("http://example.com/a").is_absolute_url
     assert lib.module.URL("/a/b").is_relative_url
+
+
+@pytest.mark.parametrize(
+    "reference", ["c", "/a b", "a/b?x=1#f", "//other.com/a", "?x=1", "#f", "", "../d"]
+)
+def test_relative_references_keep_their_shape(lib, reference):
+    """A relative reference is echoed as written — dot segments and all — with
+    only the characters RFC 3986 rejects percent-encoded."""
+    url = lib.module.URL(reference)
+    assert str(url) == str(httpx.URL(reference))
+    assert (url.path, url.raw_path, url.query, url.fragment) == (
+        httpx.URL(reference).path,
+        httpx.URL(reference).raw_path,
+        httpx.URL(reference).query,
+        httpx.URL(reference).fragment,
+    )
+    assert url.is_relative_url
+
+
+def test_join_from_a_relative_base(lib):
+    assert str(lib.module.URL("/a/b").join("c")) == "/a/c"
+    assert str(lib.module.URL("a/b").join("c")) == "a/c"
 
 
 def test_copy_with(lib):

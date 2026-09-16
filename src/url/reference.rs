@@ -3,8 +3,11 @@
 
 use std::borrow::Cow;
 use std::fmt;
-use std::sync::LazyLock;
 
+use iri_string::components::AuthorityComponents;
+use iri_string::percent_encode::PercentEncoded;
+use iri_string::spec::UriSpec;
+use iri_string::types::{UriReferenceStr, UriRelativeStr, UriRelativeString};
 use percent_encoding::percent_decode_str;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -14,132 +17,176 @@ use url::{ParseError, Url};
 use crate::exceptions::InvalidURL;
 use crate::query_params::QueryPairs;
 
-/// A relative reference has no authority for `url::Url` to hold, so it is
-/// resolved against a base that can't collide with a real one and stripped
-/// back out on the way to a string. `.invalid` is reserved by RFC 2606.
-static RELATIVE_BASE: LazyLock<Url> =
-    LazyLock::new(|| Url::parse("http://rqx.invalid/").expect("static base URL parses"));
-
-#[derive(Clone, Copy, PartialEq)]
-enum RelativeShape {
-    /// `//host/path` — an authority but no scheme.
-    Network,
-    /// `/path`
-    Rooted,
-    /// `path`, `../path`
-    Bare,
-    /// Empty, `?x=1`, `#frag` — the base's `/` is an artifact, not content.
-    NoPath,
-}
-
-impl RelativeShape {
-    fn of(input: &str) -> Self {
-        match input.as_bytes() {
-            [b'/', b'/', ..] => Self::Network,
-            [b'/', ..] => Self::Rooted,
-            [] | [b'?' | b'#', ..] => Self::NoPath,
-            _ => Self::Bare,
-        }
-    }
-}
-
+/// `url::Url` gives WHATWG normalization — default ports dropped, hosts
+/// lowercased and punycoded, paths percent-encoded — but can't hold a URL
+/// without a host. `iri-string` holds a relative reference exactly as
+/// written. Each half does what it's good at.
 #[derive(Clone)]
-pub struct UrlReference {
-    url: Url,
-    shape: Option<RelativeShape>,
+pub enum UrlReference {
+    Absolute(Url),
+    Relative(UriRelativeString),
 }
 
 impl UrlReference {
     pub fn parse(input: &str) -> PyResult<Self> {
         match Url::parse(input) {
-            Ok(url) => Ok(Self { url, shape: None }),
-            Err(ParseError::RelativeUrlWithoutBase) => Ok(Self {
-                url: RELATIVE_BASE.join(input).map_err(Self::invalid(input))?,
-                shape: Some(RelativeShape::of(input)),
-            }),
-            Err(e) => Err(Self::invalid(input)(e)),
+            Ok(url) => Ok(Self::Absolute(url)),
+            Err(ParseError::RelativeUrlWithoutBase) => Self::parse_relative(input),
+            Err(e) => Err(Self::invalid(input, &e)),
         }
     }
 
     pub fn from_url(url: Url) -> Self {
-        Self { url, shape: None }
+        Self::Absolute(url)
     }
 
-    fn invalid(input: &str) -> impl Fn(ParseError) -> pyo3::PyErr {
-        let input = input.to_owned();
-        move |e| InvalidURL::new_err(format!("invalid URL {input:?}: {e}"))
+    fn parse_relative(input: &str) -> PyResult<Self> {
+        if let Ok(reference) = UriRelativeStr::new(input) {
+            return Ok(Self::Relative(reference.to_owned()));
+        }
+        // A character RFC 3986 won't take raw — a space, say — is encoded
+        // rather than rejected, which is what httpx does with it.
+        let encoded = Self::encode_relative(input);
+        match UriRelativeStr::new(&encoded) {
+            Ok(reference) => Ok(Self::Relative(reference.to_owned())),
+            Err(e) => Err(Self::invalid(input, &e)),
+        }
+    }
+
+    fn encode_relative(input: &str) -> String {
+        let (head, fragment) = match input.split_once('#') {
+            Some((head, fragment)) => (head, Some(fragment)),
+            None => (input, None),
+        };
+        let (path, query) = match head.split_once('?') {
+            Some((path, query)) => (path, Some(query)),
+            None => (head, None),
+        };
+
+        let mut encoded = PercentEncoded::<_, UriSpec>::from_path(path).to_string();
+        if let Some(query) = query {
+            encoded.push('?');
+            encoded.push_str(&PercentEncoded::<_, UriSpec>::from_query(query).to_string());
+        }
+        if let Some(fragment) = fragment {
+            encoded.push('#');
+            encoded.push_str(&PercentEncoded::<_, UriSpec>::from_fragment(fragment).to_string());
+        }
+        encoded
+    }
+
+    fn invalid(input: &str, error: &dyn fmt::Display) -> PyErr {
+        InvalidURL::new_err(format!("invalid URL {input:?}: {error}"))
     }
 
     /// httpx's rule: a scheme and a host, or it's a reference to somewhere else.
     pub fn is_absolute(&self) -> bool {
-        self.shape.is_none() && self.url.host().is_some()
+        matches!(self, Self::Absolute(url) if url.host().is_some())
+    }
+
+    fn authority(&self) -> Option<AuthorityComponents<'_>> {
+        match self {
+            Self::Absolute(_) => None,
+            Self::Relative(reference) => reference.authority_components(),
+        }
     }
 
     pub fn scheme(&self) -> &str {
-        match self.shape {
-            None => self.url.scheme(),
-            Some(_) => "",
+        match self {
+            Self::Absolute(url) => url.scheme(),
+            Self::Relative(_) => "",
         }
     }
 
     /// Percent-encoded, as it appears in the URL: `copy_with` round-trips it
-    /// and `__repr__` masks it by position.
+    /// and `__repr__` masks it.
     pub fn username(&self) -> &str {
-        match self.shape {
-            None => self.url.username(),
-            Some(_) => "",
+        match self {
+            Self::Absolute(url) => url.username(),
+            Self::Relative(_) => self.userinfo().0,
         }
     }
 
     pub fn password(&self) -> &str {
-        match self.shape {
-            None => self.url.password().unwrap_or_default(),
-            Some(_) => "",
+        match self {
+            Self::Absolute(url) => url.password().unwrap_or_default(),
+            Self::Relative(_) => self.userinfo().1,
         }
+    }
+
+    fn userinfo(&self) -> (&str, &str) {
+        let Some(userinfo) = self.authority().and_then(|authority| authority.userinfo()) else {
+            return ("", "");
+        };
+        userinfo.split_once(':').unwrap_or((userinfo, ""))
     }
 
     /// The unicode form: `str(url)` carries punycode, `url.host` doesn't.
     pub fn host(&self) -> Cow<'_, str> {
-        let Some(host) = self.encoded_host() else {
+        let host = self.encoded_host();
+        if host.is_empty() {
             return Cow::Borrowed("");
-        };
+        }
         match idna::domain_to_unicode(host) {
             (unicode, Ok(())) => Cow::Owned(unicode),
             (_, Err(_)) => Cow::Borrowed(host),
         }
     }
 
-    fn encoded_host(&self) -> Option<&str> {
-        match self.shape {
-            None | Some(RelativeShape::Network) => self.url.host_str(),
-            Some(_) => None,
+    fn encoded_host(&self) -> &str {
+        match self {
+            Self::Absolute(url) => url.host_str().unwrap_or_default(),
+            Self::Relative(_) => self.authority().map_or("", |authority| authority.host()),
         }
     }
 
     /// Normalized: a default port for the scheme reads as no port at all.
     pub fn port(&self) -> Option<u16> {
-        match self.shape {
-            None => self.url.port(),
-            Some(_) => None,
+        match self {
+            Self::Absolute(url) => url.port(),
+            Self::Relative(_) => self
+                .authority()
+                .and_then(|authority| authority.port())
+                .and_then(|port| port.parse().ok()),
         }
     }
 
-    /// Still percent-encoded, with the base's leading `/` removed where the
-    /// original didn't have one.
+    /// As written, still percent-encoded. Empty for a reference that is all
+    /// query or fragment, where `path` and `raw_path` report `/` instead.
     pub fn encoded_path(&self) -> &str {
-        let path = self.url.path();
-        match self.shape {
-            Some(RelativeShape::Bare) => path.trim_start_matches('/'),
-            _ => path,
+        match self {
+            Self::Absolute(url) => url.path(),
+            Self::Relative(reference) => reference.path_str(),
+        }
+    }
+
+    fn encoded_path_or_root(&self) -> &str {
+        match self.encoded_path() {
+            "" => "/",
+            path => path,
         }
     }
 
     pub fn path(&self) -> Cow<'_, str> {
-        percent_decode_str(self.encoded_path()).decode_utf8_lossy()
+        percent_decode_str(self.encoded_path_or_root()).decode_utf8_lossy()
+    }
+
+    /// What goes on the request line: path plus query, no authority.
+    pub fn raw_path(&self) -> String {
+        let mut raw = self.encoded_path_or_root().to_owned();
+        let query = self.query();
+        if !query.is_empty() {
+            raw.push('?');
+            raw.push_str(query);
+        }
+        raw
     }
 
     pub fn query(&self) -> &str {
-        self.url.query().unwrap_or_default()
+        match self {
+            Self::Absolute(url) => url.query().unwrap_or_default(),
+            Self::Relative(reference) => reference.query_str().unwrap_or_default(),
+        }
     }
 
     pub fn params(&self) -> QueryPairs {
@@ -147,42 +194,63 @@ impl UrlReference {
     }
 
     pub fn fragment(&self) -> &str {
-        self.url.fragment().unwrap_or_default()
-    }
-
-    pub fn raw_path(&self) -> String {
-        let mut raw = self.encoded_path().to_owned();
-        if let Some(query) = self.url.query() {
-            raw.push('?');
-            raw.push_str(query);
-        }
-        raw
-    }
-
-    pub fn with_query(&self, query: Option<&str>) -> Self {
-        let mut url = self.url.clone();
-        url.set_query(query.filter(|q| !q.is_empty()));
-        Self {
-            url,
-            shape: self.shape,
+        match self {
+            Self::Absolute(url) => url.fragment().unwrap_or_default(),
+            Self::Relative(reference) => reference.fragment_str().unwrap_or_default(),
         }
     }
 
-    pub fn with_params(&self, params: &QueryPairs) -> Self {
-        self.with_query(Some(&params.to_string()))
+    pub fn with_params(&self, params: &QueryPairs) -> PyResult<Self> {
+        Self::compose(
+            Some(self),
+            UrlComponents {
+                query: Some(params.to_string()),
+                ..UrlComponents::default()
+            },
+        )
     }
 
-    /// Resolve a reference against this URL. An absolute argument wins
-    /// outright; anything else keeps this URL's shape.
+    /// `__repr__`'s form, with any password replaced.
+    pub fn masked(&self) -> String {
+        let text = self.to_string();
+        match UriReferenceStr::new(&text) {
+            Ok(reference) => reference
+                .mask_password()
+                .replace_password("[secure]")
+                .to_string(),
+            Err(_) => text,
+        }
+    }
+
+    /// Resolve a reference against this URL. An absolute argument wins outright.
     pub fn join(&self, other: &str) -> PyResult<Self> {
-        let joined = self.url.join(other).map_err(Self::invalid(other))?;
-        let shape = match Url::parse(other) {
-            Ok(_) => None,
-            Err(_) => self.shape,
-        };
-        Ok(Self { url: joined, shape })
+        match self {
+            Self::Absolute(url) => Ok(Self::Absolute(
+                url.join(other).map_err(|e| Self::invalid(other, &e))?,
+            )),
+            Self::Relative(reference) => Self::join_relative(reference.as_str(), other),
+        }
     }
 
+    /// RFC 3986 resolution needs an absolute base, so the reference borrows
+    /// one that can't collide with a real host (`.invalid` is reserved by RFC
+    /// 2606) and the result is taken back off it.
+    fn join_relative(reference: &str, other: &str) -> PyResult<Self> {
+        const ANCHOR: &str = "http://rqx.invalid";
+
+        let rooted = reference.starts_with('/');
+        let anchored = Url::parse(&format!("{ANCHOR}/{}", reference.trim_start_matches('/')))
+            .map_err(|e| Self::invalid(reference, &e))?;
+        let joined = anchored.join(other).map_err(|e| Self::invalid(other, &e))?;
+
+        match joined.as_str().strip_prefix(ANCHOR) {
+            None => Ok(Self::Absolute(joined)),
+            Some(tail) if rooted => Self::parse(tail),
+            Some(tail) => Self::parse(tail.trim_start_matches('/')),
+        }
+    }
+
+    /// Rebuild from components, letting the parser do the encoding.
     pub fn compose(base: Option<&Self>, components: UrlComponents) -> PyResult<Self> {
         let current = |read: fn(&Self) -> &str| base.map(read).unwrap_or_default().to_owned();
 
@@ -193,21 +261,17 @@ impl UrlReference {
         let password = components
             .password
             .unwrap_or_else(|| current(Self::password));
-        let host = components.host.unwrap_or_else(|| {
-            base.and_then(Self::encoded_host)
-                .unwrap_or_default()
-                .to_owned()
-        });
+        let host = components
+            .host
+            .unwrap_or_else(|| current(Self::encoded_host));
         let port = components.port.unwrap_or_else(|| base.and_then(Self::port));
         let path = components
             .path
-            .unwrap_or_else(|| base.map(Self::encoded_path).unwrap_or_default().to_owned());
-        let query = components
-            .query
-            .unwrap_or_else(|| base.map(Self::query).unwrap_or_default().to_owned());
+            .unwrap_or_else(|| current(Self::encoded_path));
+        let query = components.query.unwrap_or_else(|| current(Self::query));
         let fragment = components
             .fragment
-            .unwrap_or_else(|| base.map(Self::fragment).unwrap_or_default().to_owned());
+            .unwrap_or_else(|| current(Self::fragment));
 
         let mut composed = String::new();
         if !host.is_empty() {
@@ -229,9 +293,9 @@ impl UrlReference {
                 composed.push(':');
                 composed.push_str(&port.to_string());
             }
-        }
-        if !host.is_empty() && !path.is_empty() && !path.starts_with('/') {
-            composed.push('/');
+            if !path.is_empty() && !path.starts_with('/') {
+                composed.push('/');
+            }
         }
         composed.push_str(&path);
         if !query.is_empty() {
@@ -248,22 +312,10 @@ impl UrlReference {
 
 impl fmt::Display for UrlReference {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Some(shape) = self.shape else {
-            return f.write_str(self.url.as_str());
-        };
-        if shape == RelativeShape::Network {
-            write!(f, "//{}", self.url.authority())?;
+        match self {
+            Self::Absolute(url) => f.write_str(url.as_str()),
+            Self::Relative(reference) => f.write_str(reference.as_str()),
         }
-        if shape != RelativeShape::NoPath {
-            f.write_str(self.encoded_path())?;
-        }
-        if let Some(query) = self.url.query() {
-            write!(f, "?{query}")?;
-        }
-        if let Some(fragment) = self.url.fragment() {
-            write!(f, "#{fragment}")?;
-        }
-        Ok(())
     }
 }
 

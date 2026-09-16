@@ -31,27 +31,8 @@ impl PyURL {
         }
     }
 
-    /// The userinfo sits between `://` and the authority's `@`; the password
-    /// is whatever follows its colon.
-    fn masked(&self) -> String {
-        let text = self.reference.to_string();
-        if self.reference.password().is_empty() {
-            return text;
-        }
-        let Some(authority) = text.find("://").map(|i| i + 3) else {
-            return text;
-        };
-        let Some(at) = text[authority..].find('@').map(|i| authority + i) else {
-            return text;
-        };
-        match text[authority..at].find(':').map(|i| authority + i) {
-            Some(colon) => format!("{}[secure]{}", &text[..=colon], &text[at..]),
-            None => text,
-        }
-    }
-
-    fn with_params(&self, params: QueryPairs) -> Self {
-        Self::new(self.reference.with_params(&params))
+    fn with_params(&self, params: QueryPairs) -> PyResult<Self> {
+        Ok(Self::new(self.reference.with_params(&params)?))
     }
 }
 
@@ -150,31 +131,31 @@ impl PyURL {
 
     #[pyo3(signature = (key, value=None))]
     fn copy_set_param(&self, key: &str, value: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
-        Ok(self.with_params(
+        self.with_params(
             self.reference
                 .params()
                 .set(key, QueryPairs::scalar_or_empty(value)?),
-        ))
+        )
     }
 
     #[pyo3(signature = (key, value=None))]
     fn copy_add_param(&self, key: &str, value: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
-        Ok(self.with_params(
+        self.with_params(
             self.reference
                 .params()
                 .add(key, QueryPairs::scalar_or_empty(value)?),
-        ))
+        )
     }
 
-    fn copy_remove_param(&self, key: &str) -> Self {
+    fn copy_remove_param(&self, key: &str) -> PyResult<Self> {
         self.with_params(self.reference.params().remove(key))
     }
 
     #[pyo3(signature = (params=None))]
-    fn copy_merge_params(&self, params: Option<QueryPairs>) -> Self {
+    fn copy_merge_params(&self, params: Option<QueryPairs>) -> PyResult<Self> {
         match params {
             Some(params) => self.with_params(self.reference.params().merge(&params)),
-            None => Self::new(self.reference.clone()),
+            None => Ok(Self::new(self.reference.clone())),
         }
     }
 
@@ -193,7 +174,7 @@ impl PyURL {
     }
 
     fn __repr__(&self) -> String {
-        format!("URL('{}')", self.masked())
+        format!("URL('{}')", self.reference.masked())
     }
 
     fn __eq__(&self, other: &Bound<'_, PyAny>) -> bool {
