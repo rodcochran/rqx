@@ -228,26 +228,38 @@ impl UrlReference {
             Self::Absolute(url) => Ok(Self::Absolute(
                 url.join(other).map_err(|e| Self::invalid(other, &e))?,
             )),
-            Self::Relative(reference) => Self::join_relative(reference.as_str(), other),
+            Self::Relative(reference) => Self::join_relative(reference, other),
         }
     }
 
-    /// RFC 3986 resolution needs an absolute base, so the reference borrows
-    /// one that can't collide with a real host (`.invalid` is reserved by RFC
-    /// 2606) and the result is taken back off it.
-    fn join_relative(reference: &str, other: &str) -> PyResult<Self> {
+    /// RFC 3986 §5.3: an argument carrying its own scheme or authority
+    /// replaces this reference outright. Anything else merges against it, on
+    /// a borrowed absolute base — resolution needs one — that the result is
+    /// then taken back off. `.invalid` is reserved by RFC 2606.
+    fn join_relative(reference: &UriRelativeStr, other: &str) -> PyResult<Self> {
         const ANCHOR: &str = "http://rqx.invalid";
 
-        let rooted = reference.starts_with('/');
-        let anchored = Url::parse(&format!("{ANCHOR}/{}", reference.trim_start_matches('/')))
-            .map_err(|e| Self::invalid(reference, &e))?;
-        let joined = anchored.join(other).map_err(|e| Self::invalid(other, &e))?;
-
-        match joined.as_str().strip_prefix(ANCHOR) {
-            None => Ok(Self::Absolute(joined)),
-            Some(tail) if rooted => Self::parse(tail),
-            Some(tail) => Self::parse(tail.trim_start_matches('/')),
+        if Url::parse(other).is_ok() || other.starts_with("//") {
+            return Self::parse(other);
         }
+
+        let path = reference.path_str();
+        let anchored = Url::parse(&format!("{ANCHOR}/{}", path.trim_start_matches('/')))
+            .map_err(|e| Self::invalid(reference.as_str(), &e))?;
+        let joined = anchored.join(other).map_err(|e| Self::invalid(other, &e))?;
+        let tail = joined
+            .as_str()
+            .strip_prefix(ANCHOR)
+            .unwrap_or_else(|| joined.as_str());
+
+        // The receiver's own authority survives; without one, the result is
+        // rooted only if either side was.
+        let rebuilt = match reference.authority_str() {
+            Some(authority) => format!("//{authority}{tail}"),
+            None if path.starts_with('/') || other.starts_with('/') => tail.to_owned(),
+            None => tail.trim_start_matches('/').to_owned(),
+        };
+        Self::parse(&rebuilt)
     }
 
     /// Rebuild from components, letting the parser do the encoding.

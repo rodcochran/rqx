@@ -53,9 +53,15 @@ impl RequestUrl {
 
         let mut url = match (absolute, base) {
             (Some(url), _) => url,
-            (None, Some(base)) => base.0.join(self.0.trim_start_matches('/')).map_err(|e| {
-                InvalidURL::new_err(format!("could not join base_url with {:?}: {e}", self.0))
-            })?,
+            (None, Some(base)) => {
+                // A reference contributes its path and query only. An authority
+                // it carries (`//other.example/x`) is not a host rqx will
+                // target, which is how httpx merges it too.
+                let path = UrlReference::parse(&self.0)?.raw_path();
+                base.0.join(path.trim_start_matches('/')).map_err(|e| {
+                    InvalidURL::new_err(format!("could not join base_url with {:?}: {e}", self.0))
+                })?
+            }
             (None, None) => {
                 return Err(UnsupportedProtocol::new_err(
                     "Request URL is missing an 'http://' or 'https://' protocol.",

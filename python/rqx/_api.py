@@ -55,7 +55,7 @@ CertTypes = Union[str, bytes, Tuple[str, str]]
 TimeoutTypes = Union[float, int, Timeout]
 QueryParamValue = Union[str, int, float, bool, None]
 QueryParamTypes = Union[
-    Mapping[str, QueryParamValue],
+    Mapping[str, Union[QueryParamValue, Sequence[QueryParamValue]]],
     QueryParams,
     Sequence[Tuple[str, QueryParamValue]],
     str,

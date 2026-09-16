@@ -56,9 +56,30 @@ def test_relative_references_keep_their_shape(lib, reference):
     assert url.is_relative_url
 
 
-def test_join_from_a_relative_base(lib):
-    assert str(lib.module.URL("/a/b").join("c")) == "/a/c"
-    assert str(lib.module.URL("a/b").join("c")) == "a/c"
+@pytest.mark.parametrize(
+    ("base", "reference"),
+    [
+        ("/a/b", "c"),
+        ("a/b", "c"),
+        ("a/b", "/c"),
+        ("a/b", "../c"),
+        ("/a", "//host/x"),
+        ("//h/a", "b"),
+        ("//h/a", "/x"),
+        ("/a/b", "/c/../d"),
+        ("a/b", "?q=1"),
+        ("a/b", "#f"),
+        ("/a/b", ""),
+        ("", "c"),
+        ("/a", "https://o/z"),
+    ],
+)
+def test_join_from_a_relative_base(lib, base, reference):
+    """RFC 3986 §5.3: an argument with its own scheme or authority replaces the
+    base; otherwise the base's authority and path shape survive the merge."""
+    assert str(lib.module.URL(base).join(reference)) == str(
+        httpx.URL(base).join(reference)
+    )
 
 
 def test_copy_with(lib):

@@ -45,6 +45,15 @@ def test_client_base_url_is_a_url(flaky_server):
         assert client.base_url == f"{flaky_server}/"
 
 
+def test_a_network_relative_url_does_not_retarget_the_host(flaky_server):
+    """`//other.example/x` carries an authority, but a relative request URL
+    contributes its path and query only — the base's host still gets it, as
+    in httpx."""
+    with rqx.Client(base_url=f"{flaky_server}/echo-url/") as client:
+        echoed = client.get("//other.example/sub").json()
+    assert echoed["path"] == "/echo-url/sub"
+
+
 def test_url_query_survives_the_request(flaky_server):
     url = rqx.URL(f"{flaky_server}/echo-url/x").copy_set_param("a", "1")
     assert rqx.get(url).json()["query"] == "a=1"
