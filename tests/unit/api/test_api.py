@@ -73,7 +73,7 @@ def test_request_with_explicit_method(flaky_server):
 def test_params_threaded_through(flaky_server):
     resp = rqx.get(f"{flaky_server}/streamable", params={"foo": "bar"})
     assert resp.status_code == 200
-    assert "foo=bar" in resp.url
+    assert "foo=bar" in str(resp.url)
 
 
 def test_headers_threaded_through(flaky_server):
@@ -97,7 +97,7 @@ def test_follow_redirects_disabled_by_default(flaky_server):
 def test_follow_redirects_enabled(flaky_server):
     resp = rqx.get(f"{flaky_server}/redirect-once", follow_redirects=True)
     assert resp.status_code == 200
-    assert resp.url.endswith("/streamable")
+    assert str(resp.url).endswith("/streamable")
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@ def test_stream_with_follow_redirects(flaky_server):
         "GET", f"{flaky_server}/redirect-once", follow_redirects=True
     ) as resp:
         assert resp.status_code == 200
-        assert resp.url.endswith("/streamable")
+        assert str(resp.url).endswith("/streamable")
 
 
 # ---------------------------------------------------------------------------

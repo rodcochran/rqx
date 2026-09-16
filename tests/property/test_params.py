@@ -14,8 +14,8 @@ def _httpx_pairs(mapping):
     out = []
     for k, v in mapping.items():
         if v is None:
-            continue
-        if v is True:
+            out.append((k, ""))
+        elif v is True:
             out.append((k, "true"))
         elif v is False:
             out.append((k, "false"))
@@ -31,14 +31,7 @@ def test_params_round_trip_as_httpx_would_send_them(flaky_server, client, mappin
     assert parse_qsl(query, keep_blank_values=True) == _httpx_pairs(mapping)
 
 
-@given(
-    st.one_of(
-        st.binary(),
-        st.lists(st.integers()),
-        st.tuples(st.integers()),
-        st.dictionaries(st.text(), st.text()),
-    )
-)
+@given(st.one_of(st.binary(), st.dictionaries(st.text(), st.text())))
 def test_unsupported_param_value_types_raise_type_error(flaky_server, client, value):
     try:
         client.get(f"{flaky_server}/echo-url/p", params={"k": value})

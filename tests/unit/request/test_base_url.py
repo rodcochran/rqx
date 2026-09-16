@@ -82,7 +82,7 @@ def test_base_url_with_path_prefix_is_preserved(flaky_server):
     client = rqx.Client(base_url=f"{flaky_server}/nested")
     resp = client.get("/final")
     assert resp.status_code == 200
-    assert resp.url.endswith("/nested/final")
+    assert str(resp.url).endswith("/nested/final")
 
 
 def test_relative_path_with_query_string(flaky_server):
@@ -90,7 +90,7 @@ def test_relative_path_with_query_string(flaky_server):
     client = rqx.Client(base_url=flaky_server)
     resp = client.get("/streamable?foo=bar")
     assert resp.status_code == 200
-    assert "foo=bar" in resp.url
+    assert "foo=bar" in str(resp.url)
 
 
 def test_relative_path_combines_with_params_kwarg(flaky_server):
@@ -98,7 +98,7 @@ def test_relative_path_combines_with_params_kwarg(flaky_server):
     client = rqx.Client(base_url=flaky_server)
     resp = client.get("/streamable", params={"foo": "bar"})
     assert resp.status_code == 200
-    assert "foo=bar" in resp.url
+    assert "foo=bar" in str(resp.url)
 
 
 # ---------------------------------------------------------------------------

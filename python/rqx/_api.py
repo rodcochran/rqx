@@ -22,9 +22,17 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Mapping, Tuple, Union
+from typing import Any, Mapping, Sequence, Tuple, Union
 
-from ._rqx import PyClient, PyHeaders, PyResponse, PyStreamResponse, Timeout
+from ._rqx import (
+    URL,
+    PyClient,
+    PyHeaders,
+    PyResponse,
+    PyStreamResponse,
+    QueryParams,
+    Timeout,
+)
 
 __all__ = [
     "delete",
@@ -46,13 +54,20 @@ VerifyTypes = Union[bool, str]
 CertTypes = Union[str, bytes, Tuple[str, str]]
 TimeoutTypes = Union[float, int, Timeout]
 QueryParamValue = Union[str, int, float, bool, None]
-QueryParamTypes = Mapping[str, QueryParamValue]
+QueryParamTypes = Union[
+    Mapping[str, Union[QueryParamValue, Sequence[QueryParamValue]]],
+    QueryParams,
+    Sequence[Tuple[str, QueryParamValue]],
+    str,
+    bytes,
+]
 HeaderTypes = Union[Mapping[str, str], PyHeaders]
+URLTypes = Union[str, URL]
 
 
 def request(
     method: str,
-    url: str,
+    url: URLTypes,
     *,
     content: bytes | None = None,
     data: Mapping[str, str] | None = None,
@@ -91,7 +106,7 @@ def request(
 @contextmanager
 def stream(
     method: str,
-    url: str,
+    url: URLTypes,
     *,
     content: bytes | None = None,
     data: Mapping[str, str] | None = None,
@@ -135,7 +150,7 @@ def stream(
 
 
 def get(
-    url: str,
+    url: URLTypes,
     *,
     params: QueryParamTypes | None = None,
     headers: HeaderTypes | None = None,
@@ -162,7 +177,7 @@ def get(
 
 
 def options(
-    url: str,
+    url: URLTypes,
     *,
     params: QueryParamTypes | None = None,
     headers: HeaderTypes | None = None,
@@ -189,7 +204,7 @@ def options(
 
 
 def head(
-    url: str,
+    url: URLTypes,
     *,
     params: QueryParamTypes | None = None,
     headers: HeaderTypes | None = None,
@@ -216,7 +231,7 @@ def head(
 
 
 def post(
-    url: str,
+    url: URLTypes,
     *,
     content: bytes | None = None,
     data: Mapping[str, str] | None = None,
@@ -249,7 +264,7 @@ def post(
 
 
 def put(
-    url: str,
+    url: URLTypes,
     *,
     content: bytes | None = None,
     data: Mapping[str, str] | None = None,
@@ -282,7 +297,7 @@ def put(
 
 
 def patch(
-    url: str,
+    url: URLTypes,
     *,
     content: bytes | None = None,
     data: Mapping[str, str] | None = None,
@@ -315,7 +330,7 @@ def patch(
 
 
 def delete(
-    url: str,
+    url: URLTypes,
     *,
     params: QueryParamTypes | None = None,
     headers: HeaderTypes | None = None,

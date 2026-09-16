@@ -4,12 +4,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex as TokioMutex;
-use url::Url;
 
 use crate::exceptions::*;
 use crate::py_json::JsonBody;
-use crate::query_params::QueryParams;
-use crate::request::{RequestSpec, build_client_request, determine_redirect_url};
+use crate::query_params::QueryPairs;
+use crate::request::{RequestBody, RequestSpec};
 use crate::request_headers::RequestHeaders;
 use crate::response::{PendingResponse, PyResponse};
 use crate::retry::DEFAULT_RAISE_ON_REDIRECT;
@@ -17,7 +16,7 @@ use crate::runtime::RUNTIME;
 use crate::stream_context::{PyAsyncStreamContext, PyStreamContext};
 use crate::timeout::PyTimeout;
 use crate::transport::{AsyncHTTPTransport, HTTPTransport, Transport};
-use crate::url::{parse_base_url, resolve_url};
+use crate::url::{BaseUrl, PyURL, RequestUrl};
 
 const DEFAULT_TIMEOUT: f64 = 15.0;
 const DEFAULT_FOLLOW_REDIRECTS: bool = false;
@@ -41,7 +40,7 @@ pub struct Client {
     timeout_secs: f64,
     follow_redirects: bool,
     max_redirects: u32,
-    base_url: Option<Url>,
+    base_url: Option<BaseUrl>,
     cookies: Arc<TokioMutex<HashMap<String, String>>>,
     /// Client-level default bearer token. Per-request `auth_bearer=`
     /// overrides this when provided.
@@ -54,7 +53,7 @@ impl Client {
         timeout_secs: f64,
         follow_redirects: bool,
         max_redirects: u32,
-        base_url: Option<Url>,
+        base_url: Option<BaseUrl>,
         auth_bearer: Option<String>,
     ) -> Self {
         Self {
@@ -68,8 +67,8 @@ impl Client {
         }
     }
 
-    pub fn base_url(&self) -> Option<String> {
-        self.base_url.as_ref().map(|u| u.to_string())
+    pub fn base_url(&self) -> Option<PyURL> {
+        self.base_url.as_ref().map(BaseUrl::to_py)
     }
 
     pub fn timeout_secs(&self) -> f64 {
@@ -87,11 +86,11 @@ impl Client {
     pub async fn request(
         &self,
         method: &str,
-        url: &str,
+        url: RequestUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
-        params: Option<QueryParams>,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -130,11 +129,11 @@ impl Client {
     pub(crate) fn build(
         &self,
         method: &str,
-        url: &str,
+        url: RequestUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
-        params: Option<QueryParams>,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -150,21 +149,17 @@ impl Client {
             ));
         }
 
-        let resolved_url = resolve_url(self.base_url.as_ref(), url)?;
-        let request = build_client_request(
+        let resolved_url = url.resolve(self.base_url.as_ref(), params)?;
+        RequestSpec::build(
             self.transport.client(),
             method,
-            resolved_url.as_str(),
-            content,
-            data,
-            json.as_ref(),
-            params,
+            resolved_url,
+            RequestBody::new(content, data, json)?,
             headers,
             auth,
             bearer.as_deref(),
             timeout,
-        )?;
-        Ok(RequestSpec::from_request(request))
+        )
     }
 
     /// Send a built request — following redirects when asked — and accumulate
@@ -186,8 +181,8 @@ impl Client {
 
     pub async fn get(
         &self,
-        url: &str,
-        params: Option<QueryParams>,
+        url: RequestUrl,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -212,8 +207,8 @@ impl Client {
 
     pub async fn options(
         &self,
-        url: &str,
-        params: Option<QueryParams>,
+        url: RequestUrl,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -238,8 +233,8 @@ impl Client {
 
     pub async fn head(
         &self,
-        url: &str,
-        params: Option<QueryParams>,
+        url: RequestUrl,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -264,8 +259,8 @@ impl Client {
 
     pub async fn delete(
         &self,
-        url: &str,
-        params: Option<QueryParams>,
+        url: RequestUrl,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -290,11 +285,11 @@ impl Client {
 
     pub async fn post(
         &self,
-        url: &str,
+        url: RequestUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
-        params: Option<QueryParams>,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -319,11 +314,11 @@ impl Client {
 
     pub async fn put(
         &self,
-        url: &str,
+        url: RequestUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
-        params: Option<QueryParams>,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -348,11 +343,11 @@ impl Client {
 
     pub async fn patch(
         &self,
-        url: &str,
+        url: RequestUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
-        params: Option<QueryParams>,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -443,8 +438,7 @@ impl Client {
             hop.drain().await;
 
             // Resolve against the hop that sent the Location, not the original URL.
-            let new_url = determine_redirect_url(current.url(), &location)
-                .map_err(|e| RqxError::new_err(format!("Error parsing url from redirect: {e}")))?;
+            let new_url = current.redirect_target(&location)?;
             current = current.redirected(status, new_url)?;
 
             redirects_used += 1;
@@ -472,14 +466,16 @@ impl PyClient {
         timeout: Option<&Bound<'_, PyAny>>,
         follow_redirects: Option<bool>,
         max_redirects: Option<u32>,
-        base_url: Option<&str>,
+        base_url: Option<RequestUrl>,
         auth_bearer: Option<String>,
         transport: Option<PyRef<'_, HTTPTransport>>,
     ) -> PyResult<Self> {
         let timeout_secs = PyTimeout::resolve_request_timeout(timeout, DEFAULT_TIMEOUT)?;
         let follow = follow_redirects.unwrap_or(DEFAULT_FOLLOW_REDIRECTS);
         let max_r = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
-        let parsed_base_url = base_url.map(parse_base_url).transpose()?;
+        let parsed_base_url = base_url
+            .map(|url| BaseUrl::parse(url.as_str()))
+            .transpose()?;
 
         if transport.is_some() && (verify.is_some() || cert.is_some() || timeout.is_some()) {
             return Err(RqxError::new_err(
@@ -505,7 +501,7 @@ impl PyClient {
     }
 
     #[getter]
-    fn base_url(&self) -> Option<String> {
+    fn base_url(&self) -> Option<PyURL> {
         self.inner.base_url()
     }
 
@@ -519,11 +515,11 @@ impl PyClient {
         &self,
         py: Python<'_>,
         method: &str,
-        url: &str,
+        url: RequestUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<JsonBody>,
-        params: Option<QueryParams>,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -554,8 +550,8 @@ impl PyClient {
     fn get(
         &self,
         py: Python<'_>,
-        url: &str,
-        params: Option<QueryParams>,
+        url: RequestUrl,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -574,8 +570,8 @@ impl PyClient {
     fn options(
         &self,
         py: Python<'_>,
-        url: &str,
-        params: Option<QueryParams>,
+        url: RequestUrl,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -594,8 +590,8 @@ impl PyClient {
     fn head(
         &self,
         py: Python<'_>,
-        url: &str,
-        params: Option<QueryParams>,
+        url: RequestUrl,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -614,8 +610,8 @@ impl PyClient {
     fn delete(
         &self,
         py: Python<'_>,
-        url: &str,
-        params: Option<QueryParams>,
+        url: RequestUrl,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -634,11 +630,11 @@ impl PyClient {
     fn post(
         &self,
         py: Python<'_>,
-        url: &str,
+        url: RequestUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<JsonBody>,
-        params: Option<QueryParams>,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -668,11 +664,11 @@ impl PyClient {
     fn put(
         &self,
         py: Python<'_>,
-        url: &str,
+        url: RequestUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<JsonBody>,
-        params: Option<QueryParams>,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -702,11 +698,11 @@ impl PyClient {
     fn patch(
         &self,
         py: Python<'_>,
-        url: &str,
+        url: RequestUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<JsonBody>,
-        params: Option<QueryParams>,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -736,11 +732,11 @@ impl PyClient {
     fn stream(
         &self,
         method: &str,
-        url: &str,
+        url: RequestUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<JsonBody>,
-        params: Option<QueryParams>,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -802,14 +798,16 @@ impl PyAsyncClient {
         timeout: Option<&Bound<'_, PyAny>>,
         follow_redirects: Option<bool>,
         max_redirects: Option<u32>,
-        base_url: Option<&str>,
+        base_url: Option<RequestUrl>,
         auth_bearer: Option<String>,
         transport: Option<PyRef<'_, AsyncHTTPTransport>>,
     ) -> PyResult<Self> {
         let timeout_secs = PyTimeout::resolve_request_timeout(timeout, DEFAULT_TIMEOUT)?;
         let follow = follow_redirects.unwrap_or(DEFAULT_FOLLOW_REDIRECTS);
         let max_r = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
-        let parsed_base_url = base_url.map(parse_base_url).transpose()?;
+        let parsed_base_url = base_url
+            .map(|url| BaseUrl::parse(url.as_str()))
+            .transpose()?;
 
         if transport.is_some() && (verify.is_some() || cert.is_some() || timeout.is_some()) {
             return Err(RqxError::new_err(
@@ -835,7 +833,7 @@ impl PyAsyncClient {
     }
 
     #[getter]
-    fn base_url(&self) -> Option<String> {
+    fn base_url(&self) -> Option<PyURL> {
         self.inner.base_url()
     }
 
@@ -849,11 +847,11 @@ impl PyAsyncClient {
         &self,
         py: Python<'a>,
         method: &str,
-        url: &str,
+        url: RequestUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<JsonBody>,
-        params: Option<QueryParams>,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -863,14 +861,13 @@ impl PyAsyncClient {
         let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
         let method = method.to_string();
-        let url = url.to_string();
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
         RUNTIME.future_into_py(py, async move {
             inner
                 .request(
                     &method,
-                    &url,
+                    url,
                     content.as_deref(),
                     data,
                     json_value,
@@ -889,8 +886,8 @@ impl PyAsyncClient {
     fn get<'a>(
         &self,
         py: Python<'a>,
-        url: &str,
-        params: Option<QueryParams>,
+        url: RequestUrl,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -898,19 +895,10 @@ impl PyAsyncClient {
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let url = url.to_string();
         let inner = self.inner.clone();
         RUNTIME.future_into_py(py, async move {
             inner
-                .get(
-                    &url,
-                    params,
-                    headers,
-                    auth,
-                    auth_bearer,
-                    follow_redirects,
-                    t,
-                )
+                .get(url, params, headers, auth, auth_bearer, follow_redirects, t)
                 .await
         })
     }
@@ -919,8 +907,8 @@ impl PyAsyncClient {
     fn options<'a>(
         &self,
         py: Python<'a>,
-        url: &str,
-        params: Option<QueryParams>,
+        url: RequestUrl,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -928,19 +916,10 @@ impl PyAsyncClient {
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let url = url.to_string();
         let inner = self.inner.clone();
         RUNTIME.future_into_py(py, async move {
             inner
-                .options(
-                    &url,
-                    params,
-                    headers,
-                    auth,
-                    auth_bearer,
-                    follow_redirects,
-                    t,
-                )
+                .options(url, params, headers, auth, auth_bearer, follow_redirects, t)
                 .await
         })
     }
@@ -949,8 +928,8 @@ impl PyAsyncClient {
     fn head<'a>(
         &self,
         py: Python<'a>,
-        url: &str,
-        params: Option<QueryParams>,
+        url: RequestUrl,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -958,19 +937,10 @@ impl PyAsyncClient {
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let url = url.to_string();
         let inner = self.inner.clone();
         RUNTIME.future_into_py(py, async move {
             inner
-                .head(
-                    &url,
-                    params,
-                    headers,
-                    auth,
-                    auth_bearer,
-                    follow_redirects,
-                    t,
-                )
+                .head(url, params, headers, auth, auth_bearer, follow_redirects, t)
                 .await
         })
     }
@@ -979,8 +949,8 @@ impl PyAsyncClient {
     fn delete<'a>(
         &self,
         py: Python<'a>,
-        url: &str,
-        params: Option<QueryParams>,
+        url: RequestUrl,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -988,19 +958,10 @@ impl PyAsyncClient {
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let url = url.to_string();
         let inner = self.inner.clone();
         RUNTIME.future_into_py(py, async move {
             inner
-                .delete(
-                    &url,
-                    params,
-                    headers,
-                    auth,
-                    auth_bearer,
-                    follow_redirects,
-                    t,
-                )
+                .delete(url, params, headers, auth, auth_bearer, follow_redirects, t)
                 .await
         })
     }
@@ -1009,11 +970,11 @@ impl PyAsyncClient {
     fn post<'a>(
         &self,
         py: Python<'a>,
-        url: &str,
+        url: RequestUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<JsonBody>,
-        params: Option<QueryParams>,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -1022,13 +983,12 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'a, PyAny>> {
         let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let url = url.to_string();
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
         RUNTIME.future_into_py(py, async move {
             inner
                 .post(
-                    &url,
+                    url,
                     content.as_deref(),
                     data,
                     json_value,
@@ -1047,11 +1007,11 @@ impl PyAsyncClient {
     fn put<'a>(
         &self,
         py: Python<'a>,
-        url: &str,
+        url: RequestUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<JsonBody>,
-        params: Option<QueryParams>,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -1060,13 +1020,12 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'a, PyAny>> {
         let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let url = url.to_string();
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
         RUNTIME.future_into_py(py, async move {
             inner
                 .put(
-                    &url,
+                    url,
                     content.as_deref(),
                     data,
                     json_value,
@@ -1085,11 +1044,11 @@ impl PyAsyncClient {
     fn patch<'a>(
         &self,
         py: Python<'a>,
-        url: &str,
+        url: RequestUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<JsonBody>,
-        params: Option<QueryParams>,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
@@ -1098,13 +1057,12 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'a, PyAny>> {
         let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let url = url.to_string();
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
         RUNTIME.future_into_py(py, async move {
             inner
                 .patch(
-                    &url,
+                    url,
                     content.as_deref(),
                     data,
                     json_value,
@@ -1123,11 +1081,11 @@ impl PyAsyncClient {
     fn stream(
         &self,
         method: &str,
-        url: &str,
+        url: RequestUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<JsonBody>,
-        params: Option<QueryParams>,
+        params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,

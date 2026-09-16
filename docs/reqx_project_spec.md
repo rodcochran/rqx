@@ -128,7 +128,7 @@ async with reqx.AsyncClient() as client:
         params={"foo": "bar"},
     )
     assert resp.status_code == 200
-    assert resp.url.endswith("?foo=bar")
+    assert str(resp.url).endswith("?foo=bar")
 
 # Timeout enforcement
 with reqx.Client() as client:

@@ -11,10 +11,12 @@ use pyo3::prelude::{Bound, Py, PyAny, PyAnyMethods, PyErr, PyResult, Python, pyc
 use pyo3::sync::PyOnceLock;
 use pyo3::types::PyBytes;
 use reqwest::Response;
+use url::Url;
 
 use super::exceptions::{HTTPStatusError, JSONDecodeError, map_reqwest_error};
 use super::headers::PyHeaders;
 use super::py_json::value_to_py;
+use super::url::{PyURL, UrlReference};
 
 /// Headers received, body unread. Everything known before the body — status,
 /// headers, cookies, retry telemetry, elapsed — lives in `parts`. `read` buffers
@@ -65,7 +67,8 @@ Pure Rust implementation of the response parts to avoid overhead with GIL and FF
 pub struct ResponseParts {
     pub(crate) status_code: u16,
     pub(crate) headers: HeaderMap, // will materialize into PyHeaders
-    pub(crate) url: String,
+    pub(crate) url: Url,
+    pub(crate) url_cache: PyOnceLock<Py<PyURL>>,
     pub(crate) elapsed: Duration,
     pub(crate) num_retries: u32, // can't be negative, can use u32?
     pub(crate) retry_history: Vec<(String, f64)>,
@@ -202,11 +205,22 @@ impl ResponseParts {
 }
 
 impl ResponseParts {
+    /// Materialized once and cached, like `headers`: a response's URL is
+    /// read-only, so `resp.url is resp.url` holds.
+    pub fn py_url(&self, py: Python<'_>) -> PyResult<Py<PyURL>> {
+        self.url_cache
+            .get_or_try_init(py, || {
+                Py::new(py, PyURL::new(UrlReference::from_url(self.url.clone())))
+            })
+            .map(|url| url.clone_ref(py))
+    }
+
     pub fn from_reqwest(response: &Response) -> Self {
         ResponseParts {
             status_code: response.status().as_u16(),
             headers: response.headers().clone(),
-            url: response.url().to_string(),
+            url: response.url().clone(),
+            url_cache: PyOnceLock::new(),
             elapsed: Duration::ZERO,
             num_retries: 0,
             retry_history: Vec::new(),
@@ -248,8 +262,8 @@ impl PyResponse {
     }
 
     #[getter]
-    fn url(&self) -> &str {
-        &self.parts.url
+    fn url(&self, py: Python<'_>) -> PyResult<Py<PyURL>> {
+        self.parts.py_url(py)
     }
 
     #[getter]
