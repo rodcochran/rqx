@@ -28,7 +28,7 @@ enum RelativeShape {
     Rooted,
     /// `path`, `../path`
     Bare,
-    /// ``, `?x=1`, `#frag` — the base's `/` is an artifact, not content.
+    /// Empty, `?x=1`, `#frag` — the base's `/` is an artifact, not content.
     NoPath,
 }
 
@@ -37,7 +37,7 @@ impl RelativeShape {
         match input.as_bytes() {
             [b'/', b'/', ..] => Self::Network,
             [b'/', ..] => Self::Rooted,
-            [] | [b'?', ..] | [b'#', ..] => Self::NoPath,
+            [] | [b'?' | b'#', ..] => Self::NoPath,
             _ => Self::Bare,
         }
     }
@@ -202,14 +202,12 @@ impl UrlReference {
         let path = components
             .path
             .unwrap_or_else(|| base.map(Self::encoded_path).unwrap_or_default().to_owned());
-        let query = components.query.unwrap_or_else(|| match base {
-            Some(base) => base.url.query().map(str::to_owned),
-            None => None,
-        });
-        let fragment = components.fragment.unwrap_or_else(|| match base {
-            Some(base) => base.url.fragment().map(str::to_owned),
-            None => None,
-        });
+        let query = components
+            .query
+            .unwrap_or_else(|| base.map(Self::query).unwrap_or_default().to_owned());
+        let fragment = components
+            .fragment
+            .unwrap_or_else(|| base.map(Self::fragment).unwrap_or_default().to_owned());
 
         let mut composed = String::new();
         if !host.is_empty() {
@@ -218,25 +216,29 @@ impl UrlReference {
                 composed.push(':');
             }
             composed.push_str("//");
-            if !password.is_empty() {
-                composed.push_str(&format!("{username}:{password}@"));
-            } else if !username.is_empty() {
-                composed.push_str(&format!("{username}@"));
+            if !username.is_empty() || !password.is_empty() {
+                composed.push_str(&username);
+                if !password.is_empty() {
+                    composed.push(':');
+                    composed.push_str(&password);
+                }
+                composed.push('@');
             }
             composed.push_str(&host);
             if let Some(port) = port {
-                composed.push_str(&format!(":{port}"));
+                composed.push(':');
+                composed.push_str(&port.to_string());
             }
         }
         if !host.is_empty() && !path.is_empty() && !path.starts_with('/') {
             composed.push('/');
         }
         composed.push_str(&path);
-        if let Some(query) = query.filter(|q| !q.is_empty()) {
+        if !query.is_empty() {
             composed.push('?');
             composed.push_str(&query);
         }
-        if let Some(fragment) = fragment.filter(|f| !f.is_empty()) {
+        if !fragment.is_empty() {
             composed.push('#');
             composed.push_str(&fragment);
         }
@@ -272,8 +274,8 @@ impl PartialEq for UrlReference {
 }
 
 /// The pieces `URL(**kwargs)` and `copy_with(**kwargs)` can set. `None` is
-/// "not given, keep what's there"; the caller turns an explicit Python `None`
-/// into a cleared value.
+/// "not given, keep what's there", and an empty string is a cleared component
+/// — which is what an explicit Python `None` extracts to.
 #[derive(Default)]
 pub struct UrlComponents {
     pub scheme: Option<String>,
@@ -282,8 +284,8 @@ pub struct UrlComponents {
     pub host: Option<String>,
     pub port: Option<Option<u16>>,
     pub path: Option<String>,
-    pub query: Option<Option<String>>,
-    pub fragment: Option<Option<String>>,
+    pub query: Option<String>,
+    pub fragment: Option<String>,
 }
 
 impl UrlComponents {
@@ -296,16 +298,17 @@ impl UrlComponents {
                 "password" => components.password = Some(Self::text(&value)?),
                 "host" => components.host = Some(Self::text(&value)?),
                 "port" => {
-                    components.port = Some(match value.is_none() {
-                        true => None,
-                        false => Some(value.extract()?),
-                    })
+                    components.port = Some(if value.is_none() {
+                        None
+                    } else {
+                        Some(value.extract()?)
+                    });
                 }
                 "path" => components.path = Some(Self::text(&value)?),
-                "query" => components.query = Some(Self::optional_text(&value)?),
-                "fragment" => components.fragment = Some(Self::optional_text(&value)?),
+                "query" => components.query = Some(Self::text(&value)?),
+                "fragment" => components.fragment = Some(Self::text(&value)?),
                 "params" => {
-                    components.query = Some(Some(value.extract::<QueryPairs>()?.to_string()))
+                    components.query = Some(value.extract::<QueryPairs>()?.to_string());
                 }
                 key => {
                     return Err(PyTypeError::new_err(format!(
@@ -315,10 +318,6 @@ impl UrlComponents {
             }
         }
         Ok(components)
-    }
-
-    fn optional_text(value: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
-        Ok(Some(Self::text(value)?).filter(|text| !text.is_empty()))
     }
 
     fn text(value: &Bound<'_, PyAny>) -> PyResult<String> {

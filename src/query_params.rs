@@ -291,12 +291,7 @@ impl PyQueryParams {
     #[new]
     #[pyo3(signature = (params=None, **kwargs))]
     fn py_new(params: Option<QueryPairs>, kwargs: Option<QueryPairs>) -> Self {
-        let pairs = match (params, kwargs) {
-            (Some(pairs), _) => pairs,
-            (None, Some(pairs)) => pairs,
-            (None, None) => QueryPairs::default(),
-        };
-        Self::new(pairs)
+        Self::new(params.or(kwargs).unwrap_or_default())
     }
 
     #[pyo3(signature = (key, default=None))]
