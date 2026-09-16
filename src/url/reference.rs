@@ -224,6 +224,12 @@ impl UrlReference {
 
     /// Resolve a reference against this URL. An absolute argument wins outright.
     pub fn join(&self, other: &str) -> PyResult<Self> {
+        // An empty reference resolves to the base as it stands, fragment and
+        // all — what httpx and `urllib.parse.urljoin` both do. `Url::join`
+        // drops the fragment here.
+        if other.is_empty() {
+            return Ok(self.clone());
+        }
         match self {
             Self::Absolute(url) => Ok(Self::Absolute(
                 url.join(other).map_err(|e| Self::invalid(other, &e))?,
@@ -243,9 +249,16 @@ impl UrlReference {
             return Self::parse(other);
         }
 
+        // The query is anchored too: RFC 3986 §5.3 keeps the base's query for
+        // an empty or fragment-only reference.
         let path = reference.path_str();
-        let anchored = Url::parse(&format!("{ANCHOR}/{}", path.trim_start_matches('/')))
-            .map_err(|e| Self::invalid(reference.as_str(), &e))?;
+        let mut anchored_base = format!("{ANCHOR}/{}", path.trim_start_matches('/'));
+        if let Some(query) = reference.query_str() {
+            anchored_base.push('?');
+            anchored_base.push_str(query);
+        }
+        let anchored =
+            Url::parse(&anchored_base).map_err(|e| Self::invalid(reference.as_str(), &e))?;
         let joined = anchored.join(other).map_err(|e| Self::invalid(other, &e))?;
         let tail = joined
             .as_str()
