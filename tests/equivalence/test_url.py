@@ -131,7 +131,10 @@ def test_idna_host(lib):
     [
         "//münich.example/x",
         "//user@münich.example:8080/x",
+        "//user:pw@münich.example/x",
         "//münich.example",
+        "//host:80/x",
+        "//[::1]:8080/x",
         "/münich/x",
         "münich/x",
     ],
