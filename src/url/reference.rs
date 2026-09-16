@@ -142,8 +142,12 @@ impl UrlReference {
     }
 
     /// The unicode form: `str(url)` carries punycode, `url.host` doesn't.
+    /// An IPv6 literal loses the brackets that delimit it in the URL.
     pub fn host(&self) -> Cow<'_, str> {
         let host = self.encoded_host();
+        if let Some(literal) = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
+            return Cow::Borrowed(literal);
+        }
         if host.is_empty() {
             return Cow::Borrowed("");
         }

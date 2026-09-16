@@ -109,6 +109,12 @@ def test_host_is_the_unicode_form_but_the_wire_form_is_punycode():
     assert str(url) == "http://xn--nicode-2ya.com/a"
 
 
+def test_ipv6_host_drops_the_delimiting_brackets():
+    url = rqx.URL("http://[::1]:8080/x")
+    assert url.host == "::1"
+    assert str(url) == "http://[::1]:8080/x"
+
+
 def test_copy_constructor_from_url():
     original = rqx.URL(FULL)
     assert rqx.URL(original) == original
