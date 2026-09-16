@@ -55,17 +55,30 @@ impl UrlReference {
 
     /// An authority is IDNA, not percent-encoding, so a network-path
     /// reference borrows `url::Url`'s authority parser — userinfo, IPv6 and
-    /// all — by parsing under a scheme whose default port (21) no http-style
-    /// reference will be carrying.
+    /// all — by parsing under a borrowed scheme.
+    ///
+    /// A scheme drops its own default port, and a reference with no scheme has
+    /// no default to drop, so it is parsed under two schemes with different
+    /// defaults and the one that kept the port wins.
     fn encode_relative(input: &str) -> String {
         let Some(rest) = input.strip_prefix("//") else {
             return Self::encode_path(input);
         };
-        let Ok(parsed) = Url::parse(&format!("ftp:{input}")) else {
+        let (Ok(ftp), Ok(ws)) = (
+            Url::parse(&format!("ftp:{input}")),
+            Url::parse(&format!("ws:{input}")),
+        ) else {
             return Self::encode_path(input);
         };
+        let parsed = match (ftp.port(), ws.port()) {
+            (None, Some(_)) => ws,
+            _ => ftp,
+        };
 
-        let encoded = parsed.as_str().trim_start_matches("ftp:");
+        let encoded = parsed
+            .as_str()
+            .trim_start_matches(parsed.scheme())
+            .trim_start_matches(':');
         // `Url` always has a path; the reference it came from need not.
         match rest.contains(['/', '?', '#']) {
             true => encoded.to_owned(),
