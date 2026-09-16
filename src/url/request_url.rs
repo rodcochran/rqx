@@ -1,4 +1,5 @@
 use pyo3::prelude::*;
+use pyo3::pybacked::PyBackedStr;
 use pyo3::types::PyString;
 use url::{ParseError, Url};
 
@@ -32,21 +33,31 @@ impl BaseUrl {
 
 /// A URL argument: `str` or `rqx.URL`, resolved against the client's base and
 /// checked for a scheme rqx can send.
-pub struct RequestUrl(String);
+///
+/// A `str` is used where it lies — `PyBackedStr` keeps the Python object alive
+/// and points at its buffer, so no per-request copy. Only an `rqx.URL`, which
+/// has to be serialized, brings a `String` of its own.
+pub enum RequestUrl {
+    Text(PyBackedStr),
+    Url(String),
+}
 
 impl RequestUrl {
     pub fn as_str(&self) -> &str {
-        &self.0
+        match self {
+            Self::Text(text) => text,
+            Self::Url(url) => url,
+        }
     }
 
     pub fn resolve(&self, base: Option<&BaseUrl>, params: Option<QueryPairs>) -> PyResult<Url> {
-        let absolute = match Url::parse(&self.0) {
+        let absolute = match Url::parse(self.as_str()) {
             Ok(url) if url.has_authority() => Some(url),
             Ok(_) | Err(ParseError::RelativeUrlWithoutBase) => None,
             Err(e) => {
                 return Err(InvalidURL::new_err(format!(
                     "invalid URL {:?}: {e}",
-                    self.0
+                    self.as_str()
                 )));
             }
         };
@@ -57,9 +68,12 @@ impl RequestUrl {
                 // A reference contributes its path and query only. An authority
                 // it carries (`//other.example/x`) is not a host rqx will
                 // target, which is how httpx merges it too.
-                let path = UrlReference::parse(&self.0)?.raw_path();
+                let path = UrlReference::parse(self.as_str())?.raw_path();
                 base.0.join(path.trim_start_matches('/')).map_err(|e| {
-                    InvalidURL::new_err(format!("could not join base_url with {:?}: {e}", self.0))
+                    InvalidURL::new_err(format!(
+                        "could not join base_url with {:?}: {e}",
+                        self.as_str()
+                    ))
                 })?
             }
             (None, None) => {
@@ -88,10 +102,10 @@ impl<'py> FromPyObject<'_, 'py> for RequestUrl {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
-        let obj = obj.to_owned();
-        if let Ok(s) = obj.cast::<PyString>() {
-            return Ok(Self(s.to_cow()?.into_owned()));
+        if obj.cast::<PyString>().is_ok() {
+            return Ok(Self::Text(obj.extract()?));
         }
-        Ok(Self(PyURL::extract_reference(&obj)?.to_string()))
+        let reference = PyURL::extract_reference(&obj.to_owned())?;
+        Ok(Self::Url(reference.to_string()))
     }
 }
