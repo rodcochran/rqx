@@ -2511,7 +2511,7 @@ provides-extras = ["benchmarks"]
 dev = [
     { name = "brotli" },
     { name = "filelock" },
-    { name = "httpx" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "hypercorn" },
     { name = "hypothesis" },
     { name = "maturin", specifier = ">=1.12,<2.0" },
@@ -2532,7 +2532,7 @@ lint = [
 test = [
     { name = "brotli" },
     { name = "filelock" },
-    { name = "httpx" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "hypercorn" },
     { name = "hypothesis" },
     { name = "maturin", specifier = ">=1.12,<2.0" },
