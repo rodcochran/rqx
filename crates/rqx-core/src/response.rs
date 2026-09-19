@@ -13,8 +13,8 @@ use pyo3::types::PyBytes;
 use reqwest::Response;
 use url::Url;
 
-use super::exceptions::{HTTPStatusError, JSONDecodeError, map_reqwest_error};
-use super::headers::PyHeaders;
+use super::error::*;
+use super::headers::Headers;
 use super::py_json::value_to_py;
 use super::url::{PyURL, UrlReference};
 
@@ -34,7 +34,14 @@ impl PendingResponse {
         }
     }
 
-    pub fn with_retries(mut self, num_retries: u32, retry_history: Vec<(String, f64)>) -> Self {
+    pub fn with_retries(
+        mut self,
+        num_retries: u32,
+        retry_history: Vec<(
+            String,
+            f64,
+        )>,
+    ) -> Self {
         self.parts.num_retries = num_retries;
         self.parts.retry_history = retry_history;
         self
@@ -42,12 +49,14 @@ impl PendingResponse {
 
     /// Buffer the body. The one place a `PyResponse` is built from the wire.
     pub async fn read(self) -> PyResult<PyResponse> {
-        Ok(PyResponse {
-            parts: self.parts,
-            body: self.response.bytes().await.map_err(map_reqwest_error)?,
-            content_cache: PyOnceLock::new(),
-            headers_cache: PyOnceLock::new(),
-        })
+        Ok(
+            PyResponse {
+                parts: self.parts,
+                body: self.response.bytes().await.map_err(map_reqwest_error)?,
+                content_cache: PyOnceLock::new(),
+                headers_cache: PyOnceLock::new(),
+            },
+        )
     }
 
     /// Consume the body without keeping it, so the connection goes back to the pool.
@@ -56,8 +65,16 @@ impl PendingResponse {
     }
 
     /// Parts plus the live body, for stream responses.
-    pub fn into_parts(self) -> (ResponseParts, Response) {
-        (self.parts, self.response)
+    pub fn into_parts(
+        self,
+    ) -> (
+        ResponseParts,
+        Response,
+    ) {
+        (
+            self.parts,
+            self.response,
+        )
     }
 }
 
@@ -66,12 +83,15 @@ Pure Rust implementation of the response parts to avoid overhead with GIL and FF
 */
 pub struct ResponseParts {
     pub(crate) status_code: u16,
-    pub(crate) headers: HeaderMap, // will materialize into PyHeaders
+    pub(crate) headers: HeaderMap, // will materialize into Headers
     pub(crate) url: Url,
     pub(crate) url_cache: PyOnceLock<Py<PyURL>>,
     pub(crate) elapsed: Duration,
     pub(crate) num_retries: u32, // can't be negative, can use u32?
-    pub(crate) retry_history: Vec<(String, f64)>,
+    pub(crate) retry_history: Vec<(
+        String,
+        f64,
+    )>,
     pub(crate) http_version: String,
     pub(crate) cookies: HashMap<String, String>,
     pub(crate) encoding_override: Option<String>,
@@ -163,9 +183,14 @@ impl ResponseParts {
             .and_then(|s| s.canonical_reason())
             .unwrap_or("");
         let code = self.status_code;
-        let mut message = format!("{kind} '{code} {reason}' for url '{}'\n", self.url);
+        let mut message = format!(
+            "{kind} '{code} {reason}' for url '{}'\n",
+            self.url
+        );
         let location = self.headers.get(http::header::LOCATION);
-        if let (301 | 302 | 303 | 307 | 308, Some(location)) = (code, location) {
+        if let (301 | 302 | 303 | 307 | 308, Some(location)) = (
+            code, location,
+        ) {
             let location = String::from_utf8_lossy(location.as_bytes());
             message.push_str(&format!("Redirect location: '{location}'\n"));
         }
@@ -193,14 +218,20 @@ impl ResponseParts {
             .chars()
             .count();
         let full = error.to_string();
-        let position = format!(" at line {} column {}", error.line(), error.column());
+        let position = format!(
+            " at line {} column {}",
+            error.line(),
+            error.column()
+        );
         let reason = full.strip_suffix(&position).unwrap_or(&full);
         let content_type = self.content_type().unwrap_or("<none>");
         let message = format!(
             "response is not JSON (HTTP {}, content-type: {content_type}): {reason}",
             self.status_code
         );
-        JSONDecodeError::new_err((message, doc, pos))
+        JSONDecodeError::new_err((
+            message, doc, pos,
+        ))
     }
 }
 
@@ -209,9 +240,15 @@ impl ResponseParts {
     /// read-only, so `resp.url is resp.url` holds.
     pub fn py_url(&self, py: Python<'_>) -> PyResult<Py<PyURL>> {
         self.url_cache
-            .get_or_try_init(py, || {
-                Py::new(py, PyURL::new(UrlReference::from_url(self.url.clone())))
-            })
+            .get_or_try_init(
+                py,
+                || {
+                    Py::new(
+                        py,
+                        PyURL::new(UrlReference::from_url(self.url.clone())),
+                    )
+                },
+            )
             .map(|url| url.clone_ref(py))
     }
 
@@ -224,10 +261,20 @@ impl ResponseParts {
             elapsed: Duration::ZERO,
             num_retries: 0,
             retry_history: Vec::new(),
-            http_version: format!("{:?}", response.version()),
+            http_version: format!(
+                "{:?}",
+                response.version()
+            ),
             cookies: response
                 .cookies()
-                .map(|c| (c.name().to_string(), c.value().to_string()))
+                .map(
+                    |c| {
+                        (
+                            c.name().to_string(),
+                            c.value().to_string(),
+                        )
+                    },
+                )
                 .collect(),
             encoding_override: None,
         }
@@ -255,9 +302,15 @@ impl PyResponse {
         // read-only. Repeat access is then a refcount bump, and
         // `resp.headers is resp.headers` holds (matching httpx).
         self.headers_cache
-            .get_or_try_init(py, || {
-                Py::new(py, PyHeaders::from_header_map(self.parts.headers.clone()))
-            })
+            .get_or_try_init(
+                py,
+                || {
+                    Py::new(
+                        py,
+                        PyHeaders::from_header_map(self.parts.headers.clone()),
+                    )
+                },
+            )
             .map(|h| h.clone_ref(py))
     }
 
@@ -277,7 +330,12 @@ impl PyResponse {
     }
 
     #[getter]
-    fn retry_history(&self) -> &[(String, f64)] {
+    fn retry_history(
+        &self,
+    ) -> &[(
+        String,
+        f64,
+    )] {
         &self.parts.retry_history
     }
 
@@ -313,7 +371,15 @@ impl PyResponse {
     #[getter]
     fn content(&self, py: Python<'_>) -> Py<PyBytes> {
         self.content_cache
-            .get_or_init(py, || PyBytes::new(py, &self.body).unbind())
+            .get_or_init(
+                py,
+                || {
+                    PyBytes::new(
+                        py, &self.body,
+                    )
+                    .unbind()
+                },
+            )
             .clone_ref(py)
     }
 
@@ -340,9 +406,16 @@ impl PyResponse {
     /// json.loads round-trip (which was measurably slower than calling json.loads
     /// directly — see benchmarks/b5_json_parsing.py / docs/improvements.md).
     fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let value = serde_json::from_slice(&self.body)
-            .map_err(|e| self.parts.json_decode_error(&self.body, &e))?;
-        value_to_py(py, value)
+        let value = serde_json::from_slice(&self.body).map_err(
+            |e| {
+                self.parts.json_decode_error(
+                    &self.body, &e,
+                )
+            },
+        )?;
+        value_to_py(
+            py, value,
+        )
     }
 
     /// The response itself when the status is 2xx; otherwise HTTPStatusError with
@@ -351,7 +424,9 @@ impl PyResponse {
         let Some(error) = slf.borrow().parts.status_error() else {
             return Ok(slf);
         };
-        error.value(slf.py()).setattr("response", &slf)?;
+        error.value(slf.py()).setattr(
+            "response", &slf,
+        )?;
         Err(error)
     }
 

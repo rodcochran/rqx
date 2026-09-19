@@ -5,6 +5,8 @@ use pyo3::types::PyList;
 use std::collections::HashMap;
 use std::str::FromStr;
 
+use rqx_core::headers::Headers;
+
 /// Case-insensitive header dict.
 ///
 /// Backed by `http::HeaderMap`, the canonical Rust structure for HTTP headers.
@@ -12,7 +14,7 @@ use std::str::FromStr;
 /// semantics for free.
 #[pyclass]
 pub struct PyHeaders {
-    pub(crate) inner: HeaderMap,
+    pub(crate) inner: Headers,
 }
 
 #[pymethods]
@@ -20,26 +22,17 @@ impl PyHeaders {
     #[new]
     #[pyo3(signature = (init=None))]
     fn __new__(init: Option<HashMap<String, String>>) -> PyResult<Self> {
-        let mut inner = HeaderMap::new();
-        if let Some(map) = init {
-            for (k, v) in map {
-                let name = HeaderName::from_str(&k).map_err(|e| {
-                    PyValueError::new_err(format!("invalid header name {k:?}: {e}"))
-                })?;
-                let value = HeaderValue::from_str(&v).map_err(|e| {
-                    PyValueError::new_err(format!("invalid header value {v:?}: {e}"))
-                })?;
-                inner
-                    .try_insert(name, value)
-                    .map_err(|_| PyValueError::new_err("too many headers"))?;
-            }
-        }
-        Ok(Self { inner })
+        Ok(
+            Self {
+                inner: Headers::new(init)?,
+            },
+        )
     }
 
     fn __getitem__(&self, key: &str) -> PyResult<String> {
         let name = HeaderName::from_str(key).map_err(|_| PyKeyError::new_err(key.to_string()))?;
         let values: Vec<&str> = self
+            .inner
             .inner
             .get_all(&name)
             .iter()
@@ -52,48 +45,46 @@ impl PyHeaders {
     }
 
     fn __setitem__(&mut self, key: &str, value: String) -> PyResult<()> {
-        let name = HeaderName::from_str(key)
-            .map_err(|e| PyValueError::new_err(format!("invalid header name {key:?}: {e}")))?;
-        let val = HeaderValue::from_str(&value)
-            .map_err(|e| PyValueError::new_err(format!("invalid header value {value:?}: {e}")))?;
-        // Replaces existing entries with this name.
-        self.inner
-            .try_insert(name, val)
-            .map_err(|_| PyValueError::new_err("too many headers"))?;
-        Ok(())
+        self.inner.set_item(
+            key, value,
+        )
     }
 
     fn __delitem__(&mut self, key: &str) -> PyResult<()> {
-        let name = HeaderName::from_str(key).map_err(|_| PyKeyError::new_err(key.to_string()))?;
-        if self.inner.remove(&name).is_none() {
-            return Err(PyKeyError::new_err(key.to_string()));
-        }
-        Ok(())
+        self.inner.delete_item(key)
     }
 
     fn __contains__(&self, key: &str) -> bool {
-        HeaderName::from_str(key)
-            .map(|name| self.inner.contains_key(&name))
-            .unwrap_or(false)
+        self.inner.contains(key)
     }
 
     fn __iter__(slf: PyRef<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let keys: Vec<String> = slf.inner.keys().map(|k| k.as_str().to_string()).collect();
-        let list = PyList::new(py, &keys)?;
+        let keys: Vec<String> = slf
+            .inner
+            .inner
+            .keys()
+            .map(|k| k.as_str().to_string())
+            .collect();
+        let list = PyList::new(
+            py, &keys,
+        )?;
         Ok(list.try_iter()?.into())
     }
 
     fn __len__(&self) -> usize {
-        self.inner.keys_len()
+        self.inner.length()
     }
 
     fn __repr__(&self) -> String {
-        format!("Headers({:?})", self.inner)
+        format!(
+            "Headers({:?})",
+            self.inner.inner
+        )
     }
 
     fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
         if let Ok(other_headers) = other.cast::<PyHeaders>() {
-            return Ok(self.inner == other_headers.borrow().inner);
+            return Ok(self.inner.inner == other_headers.borrow().inner.inner);
         }
         if let Ok(other_map) = other.extract::<HashMap<String, String>>() {
             let mut other_inner = HeaderMap::try_with_capacity(other_map.len()).unwrap_or_default();
@@ -107,11 +98,16 @@ impl PyHeaders {
                     Err(_) => return Ok(false),
                 };
                 // A mapping too large to hold can't equal this one.
-                if other_inner.try_insert(name, value).is_err() {
+                if other_inner
+                    .try_insert(
+                        name, value,
+                    )
+                    .is_err()
+                {
                     return Ok(false);
                 }
             }
-            return Ok(self.inner == other_inner);
+            return Ok(self.inner.inner == other_inner);
         }
         Ok(false)
     }
@@ -122,52 +118,20 @@ impl PyHeaders {
     }
 
     fn keys(&self) -> Vec<String> {
-        self.inner.keys().map(|k| k.as_str().to_string()).collect()
+        self.inner.keys()
     }
 
     fn values(&self) -> Vec<String> {
-        self.inner
-            .values()
-            .map(|v| v.to_str().unwrap_or("").to_string())
-            .collect()
+        self.inner.values()
     }
 
-    fn items(&self) -> Vec<(String, String)> {
+    fn items(
+        &self,
+    ) -> Vec<(
+        String,
+        String,
+    )> {
         // Includes duplicates (Set-Cookie, etc.) — same as iterating HeaderMap directly.
-        self.inner
-            .iter()
-            .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect()
-    }
-}
-
-// Rust-only helpers (not exposed to Python).
-impl PyHeaders {
-    /// Build from `Vec<(name, value)>` — used by response construction where
-    /// the data came from reqwest's iteration.
-    pub fn from_pairs(items: Vec<(String, String)>) -> Self {
-        let mut inner = HeaderMap::try_with_capacity(items.len()).unwrap_or_default();
-        for (k, v) in items {
-            // Skip malformed names/values defensively. reqwest's HeaderMap
-            // shouldn't ever produce them, but we don't want to panic if
-            // something pathological slips through. Same for the entry cap.
-            if let (Ok(name), Ok(value)) = (HeaderName::from_str(&k), HeaderValue::from_str(&v)) {
-                let _ = inner.try_append(name, value); // append preserves multi-values
-            }
-        }
-        Self { inner }
-    }
-
-    /// Return the first value matching `key` (case-insensitive). Used by
-    /// Rust-side code that just wants a single header for internal logic.
-    pub fn get_first(&self, key: &str) -> Option<&str> {
-        HeaderName::from_str(key)
-            .ok()
-            .and_then(|name| self.inner.get(&name))
-            .and_then(|v| v.to_str().ok())
-    }
-
-    pub fn from_header_map(header_map: HeaderMap) -> Self {
-        Self { inner: header_map }
+        self.inner.items()
     }
 }

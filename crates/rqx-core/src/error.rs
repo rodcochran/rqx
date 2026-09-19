@@ -1,30 +1,5 @@
 use std::error::Error;
 
-// import_exception!(
-//     rqx._rqx, InvalidURL
-// );
-// import_exception!(
-//     rqx._rqx,
-//     JSONDecodeError
-// );
-// import_exception!(
-//     rqx._rqx,
-//     StreamError
-// );
-// import_exception!(
-//     rqx._rqx,
-//     StreamConsumed
-// );
-// import_exception!(
-//     rqx._rqx,
-//     StreamClosed
-// );
-// import_exception!(
-//     rqx._rqx,
-//     ResponseNotRead
-// );
-
-
 #[derive(Debug)]
 pub enum RqxError {
     HTTPError(HTTPError),
