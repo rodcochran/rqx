@@ -49,7 +49,7 @@ test = [
     "hypercorn",
     "rich",
     "testcontainers",
-    "httpx",
+    "httpx>=0.28",
     "maturin>=1.12,<2.0",
 ]
 lint = [
