@@ -21,7 +21,11 @@ Repository = "https://github.com/rodcochran/rqx"
 Issues = "https://github.com/rodcochran/rqx/issues"
 Changelog = "https://github.com/rodcochran/rqx/releases"
 
+
+
 [tool.maturin]
+# Route Maturin to the specific bindings sub-crate
+manifest-path = "crates/rqx/Cargo.toml"
 module-name = "rqx._rqx"
 python-source = "python"
 # Build the wheel with pyo3's extension-module behavior. Kept here (rather than

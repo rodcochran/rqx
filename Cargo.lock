@@ -1235,8 +1235,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "rqx-core"
+name = "rqx"
 version = "0.3.0"
+dependencies = [
+ "bytes",
+ "encoding_rs",
+ "futures",
+ "http",
+ "hyper",
+ "idna",
+ "iri-string",
+ "mime",
+ "percent-encoding",
+ "pyo3",
+ "pyo3-async-runtimes",
+ "rand",
+ "reqwest",
+ "rqx-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "rqx-core"
+version = "0.1.0"
 dependencies = [
  "bytes",
  "encoding_rs",
