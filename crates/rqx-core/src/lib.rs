@@ -14,3 +14,4 @@ mod url;
 pub mod client;
 pub mod error;
 pub mod retry;
+pub mod timeout;

@@ -1,31 +1,12 @@
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
-/// Granular per-phase HTTP timeout config.
-///
-/// Each phase is independent and may be `None` (no timeout on that phase).
-/// Phases:
-///   - `connect` — TCP/TLS connection establishment
-///   - `read`    — receiving response data
-///   - `write`   — sending request body (currently a no-op; reqwest doesn't
-///                 expose a per-phase write timeout)
-///   - `pool`    — connection pool idle timeout (maps to reqwest's
-///                 `pool_idle_timeout`; semantics differ slightly from httpx's
-///                 pool-acquisition timeout)
-///
-/// Construct with a single `all` value to set every phase, or pass per-phase
-/// kwargs. Per-phase kwargs take precedence over `all` when both are given.
+use rqx_core::timeout::Timeout;
+
 #[pyclass(name = "Timeout", skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyTimeout {
-    #[pyo3(get)]
-    pub connect: Option<f64>,
-    #[pyo3(get)]
-    pub read: Option<f64>,
-    #[pyo3(get)]
-    pub write: Option<f64>,
-    #[pyo3(get)]
-    pub pool: Option<f64>,
+    pub inner: Timeout,
 }
 
 #[pymethods]
@@ -40,18 +21,40 @@ impl PyTimeout {
         pool: Option<f64>,
     ) -> Self {
         Self {
-            connect: connect.or(all),
-            read: read.or(all),
-            write: write.or(all),
-            pool: pool.or(all),
+            inner: Timeout::new(
+                connect.or(all),
+                read.or(all),
+                write.or(all),
+                pool.or(all),
+            ),
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
             "Timeout(connect={:?}, read={:?}, write={:?}, pool={:?})",
-            self.connect, self.read, self.write, self.pool
+            self.inner.connect, self.inner.read, self.inner.write, self.inner.pool
         )
+    }
+
+    #[getter]
+    pub fn connect(&self) -> Option<f64> {
+        self.inner.connect
+    }
+
+    #[getter]
+    pub fn read(&self) -> Option<f64> {
+        self.inner.read
+    }
+
+    #[getter]
+    pub fn write(&self) -> Option<f64> {
+        self.inner.write
+    }
+
+    #[getter]
+    pub fn pool(&self) -> Option<f64> {
+        self.inner.pool
     }
 }
 
@@ -62,13 +65,18 @@ impl PyTimeout {
     /// taking too long" phase. Fall back to the max of any other set fields.
     /// Returns None when all phases are None.
     pub fn per_request_total(&self) -> Option<f64> {
-        if let Some(r) = self.read {
+        if let Some(r) = self.inner.read {
             return Some(r);
         }
         let mut max: Option<f64> = None;
-        for v in [self.connect, self.write, self.pool] {
+        for v in [self.inner.connect, self.inner.write, self.inner.pool] {
             if let Some(x) = v {
-                max = Some(max.map_or(x, |m| m.max(x)));
+                max = Some(
+                    max.map_or(
+                        x,
+                        |m| m.max(x),
+                    ),
+                );
             }
         }
         max
@@ -81,16 +89,18 @@ impl PyTimeout {
             return Ok(t.borrow().clone());
         }
         if let Ok(n) = value.extract::<f64>() {
-            return Ok(Self {
-                connect: Some(n),
-                read: Some(n),
-                write: Some(n),
-                pool: Some(n),
-            });
+            return Ok(
+                Self {
+                    inner: Timeout {
+                        connect: Some(n),
+                        read: Some(n),
+                        write: Some(n),
+                        pool: Some(n),
+                    },
+                },
+            );
         }
-        Err(PyTypeError::new_err(
-            "timeout must be a number or rqx.Timeout instance",
-        ))
+        Err(PyTypeError::new_err("timeout must be a number or rqx.Timeout instance"))
     }
 
     /// Resolve a per-request `timeout=` kwarg to a seconds value for
