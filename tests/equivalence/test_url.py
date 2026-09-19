@@ -57,37 +57,35 @@ def test_relative_references_keep_their_shape(lib, reference):
 
 
 @pytest.mark.parametrize(
-    ("base", "reference"),
+    ("base", "reference", "expected"),
     [
-        ("/a/b", "c"),
-        ("a/b", "c"),
-        ("a/b", "/c"),
-        ("a/b", "../c"),
-        ("/a", "//host/x"),
-        ("//h/a", "b"),
-        ("//h/a", "/x"),
-        ("/a/b", "/c/../d"),
-        ("a/b", "?q=1"),
-        ("a/b", "#f"),
-        ("/a/b", ""),
-        ("/a/b?x=1", ""),
-        ("/a/b?x=1", "#f"),
-        ("/a/b?x=1", "c"),
-        ("/a/b?x=1", "?y=2"),
-        ("//h/a?x=1", ""),
-        ("a/b?x=1", ""),
-        ("/a#f1", ""),
-        ("http://x/a#f1", ""),
-        ("", "c"),
-        ("/a", "https://o/z"),
+        ("/a/b", "c", "/a/c"),
+        ("a/b", "c", "a/c"),
+        ("a/b", "/c", "/c"),
+        ("a/b", "../c", "c"),
+        ("/a", "//host/x", "//host/x"),
+        ("//h/a", "b", "//h/b"),
+        ("//h/a", "/x", "//h/x"),
+        ("/a/b", "/c/../d", "/d"),
+        ("a/b", "?q=1", "a/b?q=1"),
+        ("a/b", "#f", "a/b#f"),
+        ("/a/b", "", "/a/b"),
+        ("/a/b?x=1", "", "/a/b?x=1"),
+        ("/a/b?x=1", "#f", "/a/b?x=1#f"),
+        ("/a/b?x=1", "c", "/a/c"),
+        ("/a/b?x=1", "?y=2", "/a/b?y=2"),
+        ("//h/a?x=1", "", "//h/a?x=1"),
+        ("a/b?x=1", "", "a/b?x=1"),
+        ("/a#f1", "", "/a#f1"),
+        ("http://x/a#f1", "", "http://x/a#f1"),
+        ("", "c", "c"),
+        ("/a", "https://o/z", "https://o/z"),
     ],
 )
-def test_join_from_a_relative_base(lib, base, reference):
+def test_join_from_a_relative_base(lib, base, reference, expected):
     """RFC 3986 §5.3: an argument with its own scheme or authority replaces the
     base; otherwise the base's authority and path shape survive the merge."""
-    assert str(lib.module.URL(base).join(reference)) == str(
-        httpx.URL(base).join(reference)
-    )
+    assert str(lib.module.URL(base).join(reference)) == expected
 
 
 def test_copy_with(lib):
