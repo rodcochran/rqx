@@ -1,11 +1,10 @@
-use pyo3::prelude::PyResult;
 use std::collections::HashMap;
 
-use crate::exceptions::*;
+use crate::error::{RqxError, TransportError};
 
-/// Parses the Python `proxy` dict into `reqwest::Proxy` values.
-/// Map keys: "http" | "https" (others silently ignored).
-pub fn parse_proxies(proxy: Option<HashMap<String, String>>) -> PyResult<Vec<reqwest::Proxy>> {
+pub fn parse_proxies(
+    proxy: Option<HashMap<String, String>>,
+) -> Result<Vec<reqwest::Proxy>, RqxError> {
     let Some(map) = proxy else {
         return Ok(Vec::new());
     };
@@ -16,7 +15,7 @@ pub fn parse_proxies(proxy: Option<HashMap<String, String>>) -> PyResult<Vec<req
             "https" => reqwest::Proxy::https(&url),
             _ => continue,
         }
-        .map_err(|e| RqxError::new_err(format!("invalid proxy: {e}")))?;
+        .map_err(|e| TransportError::ProxyError(format!("invalid proxy: {e}")))?;
         out.push(p);
     }
     Ok(out)

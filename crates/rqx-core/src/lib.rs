@@ -4,6 +4,7 @@
     clippy::redundant_field_names
 )]
 
+mod http;
 mod query_params;
 mod request;
 mod request_headers;

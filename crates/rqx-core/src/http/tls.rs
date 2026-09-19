@@ -20,11 +20,13 @@ impl VerifyConfig {
     pub fn from_py_any(verify: &Bound<'_, PyAny>) -> PyResult<Self> {
         if verify.is_instance_of::<PyBool>() {
             let enabled = verify.extract::<bool>().unwrap();
-            Ok(if enabled {
-                Self::Default
-            } else {
-                Self::DisableVerification
-            })
+            Ok(
+                if enabled {
+                    Self::Default
+                } else {
+                    Self::DisableVerification
+                },
+            )
         } else if verify.is_instance_of::<PyString>() {
             let path = verify
                 .extract::<String>()
@@ -35,10 +37,14 @@ impl VerifyConfig {
                 .map_err(|e| RqxError::new_err(format!("failed to construct CA cert: {e}")))?;
             Ok(Self::CustomCa(cert))
         } else {
-            Err(RqxError::new_err(format!(
-                "verify must be bool or str (CA cert path), got {}",
-                verify.get_type().name()?,
-            )))
+            Err(
+                RqxError::new_err(
+                    format!(
+                        "verify must be bool or str (CA cert path), got {}",
+                        verify.get_type().name()?,
+                    ),
+                ),
+            )
         }
     }
 }
@@ -64,7 +70,10 @@ pub fn parse_identity(cert: &Bound<'_, PyAny>) -> PyResult<Identity> {
         cert.extract()
             .map_err(|e| RqxError::new_err(format!("failed to read cert bytes: {e}")))?
     } else if cert.is_instance_of::<PyTuple>() {
-        let (cert_path, key_path): (String, String) = cert
+        let (cert_path, key_path): (
+            String,
+            String,
+        ) = cert
             .extract()
             .map_err(|e| RqxError::new_err(format!("failed to parse cert, key tuple: {e}")))?;
         let mut bytes = std::fs::read(&cert_path)
@@ -74,10 +83,14 @@ pub fn parse_identity(cert: &Bound<'_, PyAny>) -> PyResult<Identity> {
         bytes.append(&mut key_bytes);
         bytes
     } else {
-        return Err(RqxError::new_err(format!(
-            "cert must be str (path), bytes (PEM), or (cert_path, key_path) tuple, got {}",
-            cert.get_type().name()?,
-        )));
+        return Err(
+            RqxError::new_err(
+                format!(
+                    "cert must be str (path), bytes (PEM), or (cert_path, key_path) tuple, got {}",
+                    cert.get_type().name()?,
+                ),
+            ),
+        );
     };
 
     Identity::from_pem(&pem_bytes)
