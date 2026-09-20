@@ -9,20 +9,7 @@ use super::request::RequestSpec;
 use super::runtime::RUNTIME;
 use super::stream::{PyAsyncStreamResponse, PyStreamResponse};
 
-/// A request built by `stream()` but not yet sent. Sent once, on enter.
-struct Unsent {
-    client: Client,
-    request: RequestSpec,
-    follow_redirects: Option<bool>,
-}
-
-impl Unsent {
-    fn take(slot: &mut Option<Unsent>) -> PyResult<Unsent> {
-        slot.take().ok_or_else(|| {
-            RqxError::new_err("stream already started; call stream() again for a new request")
-        })
-    }
-}
+use rqx_core::stream_context::Unsent;
 
 /// What `Client.stream()` returns: `with` sends the request and yields the
 /// response, leaving the block closes it.
@@ -38,11 +25,15 @@ impl PyStreamContext {
         let unsent = Unsent::take(&mut slf.unsent)?;
         let pending = block_on_inner(
             py,
-            unsent
-                .client
-                .stream(unsent.request, unsent.follow_redirects),
+            unsent.client.stream(
+                unsent.request,
+                unsent.follow_redirects,
+            ),
         )?;
-        let response = Py::new(py, PyStreamResponse::from_pending(pending))?;
+        let response = Py::new(
+            py,
+            PyStreamResponse::from_pending(pending),
+        )?;
         slf.response = Some(response.clone_ref(py));
         Ok(response)
     }
@@ -63,11 +54,13 @@ impl PyStreamContext {
 impl PyStreamContext {
     pub fn new(client: Client, request: RequestSpec, follow_redirects: Option<bool>) -> Self {
         Self {
-            unsent: Some(Unsent {
-                client,
-                request,
-                follow_redirects,
-            }),
+            unsent: Some(
+                Unsent {
+                    client,
+                    request,
+                    follow_redirects,
+                },
+            ),
             response: None,
         }
     }
@@ -90,17 +83,28 @@ impl PyAsyncStreamContext {
     ) -> PyResult<Bound<'py, PyAny>> {
         let unsent = Unsent::take(&mut slf.unsent)?;
         let slot = Arc::clone(&slf.response);
-        RUNTIME.future_into_py(py, async move {
-            let pending = unsent
-                .client
-                .stream(unsent.request, unsent.follow_redirects)
-                .await?;
-            Python::attach(|py| {
-                let response = Py::new(py, PyAsyncStreamResponse::from_pending(pending))?;
-                *slot.lock().unwrap() = Some(response.clone_ref(py));
-                Ok(response)
-            })
-        })
+        RUNTIME.future_into_py(
+            py,
+            async move {
+                let pending = unsent
+                    .client
+                    .stream(
+                        unsent.request,
+                        unsent.follow_redirects,
+                    )
+                    .await?;
+                Python::attach(
+                    |py| {
+                        let response = Py::new(
+                            py,
+                            PyAsyncStreamResponse::from_pending(pending),
+                        )?;
+                        *slot.lock().unwrap() = Some(response.clone_ref(py));
+                        Ok(response)
+                    },
+                )
+            },
+        )
     }
 
     fn __aexit__<'py>(
@@ -111,27 +115,32 @@ impl PyAsyncStreamContext {
         _traceback: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let slot = Arc::clone(&slf.response);
-        RUNTIME.future_into_py(py, async move {
-            let response = slot.lock().unwrap().take();
-            if let Some(response) = response {
-                let body = Python::attach(|py| response.borrow(py).take_body());
-                if let Some(body) = body {
-                    body.close().await;
+        RUNTIME.future_into_py(
+            py,
+            async move {
+                let response = slot.lock().unwrap().take();
+                if let Some(response) = response {
+                    let body = Python::attach(|py| response.borrow(py).take_body());
+                    if let Some(body) = body {
+                        body.close().await;
+                    }
                 }
-            }
-            Ok(false)
-        })
+                Ok(false)
+            },
+        )
     }
 }
 
 impl PyAsyncStreamContext {
     pub fn new(client: Client, request: RequestSpec, follow_redirects: Option<bool>) -> Self {
         Self {
-            unsent: Some(Unsent {
-                client,
-                request,
-                follow_redirects,
-            }),
+            unsent: Some(
+                Unsent {
+                    client,
+                    request,
+                    follow_redirects,
+                },
+            ),
             response: Arc::new(Mutex::new(None)),
         }
     }

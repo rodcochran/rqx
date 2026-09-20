@@ -24,10 +24,14 @@ impl PyURL {
         }
         match obj.cast::<PyString>() {
             Ok(s) => UrlReference::parse(&s.to_cow()?),
-            Err(_) => Err(PyTypeError::new_err(format!(
-                "Invalid type for url. Expected str or rqx.URL, got {}",
-                obj.get_type().name()?
-            ))),
+            Err(_) => Err(
+                PyTypeError::new_err(
+                    format!(
+                        "Invalid type for url. Expected str or rqx.URL, got {}",
+                        obj.get_type().name()?
+                    ),
+                ),
+            ),
         }
     }
 
@@ -46,14 +50,22 @@ impl PyURL {
     ) -> PyResult<Self> {
         let base = url.map(Self::extract_reference).transpose()?;
         match kwargs {
-            None => Ok(Self::new(match base {
-                Some(reference) => reference,
-                None => UrlReference::parse("")?,
-            })),
-            Some(kwargs) => Ok(Self::new(UrlReference::compose(
-                base.as_ref(),
-                UrlComponents::extract(kwargs)?,
-            )?)),
+            None => Ok(
+                Self::new(
+                    match base {
+                        Some(reference) => reference,
+                        None => UrlReference::parse("")?,
+                    },
+                ),
+            ),
+            Some(kwargs) => Ok(
+                Self::new(
+                    UrlReference::compose(
+                        base.as_ref(),
+                        UrlComponents::extract(kwargs)?,
+                    )?,
+                ),
+            ),
         }
     }
 
@@ -89,7 +101,10 @@ impl PyURL {
 
     #[getter]
     fn query<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, self.reference.query().as_bytes())
+        PyBytes::new(
+            py,
+            self.reference.query().as_bytes(),
+        )
     }
 
     #[getter]
@@ -99,7 +114,10 @@ impl PyURL {
 
     #[getter]
     fn raw_path<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, self.reference.raw_path().as_bytes())
+        PyBytes::new(
+            py,
+            self.reference.raw_path().as_bytes(),
+        )
     }
 
     #[getter]
@@ -123,27 +141,33 @@ impl PyURL {
             Some(kwargs) => UrlComponents::extract(kwargs)?,
             None => UrlComponents::default(),
         };
-        Ok(Self::new(UrlReference::compose(
-            Some(&self.reference),
-            components,
-        )?))
+        Ok(
+            Self::new(
+                UrlReference::compose(
+                    Some(&self.reference),
+                    components,
+                )?,
+            ),
+        )
     }
 
     #[pyo3(signature = (key, value=None))]
     fn copy_set_param(&self, key: &str, value: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
         self.with_params(
-            self.reference
-                .params()
-                .set(key, QueryPairs::scalar_or_empty(value)?),
+            self.reference.params().set(
+                key,
+                QueryPairs::scalar_or_empty(value)?,
+            ),
         )
     }
 
     #[pyo3(signature = (key, value=None))]
     fn copy_add_param(&self, key: &str, value: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
         self.with_params(
-            self.reference
-                .params()
-                .add(key, QueryPairs::scalar_or_empty(value)?),
+            self.reference.params().add(
+                key,
+                QueryPairs::scalar_or_empty(value)?,
+            ),
         )
     }
 
@@ -174,7 +198,10 @@ impl PyURL {
     }
 
     fn __repr__(&self) -> String {
-        format!("URL('{}')", self.reference.masked())
+        format!(
+            "URL('{}')",
+            self.reference.masked()
+        )
     }
 
     fn __eq__(&self, other: &Bound<'_, PyAny>) -> bool {

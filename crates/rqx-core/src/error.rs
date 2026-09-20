@@ -252,6 +252,13 @@ pub enum StreamError {
     StreamConsumed(String),
     StreamClosed(String),
     ResponseNotRead(String),
+    StreamError(String),
+}
+
+impl From<StreamError> for RqxError {
+    fn from(value: StreamError) -> Self {
+        RqxError::StreamError(value)
+    }
 }
 
 impl std::fmt::Display for StreamError {
@@ -266,6 +273,10 @@ impl std::fmt::Display for StreamError {
                 "{e}"
             ),
             StreamError::ResponseNotRead(e) => write!(
+                f,
+                "{e}"
+            ),
+            StreamError::StreamError(e) => write!(
                 f,
                 "{e}"
             ),

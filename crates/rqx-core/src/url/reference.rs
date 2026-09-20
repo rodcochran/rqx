@@ -9,9 +9,6 @@ use iri_string::percent_encode::PercentEncoded;
 use iri_string::spec::UriSpec;
 use iri_string::types::{UriReferenceStr, UriRelativeStr, UriRelativeString};
 use percent_encoding::percent_decode_str;
-use pyo3::exceptions::PyTypeError;
-use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict, PyString};
 use url::{ParseError, Url};
 
 use crate::error::*;
@@ -270,7 +267,7 @@ impl UrlReference {
         }
     }
 
-    pub fn with_params(&self, params: &QueryPairs) -> PyResult<Self> {
+    pub fn with_params(&self, params: &QueryPairs) -> Result<Self, RqxError> {
         Self::compose(
             Some(self),
             UrlComponents {
@@ -371,7 +368,7 @@ impl UrlReference {
     }
 
     /// Rebuild from components, letting the parser do the encoding.
-    pub fn compose(base: Option<&Self>, components: UrlComponents) -> PyResult<Self> {
+    pub fn compose(base: Option<&Self>, components: UrlComponents) -> Result<Self, RqxError> {
         let current = |read: fn(&Self) -> &str| base.map(read).unwrap_or_default().to_owned();
 
         let scheme = components.scheme.unwrap_or_else(|| current(Self::scheme));
