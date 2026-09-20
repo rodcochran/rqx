@@ -87,10 +87,7 @@ impl Client {
         json: Option<serde_json::Value>,
         params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
-        auth: Option<(
-            String,
-            String,
-        )>,
+        auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
@@ -108,13 +105,7 @@ impl Client {
             timeout,
         )?;
         // `stream` stamps `elapsed` when the headers arrive; reading the body doesn't move it.
-        self.stream(
-            request,
-            follow_redirects,
-        )
-        .await?
-        .read()
-        .await
+        self.stream(request, follow_redirects).await?.read().await
     }
 
     /// Send a built request, leaving the body unread for the stream response
@@ -125,12 +116,7 @@ impl Client {
         follow_redirects: Option<bool>,
     ) -> Result<PendingResponse, RqxError> {
         let start_time = Instant::now();
-        let mut pending = self
-            .send(
-                request,
-                follow_redirects,
-            )
-            .await?;
+        let mut pending = self.send(request, follow_redirects).await?;
         pending.parts.elapsed = start_time.elapsed();
         Ok(pending)
     }
@@ -144,10 +130,7 @@ impl Client {
         json: Option<serde_json::Value>,
         params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
-        auth: Option<(
-            String,
-            String,
-        )>,
+        auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         timeout: f64,
     ) -> Result<RequestSpec, RqxError> {
@@ -156,26 +139,19 @@ impl Client {
         // rule against the effective values that would actually be applied.
         let bearer = auth_bearer.or_else(|| self.auth_bearer.clone());
         if auth.is_some() && bearer.is_some() {
-            return Err(
-                RequestError::RequestError(
-                    "Cannot specify both auth= (basic) and auth_bearer= on the same request"
-                        .to_string(),
-                )
-                .into(),
-            );
+            return Err(RequestError::RequestError(
+                "Cannot specify both auth= (basic) and auth_bearer= on the same request"
+                    .to_string(),
+            )
+            .into());
         }
 
-        let resolved_url = url.resolve(
-            self.base_url.as_ref(),
-            params,
-        )?;
+        let resolved_url = url.resolve(self.base_url.as_ref(), params)?;
         RequestSpec::build(
             self.transport.client(),
             method,
             resolved_url,
-            RequestBody::new(
-                content, data, json,
-            )?,
+            RequestBody::new(content, data, json)?,
             headers,
             auth,
             bearer.as_deref(),
@@ -205,10 +181,7 @@ impl Client {
         url: RequestUrl,
         params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
-        auth: Option<(
-            String,
-            String,
-        )>,
+        auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
@@ -234,10 +207,7 @@ impl Client {
         url: RequestUrl,
         params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
-        auth: Option<(
-            String,
-            String,
-        )>,
+        auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
@@ -263,10 +233,7 @@ impl Client {
         url: RequestUrl,
         params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
-        auth: Option<(
-            String,
-            String,
-        )>,
+        auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
@@ -292,10 +259,7 @@ impl Client {
         url: RequestUrl,
         params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
-        auth: Option<(
-            String,
-            String,
-        )>,
+        auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
@@ -324,10 +288,7 @@ impl Client {
         json: Option<serde_json::Value>,
         params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
-        auth: Option<(
-            String,
-            String,
-        )>,
+        auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
@@ -356,10 +317,7 @@ impl Client {
         json: Option<serde_json::Value>,
         params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
-        auth: Option<(
-            String,
-            String,
-        )>,
+        auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
@@ -388,10 +346,7 @@ impl Client {
         json: Option<serde_json::Value>,
         params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
-        auth: Option<(
-            String,
-            String,
-        )>,
+        auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
@@ -419,16 +374,10 @@ impl Client {
         if resp_cookies.is_empty() {
             return;
         }
-        self.cookies.lock().await.extend(
-            resp_cookies.iter().map(
-                |(k, v)| {
-                    (
-                        k.clone(),
-                        v.clone(),
-                    )
-                },
-            ),
-        );
+        self.cookies
+            .lock()
+            .await
+            .extend(resp_cookies.iter().map(|(k, v)| (k.clone(), v.clone())));
     }
 
     /// Follow the HTTP redirect chain. Returns the final hop with its body
@@ -451,10 +400,7 @@ impl Client {
         let mut current = spec;
         let mut redirects_used: u32 = 0;
         let mut num_retries: u32 = 0;
-        let mut retry_history: Vec<(
-            String,
-            f64,
-        )> = Vec::new();
+        let mut retry_history: Vec<(String, f64)> = Vec::new();
         loop {
             let mut hop = self.transport.send(&current).await?;
             num_retries += hop.parts.num_retries;
@@ -462,33 +408,19 @@ impl Client {
             let status = hop.parts.status_code;
 
             if !(300..400).contains(&status) {
-                return Ok(
-                    hop.with_retries(
-                        num_retries,
-                        retry_history,
-                    ),
-                );
+                return Ok(hop.with_retries(num_retries, retry_history));
             }
 
             self.accumulate_cookies(&hop.parts.cookies).await;
 
             if redirects_used + 1 >= self.max_redirects {
                 if raise_on_redirect {
-                    return Err(
-                        TooManyRedirects::new_err(
-                            format!(
-                                "Exceeded max redirects {}",
-                                self.max_redirects
-                            ),
-                        ),
-                    );
+                    return Err(TooManyRedirects::new_err(format!(
+                        "Exceeded max redirects {}",
+                        self.max_redirects
+                    )));
                 }
-                return Ok(
-                    hop.with_retries(
-                        num_retries,
-                        retry_history,
-                    ),
-                );
+                return Ok(hop.with_retries(num_retries, retry_history));
             }
 
             let location = hop
@@ -504,9 +436,7 @@ impl Client {
 
             // Resolve against the hop that sent the Location, not the original URL.
             let new_url = current.redirect_target(&location)?;
-            current = current.redirected(
-                status, new_url,
-            )?;
+            current = current.redirected(status, new_url)?;
 
             redirects_used += 1;
         }

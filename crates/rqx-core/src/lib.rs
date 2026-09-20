@@ -10,6 +10,6 @@ pub mod error;
 pub mod headers;
 pub mod response;
 pub mod retry;
-pub mod stream;
+
 pub mod streaming;
 pub mod timeout;

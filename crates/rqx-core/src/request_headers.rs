@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::types::{PyDict, PyString};
 
-use crate::headers::PyHeaders;
+use crate::headers::Headers;
 
 /// The `headers=` kwarg, built straight into a `HeaderMap` at the boundary:
 /// no intermediate map, one validation pass, and a `ValueError` instead of
