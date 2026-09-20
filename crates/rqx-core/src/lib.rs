@@ -1,5 +1,4 @@
 mod http;
-mod py_json;
 mod query_params;
 mod request;
 mod request_headers;
@@ -12,5 +11,5 @@ pub mod headers;
 pub mod response;
 pub mod retry;
 pub mod stream;
-pub mod stream_context;
+pub mod streaming;
 pub mod timeout;
