@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::sync::Mutex as TokioMutex;
+use url::Url;
 
 use crate::error::*;
 use crate::query_params::QueryPairs;
@@ -11,7 +12,9 @@ use crate::request_headers::RequestHeaders;
 use crate::response::{PendingResponse, PyResponse};
 use crate::retry::DEFAULT_RAISE_ON_REDIRECT;
 use crate::transport::Transport;
-use crate::url::{BaseUrl, PyURL, RequestUrl};
+use crate::url::reference::UrlReference;
+use crate::url::request_url::BaseUrl;
+use crate::url::url::RqxClientUrl;
 
 const DEFAULT_TIMEOUT: f64 = 15.0;
 const DEFAULT_FOLLOW_REDIRECTS: bool = false;
@@ -62,8 +65,8 @@ impl Client {
         }
     }
 
-    pub fn base_url(&self) -> Option<PyURL> {
-        self.base_url.as_ref().map(BaseUrl::to_py)
+    pub fn base_url(&self) -> Option<&BaseUrl> {
+        self.base_url.as_ref()
     }
 
     pub fn timeout_secs(&self) -> f64 {
@@ -81,7 +84,7 @@ impl Client {
     pub async fn request(
         &self,
         method: &str,
-        url: RequestUrl,
+        url: RqxClientUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
@@ -124,7 +127,7 @@ impl Client {
     pub fn build(
         &self,
         method: &str,
-        url: RequestUrl,
+        url: RqxClientUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
@@ -146,17 +149,32 @@ impl Client {
             .into());
         }
 
-        let resolved_url = url.resolve(self.base_url.as_ref(), params)?;
         RequestSpec::build(
             self.transport.client(),
             method,
-            resolved_url,
+            self.merge_url(&url)?,
+            params,
             RequestBody::new(content, data, json)?,
             headers,
             auth,
             bearer.as_deref(),
             timeout,
         )
+    }
+
+    fn merge_url(&self, url: &RqxClientUrl) -> Result<Url, RqxError> {
+        if let UrlReference::Absolute(absolute) = url.get_inner()
+            && absolute.has_authority()
+        {
+            return Ok(absolute);
+        }
+        match &self.base_url {
+            Some(base) => base.join(url),
+            None => Err(TransportError::UnsupportedProtocol(
+                "Request URL is missing an 'http://' or 'https://' protocol.".to_string(),
+            )
+            .into()),
+        }
     }
 
     /// Send a built request — following redirects when asked — and accumulate
@@ -178,7 +196,7 @@ impl Client {
 
     pub async fn get(
         &self,
-        url: RequestUrl,
+        url: RqxClientUrl,
         params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
@@ -204,7 +222,7 @@ impl Client {
 
     pub async fn options(
         &self,
-        url: RequestUrl,
+        url: RqxClientUrl,
         params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
@@ -230,7 +248,7 @@ impl Client {
 
     pub async fn head(
         &self,
-        url: RequestUrl,
+        url: RqxClientUrl,
         params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
@@ -256,7 +274,7 @@ impl Client {
 
     pub async fn delete(
         &self,
-        url: RequestUrl,
+        url: RqxClientUrl,
         params: Option<QueryPairs>,
         headers: Option<RequestHeaders>,
         auth: Option<(String, String)>,
@@ -282,7 +300,7 @@ impl Client {
 
     pub async fn post(
         &self,
-        url: RequestUrl,
+        url: RqxClientUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
@@ -311,7 +329,7 @@ impl Client {
 
     pub async fn put(
         &self,
-        url: RequestUrl,
+        url: RqxClientUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
@@ -340,7 +358,7 @@ impl Client {
 
     pub async fn patch(
         &self,
-        url: RequestUrl,
+        url: RqxClientUrl,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,

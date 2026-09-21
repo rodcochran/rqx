@@ -8,6 +8,7 @@ use url::Url;
 
 use super::error::*;
 use super::headers::Headers;
+use super::query_params::QueryPairs;
 
 /// The one body a request can have. `content`, `data` and `json` are three
 /// ways of naming it, and at most one of them may be set.
@@ -60,7 +61,8 @@ impl RequestSpec {
     pub fn build(
         http_client: &Client,
         method: &str,
-        url: Url,
+        mut url: Url,
+        params: Option<QueryPairs>,
         body: RequestBody,
         headers: Option<Headers>,
         auth: Option<(String, String)>,
@@ -70,6 +72,20 @@ impl RequestSpec {
         // Uppercased like httpx, so `request("get", ...)` is GET on the wire.
         let method = Method::from_bytes(method.to_ascii_uppercase().as_bytes())
             .map_err(|e| RequestError::RequestError(format!("invalid method {method:?}: {e}")))?;
+
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(TransportError::UnsupportedProtocol(format!(
+                "Request URL has an unsupported protocol '{}://'.",
+                url.scheme()
+            ))
+            .into());
+        }
+
+        // `params=` replaces whatever query the URL carried, as in httpx.
+        if let Some(params) = params {
+            let query = params.to_string();
+            url.set_query(Some(query.as_str()).filter(|q| !q.is_empty()));
+        }
 
         let mut builder = body.apply(http_client.request(method, url));
 

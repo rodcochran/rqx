@@ -1,9 +1,8 @@
-use url::{ParseError, Url};
+use url::Url;
 
 use super::reference::UrlReference;
-use crate::error::*;
-
-use crate::query_params::QueryPairs;
+use super::url::RqxClientUrl;
+use crate::error::RqxError;
 
 /// A `Client(base_url=)`, canonicalized.
 ///
@@ -14,81 +13,34 @@ use crate::query_params::QueryPairs;
 pub struct BaseUrl(Url);
 
 impl BaseUrl {
-    pub fn parse(input: &str) -> Result<Self, RqxError> {
-        let mut url = Url::parse(input)
-            .map_err(|e| RqxError::InvalidURL(format!("invalid base_url {input:?}: {e}")))?;
-        if !url.path().ends_with('/') {
-            url.set_path(&format!("{}/", url.path()));
+    pub fn new(url: &RqxClientUrl) -> Result<Self, RqxError> {
+        match url.get_inner() {
+            UrlReference::Absolute(base) => Ok(Self(base).with_trailing_slash()),
+            UrlReference::Relative(_) => Err(RqxError::InvalidURL(format!(
+                "invalid base_url \"{url}\": relative URL without a base"
+            ))),
         }
-        Ok(Self(url))
+    }
+
+    fn with_trailing_slash(mut self) -> Self {
+        if !self.0.path().ends_with('/') {
+            self.0.set_path(&format!("{}/", self.0.path()));
+        }
+        self
     }
 
     pub fn get_inner(&self) -> Url {
         self.0.clone()
     }
-}
 
-pub enum RequestUrl {
-    Url(String),
-}
-
-impl RequestUrl {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Url(url) => url,
-        }
-    }
-
-    pub fn resolve(
-        &self,
-        base: Option<&BaseUrl>,
-        params: Option<QueryPairs>,
-    ) -> Result<Url, RqxError> {
-        let absolute = match Url::parse(self.as_str()) {
-            Ok(url) if url.has_authority() => Some(url),
-            Ok(_) | Err(ParseError::RelativeUrlWithoutBase) => None,
-            Err(e) => {
-                return Err(RqxError::InvalidURL(format!(
-                    "invalid URL {:?}: {e}",
-                    self.as_str()
-                )));
-            }
-        };
-
-        let mut url = match (absolute, base) {
-            (Some(url), _) => url,
-            (None, Some(base)) => {
-                // A reference contributes its path and query only. An authority
-                // it carries (`//other.example/x`) is not a host rqx will
-                // target, which is how httpx merges it too.
-                let path = UrlReference::parse(self.as_str())?.raw_path();
-                base.0.join(path.trim_start_matches('/')).map_err(|e| {
-                    RqxError::InvalidURL(format!(
-                        "could not join base_url with {:?}: {e}",
-                        self.as_str()
-                    ))
-                })?
-            }
-            (None, None) => {
-                return Err(TransportError::UnsupportedProtocol(
-                    "Request URL is missing an 'http://' or 'https://' protocol.".to_string(),
-                )
-                .into());
-            }
-        };
-
-        // `params=` replaces whatever query the URL carried, as in httpx.
-        if let Some(params) = params {
-            let query = params.to_string();
-            url.set_query(Some(query.as_str()).filter(|q| !q.is_empty()));
-        }
-
-        match url.scheme() {
-            "http" | "https" => Ok(url),
-            scheme => Err(TransportError::UnsupportedProtocol(format!(
-                "Request URL has an unsupported protocol '{scheme}://'."
-            ))
-            .into()),
+    // A reference contributes its path and query only. An authority it carries
+    // (`//other.example/x`) is not a host rqx will target, as in httpx.
+    pub fn join(&self, url: &RqxClientUrl) -> Result<Url, RqxError> {
+        match self.0.join(url.raw_path().trim_start_matches('/')) {
+            Ok(joined) => Ok(joined),
+            Err(e) => Err(RqxError::InvalidURL(format!(
+                "could not join base_url with \"{url}\": {e}"
+            ))),
         }
     }
 }

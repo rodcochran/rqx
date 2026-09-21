@@ -21,25 +21,12 @@ impl RqxClientUrl {
         Ok(Self::new(UrlReference::parse(input)?))
     }
 
-    pub fn compose(
-        base: Option<&Self>,
-        kwargs: HashMap<String, Option<UrlComponentValue>>,
-    ) -> Result<Self, RqxError> {
-        match (base, kwargs.is_empty()) {
-            (Some(url), true) => Ok(url.clone()),
-            (None, true) => Self::parse(""),
-            (base, false) => {
-                let components = UrlComponents::from_hash_map(kwargs)?;
-                Ok(Self::new(UrlReference::compose(
-                    base.map(|url| &url.reference),
-                    components,
-                )?))
-            }
-        }
-    }
-
     fn with_params(&self, params: &QueryPairs) -> Result<Self, RqxError> {
         Ok(Self::new(self.reference.with_params(params)?))
+    }
+
+    pub fn get_inner(&self) -> UrlReference {
+        self.reference.clone()
     }
 
     pub fn scheme(&self) -> &str {
@@ -98,6 +85,9 @@ impl RqxClientUrl {
         &self,
         kwargs: HashMap<String, Option<UrlComponentValue>>,
     ) -> Result<Self, RqxError> {
+        if kwargs.is_empty() {
+            return Ok(self.clone());
+        }
         let components = UrlComponents::from_hash_map(kwargs)?;
         Ok(Self::new(UrlReference::compose(
             Some(&self.reference),
