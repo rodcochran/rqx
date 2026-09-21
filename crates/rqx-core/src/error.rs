@@ -5,7 +5,7 @@ use std::error::Error;
 pub enum RqxError {
     HTTPError(HTTPError),
     InvalidURL(String),
-    JSONDecodeError(String),
+    JSONDecodeError(JSONDecodeError),
     StreamError(StreamError),
     TLSConfigError(String),
 }
@@ -200,6 +200,25 @@ impl std::fmt::Display for StreamError {
             StreamError::ResponseNotRead(e) => write!(f, "{e}"),
             StreamError::StreamError(e) => write!(f, "{e}"),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct JSONDecodeError {
+    pub message: String,
+    pub doc: String,
+    pub pos: usize,
+}
+
+impl From<JSONDecodeError> for RqxError {
+    fn from(value: JSONDecodeError) -> Self {
+        RqxError::JSONDecodeError(value)
+    }
+}
+
+impl std::fmt::Display for JSONDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.message)
     }
 }
 

@@ -6,10 +6,10 @@ use tokio::sync::Mutex as TokioMutex;
 use url::Url;
 
 use crate::error::*;
+use crate::headers::Headers;
 use crate::query_params::QueryPairs;
 use crate::request::{RequestBody, RequestSpec};
-use crate::request_headers::RequestHeaders;
-use crate::response::{PendingResponse, PyResponse};
+use crate::response::{BufferedResponse, PendingResponse};
 use crate::retry::DEFAULT_RAISE_ON_REDIRECT;
 use crate::transport::Transport;
 use crate::url::reference::UrlReference;
@@ -89,12 +89,12 @@ impl Client {
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
         params: Option<QueryPairs>,
-        headers: Option<RequestHeaders>,
+        headers: Option<Headers>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
-    ) -> Result<PyResponse, RqxError> {
+    ) -> Result<BufferedResponse, RqxError> {
         let request = self.build(
             method,
             url,
@@ -132,7 +132,7 @@ impl Client {
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
         params: Option<QueryPairs>,
-        headers: Option<RequestHeaders>,
+        headers: Option<Headers>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         timeout: f64,
@@ -198,12 +198,12 @@ impl Client {
         &self,
         url: RqxClientUrl,
         params: Option<QueryPairs>,
-        headers: Option<RequestHeaders>,
+        headers: Option<Headers>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
-    ) -> Result<PyResponse, RqxError> {
+    ) -> Result<BufferedResponse, RqxError> {
         self.request(
             "GET",
             url,
@@ -224,12 +224,12 @@ impl Client {
         &self,
         url: RqxClientUrl,
         params: Option<QueryPairs>,
-        headers: Option<RequestHeaders>,
+        headers: Option<Headers>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
-    ) -> Result<PyResponse, RqxError> {
+    ) -> Result<BufferedResponse, RqxError> {
         self.request(
             "OPTIONS",
             url,
@@ -250,12 +250,12 @@ impl Client {
         &self,
         url: RqxClientUrl,
         params: Option<QueryPairs>,
-        headers: Option<RequestHeaders>,
+        headers: Option<Headers>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
-    ) -> Result<PyResponse, RqxError> {
+    ) -> Result<BufferedResponse, RqxError> {
         self.request(
             "HEAD",
             url,
@@ -276,12 +276,12 @@ impl Client {
         &self,
         url: RqxClientUrl,
         params: Option<QueryPairs>,
-        headers: Option<RequestHeaders>,
+        headers: Option<Headers>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
-    ) -> Result<PyResponse, RqxError> {
+    ) -> Result<BufferedResponse, RqxError> {
         self.request(
             "DELETE",
             url,
@@ -305,12 +305,12 @@ impl Client {
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
         params: Option<QueryPairs>,
-        headers: Option<RequestHeaders>,
+        headers: Option<Headers>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
-    ) -> Result<PyResponse, RqxError> {
+    ) -> Result<BufferedResponse, RqxError> {
         self.request(
             "POST",
             url,
@@ -334,12 +334,12 @@ impl Client {
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
         params: Option<QueryPairs>,
-        headers: Option<RequestHeaders>,
+        headers: Option<Headers>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
-    ) -> Result<PyResponse, RqxError> {
+    ) -> Result<BufferedResponse, RqxError> {
         self.request(
             "PUT",
             url,
@@ -363,12 +363,12 @@ impl Client {
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
         params: Option<QueryPairs>,
-        headers: Option<RequestHeaders>,
+        headers: Option<Headers>,
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
         timeout: f64,
-    ) -> Result<PyResponse, RqxError> {
+    ) -> Result<BufferedResponse, RqxError> {
         self.request(
             "PATCH",
             url,
@@ -444,8 +444,7 @@ impl Client {
             let location = hop
                 .parts
                 .headers
-                .get("location")
-                .and_then(|v| v.to_str().ok())
+                .get_first("location")
                 .map(String::from)
                 .ok_or_else(|| RqxError::new_err("3xx response missing Location header"))?;
 

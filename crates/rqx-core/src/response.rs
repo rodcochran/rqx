@@ -2,21 +2,21 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
 
+use bytes::Bytes;
 use encoding_rs::Encoding;
 use http::StatusCode;
-use http::header::{HeaderMap, HeaderValue};
 use mime::Mime;
 use reqwest::Response;
-use url::Url;
 
 use super::error::*;
-use super::url::PyURL;
+use super::headers::Headers;
 
 use crate::url::reference::UrlReference;
+use crate::url::url::RqxClientUrl;
 
 /// Headers received, body unread. Everything known before the body — status,
 /// headers, cookies, retry telemetry, elapsed — lives in `parts`. `read` buffers
-/// the body into a `PyResponse`; stream responses take the live body as-is.
+/// the body into a `BufferedResponse`; stream responses take the live body as-is.
 pub struct PendingResponse {
     pub parts: ResponseParts,
     response: Response,
@@ -25,7 +25,7 @@ pub struct PendingResponse {
 impl PendingResponse {
     pub fn new(response: Response) -> Self {
         Self {
-            parts: ResponseParts::from_reqwest(&response),
+            parts: ResponseParts::from(&response),
             response,
         }
     }
@@ -36,13 +36,11 @@ impl PendingResponse {
         self
     }
 
-    /// Buffer the body. The one place a `PyResponse` is built from the wire.
-    pub async fn read(self) -> PyResult<PyResponse> {
-        Ok(PyResponse {
+    /// Buffer the body. The one place a `BufferedResponse` is built from the wire.
+    pub async fn read(self) -> Result<BufferedResponse, RqxError> {
+        Ok(BufferedResponse {
             parts: self.parts,
-            body: self.response.bytes().await.map_err(map_reqwest_error)?,
-            content_cache: PyOnceLock::new(),
-            headers_cache: PyOnceLock::new(),
+            body: self.response.bytes().await?,
         })
     }
 
@@ -57,23 +55,31 @@ impl PendingResponse {
     }
 }
 
-/*
-Pure Rust implementation of the response parts to avoid overhead with GIL and FFI
-*/
+pub struct BufferedResponse {
+    pub parts: ResponseParts,
+    pub body: Bytes,
+}
+
+impl BufferedResponse {
+    pub fn text(&self) -> String {
+        self.parts.text(&self.body)
+    }
+
+    pub fn json(&self) -> Result<serde_json::Value, RqxError> {
+        self.parts.json(&self.body)
+    }
+}
+
 pub struct ResponseParts {
     pub status_code: u16,
-    pub headers: HeaderMap, // will materialize into Headers
-    pub url: Url,
-    pub url_cache: PyOnceLock<Py<PyURL>>,
+    pub headers: Headers,
+    pub url: RqxClientUrl,
     pub elapsed: Duration,
-    pub num_retries: u32, // can't be negative, can use u32?
+    pub num_retries: u32,
     pub retry_history: Vec<(String, f64)>,
     pub http_version: String,
     pub cookies: HashMap<String, String>,
     pub encoding_override: Option<String>,
-    // What to do with content, and raw Response?
-    // on PyResponse struct, we had content: Py<PyBytes>.
-    // on PyStreamResposne struct, we had response: Option<reqwest::Response>,
 }
 
 impl ResponseParts {
@@ -109,11 +115,19 @@ impl ResponseParts {
     }
 
     pub fn content_type(&self) -> Option<&str> {
-        self.headers.get("content-type")?.to_str().ok()
+        self.headers.get_first("content-type")
     }
 
-    fn get_first_header_for_key(&self, key: &str) -> Option<&HeaderValue> {
-        self.headers.get_all(key).iter().next()
+    pub fn text(&self, body: &[u8]) -> String {
+        let (decoded, _, _) = self.resolved_encoding().decode(body);
+        decoded.into_owned()
+    }
+
+    pub fn json(&self, body: &[u8]) -> Result<serde_json::Value, RqxError> {
+        match serde_json::from_slice(body) {
+            Ok(value) => Ok(value),
+            Err(e) => Err(self.json_decode_error(body, &e)),
+        }
     }
 
     pub fn is_informational(&self) -> bool {
@@ -125,8 +139,7 @@ impl ResponseParts {
     }
 
     pub fn is_redirect(&self) -> bool {
-        (300..400).contains(&self.status_code)
-            && self.get_first_header_for_key("location").is_some()
+        (300..400).contains(&self.status_code) && self.headers.contains("location")
     }
 
     pub fn is_client_error(&self) -> bool {
@@ -160,8 +173,10 @@ impl ResponseParts {
             .unwrap_or("");
         let code = self.status_code;
         let mut message = format!("{kind} '{code} {reason}' for url '{}'\n", self.url);
-        let location = self.headers.get(http::header::LOCATION);
-        if let (301 | 302 | 303 | 307 | 308, Some(location)) = (code, location) {
+        let location = self.headers.inner.get(http::header::LOCATION);
+        if let Some(location) = location
+            && matches!(code, 301 | 302 | 303 | 307 | 308)
+        {
             let location = String::from_utf8_lossy(location.as_bytes());
             message.push_str(&format!("Redirect location: '{location}'\n"));
         }
@@ -173,7 +188,7 @@ impl ResponseParts {
 
     /// `json()`'s error for a body serde_json rejects, positioned the way the stdlib
     /// parser positions it: `pos` counts characters, not bytes.
-    pub fn json_decode_error(&self, body: &[u8], error: &serde_json::Error) -> PyErr {
+    pub fn json_decode_error(&self, body: &[u8], error: &serde_json::Error) -> RqxError {
         let doc = String::from_utf8_lossy(body).into_owned();
         let byte_offset = if error.line() == 0 {
             0
@@ -196,27 +211,16 @@ impl ResponseParts {
             "response is not JSON (HTTP {}, content-type: {content_type}): {reason}",
             self.status_code
         );
-        JSONDecodeError::new_err((message, doc, pos))
+        JSONDecodeError { message, doc, pos }.into()
     }
 }
 
-impl ResponseParts {
-    /// Materialized once and cached, like `headers`: a response's URL is
-    /// read-only, so `resp.url is resp.url` holds.
-    pub fn py_url(&self, py: Python<'_>) -> PyResult<Py<PyURL>> {
-        self.url_cache
-            .get_or_try_init(py, || {
-                Py::new(py, PyURL::new(UrlReference::from_url(self.url.clone())))
-            })
-            .map(|url| url.clone_ref(py))
-    }
-
-    pub fn from_reqwest(response: &Response) -> Self {
+impl From<&Response> for ResponseParts {
+    fn from(response: &Response) -> Self {
         ResponseParts {
             status_code: response.status().as_u16(),
-            headers: response.headers().clone(),
-            url: response.url().clone(),
-            url_cache: PyOnceLock::new(),
+            headers: Headers::from_header_map(response.headers().clone()),
+            url: RqxClientUrl::new(UrlReference::from_url(response.url().clone())),
             elapsed: Duration::ZERO,
             num_retries: 0,
             retry_history: Vec::new(),
