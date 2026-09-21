@@ -41,15 +41,9 @@ impl PyResponse {
         // read-only. Repeat access is then a refcount bump, and
         // `resp.headers is resp.headers` holds (matching httpx).
         self.headers_cache
-            .get_or_try_init(
-                py,
-                || {
-                    Py::new(
-                        py,
-                        PyHeaders::from_header_map(self.parts.headers.clone()),
-                    )
-                },
-            )
+            .get_or_try_init(py, || {
+                Py::new(py, PyHeaders::from_header_map(self.parts.headers.clone()))
+            })
             .map(|h| h.clone_ref(py))
     }
 
@@ -69,12 +63,7 @@ impl PyResponse {
     }
 
     #[getter]
-    fn retry_history(
-        &self,
-    ) -> &[(
-        String,
-        f64,
-    )] {
+    fn retry_history(&self) -> &[(String, f64)] {
         &self.parts.retry_history
     }
 
@@ -110,15 +99,7 @@ impl PyResponse {
     #[getter]
     fn content(&self, py: Python<'_>) -> Py<PyBytes> {
         self.content_cache
-            .get_or_init(
-                py,
-                || {
-                    PyBytes::new(
-                        py, &self.body,
-                    )
-                    .unbind()
-                },
-            )
+            .get_or_init(py, || PyBytes::new(py, &self.body).unbind())
             .clone_ref(py)
     }
 
@@ -145,16 +126,9 @@ impl PyResponse {
     /// json.loads round-trip (which was measurably slower than calling json.loads
     /// directly — see benchmarks/b5_json_parsing.py / docs/improvements.md).
     fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let value = serde_json::from_slice(&self.body).map_err(
-            |e| {
-                self.parts.json_decode_error(
-                    &self.body, &e,
-                )
-            },
-        )?;
-        value_to_py(
-            py, value,
-        )
+        let value = serde_json::from_slice(&self.body)
+            .map_err(|e| self.parts.json_decode_error(&self.body, &e))?;
+        value_to_py(py, value)
     }
 
     /// The response itself when the status is 2xx; otherwise HTTPStatusError with
@@ -163,9 +137,7 @@ impl PyResponse {
         let Some(error) = slf.borrow().parts.status_error() else {
             return Ok(slf);
         };
-        error.value(slf.py()).setattr(
-            "response", &slf,
-        )?;
+        error.value(slf.py()).setattr("response", &slf)?;
         Err(error)
     }
 
