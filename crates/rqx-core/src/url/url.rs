@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use super::components::{UrlComponentValue, UrlComponents};
 use super::reference::UrlReference;
 use crate::error::RqxError;
-use crate::query_params::QueryPairs;
+use crate::query_params::{QueryPairs, ScalarValue};
 
 pub struct RqxClientUrl {
     reference: UrlReference,
@@ -87,40 +87,21 @@ impl RqxClientUrl {
 impl RqxClientUrl {
     pub fn copy_with(
         &self,
-        kwargs: Option<HashMap<String, Option<UrlComponentValue>>>,
+        kwargs: HashMap<String, Option<UrlComponentValue>>,
     ) -> Result<Self, RqxError> {
-        let components = match kwargs {
-            Some(kwargs) => UrlComponents::from_hash_map(kwargs)?,
-            None => UrlComponents::default(),
-        };
+        let components = UrlComponents::from_hash_map(kwargs)?;
         Ok(Self::new(UrlReference::compose(
             Some(&self.reference),
             components,
         )?))
     }
 
-    pub fn copy_set_param(
-        &self,
-        key: &str,
-        value: Option<UrlComponentValue>,
-    ) -> Result<Self, RqxError> {
-        self.with_params(
-            self.reference
-                .params()
-                .set(key, QueryPairs::scalar_or_empty(value)?),
-        )
+    pub fn copy_set_param(&self, key: &str, value: Option<ScalarValue>) -> Result<Self, RqxError> {
+        self.with_params(self.reference.params().set(key, QueryPairs::scalar(value)))
     }
 
-    pub fn copy_add_param(
-        &self,
-        key: &str,
-        value: Option<UrlComponentValue>,
-    ) -> Result<Self, RqxError> {
-        self.with_params(
-            self.reference
-                .params()
-                .add(key, QueryPairs::scalar_or_empty(value)?),
-        )
+    pub fn copy_add_param(&self, key: &str, value: Option<ScalarValue>) -> Result<Self, RqxError> {
+        self.with_params(self.reference.params().add(key, QueryPairs::scalar(value)))
     }
 
     pub fn copy_remove_param(&self, key: &str) -> Result<Self, RqxError> {

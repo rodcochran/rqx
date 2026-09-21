@@ -23,7 +23,7 @@ impl std::fmt::Display for UrlComponentValue {
 }
 
 impl UrlComponentValue {
-    fn type_name(&self) -> &'static str {
+    pub fn type_name(&self) -> &'static str {
         match self {
             Self::String(_) => "str",
             Self::Bytes(_) => "bytes",

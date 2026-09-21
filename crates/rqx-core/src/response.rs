@@ -6,13 +6,13 @@ use encoding_rs::Encoding;
 use http::StatusCode;
 use http::header::{HeaderMap, HeaderValue};
 use mime::Mime;
-// use pyo3::prelude::{Py, PyErr, PyResult, Python};
-// use pyo3::sync::PyOnceLock;
 use reqwest::Response;
 use url::Url;
 
 use super::error::*;
-use super::url::{PyURL, UrlReference};
+use super::url::PyURL;
+
+use crate::url::reference::UrlReference;
 
 /// Headers received, body unread. Everything known before the body — status,
 /// headers, cookies, retry telemetry, elapsed — lives in `parts`. `read` buffers
