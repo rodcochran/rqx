@@ -14,12 +14,12 @@ pub enum VerifyConfig {
 }
 
 impl VerifyConfig {
-    pub fn from_bool(v: bool) -> Result<VerifyConfig, _> {
-        Ok(if v {
+    pub fn from_bool(v: bool) -> VerifyConfig {
+        if v {
             Self::Default
         } else {
             Self::DisableVerification
-        })
+        }
     }
 
     pub fn from_path_str(path: String) -> Result<VerifyConfig, RqxError> {
@@ -56,6 +56,6 @@ impl IdentityParser {
     pub fn from_pem_bytes(pem_bytes: &[u8]) -> Result<Identity, RqxError> {
         Ok(Identity::from_pem(&pem_bytes).map_err(|e| {
             RqxError::TLSConfigError(format!("failed to construct client cert: {e}"))
-        }))?
+        })?)
     }
 }
