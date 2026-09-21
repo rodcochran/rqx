@@ -2,10 +2,8 @@
 //! (https://github.com/rodcochran/rqx/issues/59).
 
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fmt;
 
-use bytes::Bytes;
 use iri_string::components::AuthorityComponents;
 use iri_string::percent_encode::PercentEncoded;
 use iri_string::spec::UriSpec;
@@ -15,6 +13,7 @@ use url::{ParseError, Url};
 
 use crate::error::*;
 use crate::query_params::QueryPairs;
+use crate::url::components::UrlComponents;
 
 /// `url::Url` gives WHATWG normalization — default ports dropped, hosts
 /// lowercased and punycoded, paths percent-encoded — but can't hold a URL
@@ -383,133 +382,5 @@ impl fmt::Display for UrlReference {
 impl PartialEq for UrlReference {
     fn eq(&self, other: &Self) -> bool {
         self.to_string() == other.to_string()
-    }
-}
-
-pub enum UrlComponentValue {
-    String(String),
-    Bytes(Bytes),
-    Int(u16),
-    QueryPairs(QueryPairs),
-}
-
-impl std::fmt::Display for UrlComponentValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::String(s) => f.write_str(s),
-            Self::Bytes(b) => f.write_str(&String::from_utf8_lossy(b)),
-            Self::Int(i) => f.write_str(&i.to_string()),
-            Self::QueryPairs(qp) => write!(f, "{qp}"),
-        }
-    }
-}
-
-impl UrlComponentValue {
-    fn type_name(&self) -> &'static str {
-        match self {
-            Self::String(_) => "str",
-            Self::Bytes(_) => "bytes",
-            Self::Int(_) => "int",
-            Self::QueryPairs(_) => "QueryPairs",
-        }
-    }
-}
-#[derive(Default)]
-pub struct UrlComponents {
-    pub scheme: Option<String>,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub host: Option<String>,
-    pub port: Option<Option<u16>>,
-    pub path: Option<String>,
-    pub query: Option<String>,
-    pub fragment: Option<String>,
-}
-
-impl UrlComponents {
-    pub fn from_hash_map(
-        map: HashMap<String, Option<UrlComponentValue>>,
-    ) -> Result<Self, RqxError> {
-        let mut components = Self::default();
-        for (key, value) in &map {
-            match key.as_str() {
-                "scheme" => components = components.with_scheme(value),
-                "username" => components = components.with_username(value),
-                "password" => components = components.with_password(value),
-                "host" => components = components.with_host(value),
-                "port" => components = components.with_port(value)?,
-                "path" => components = components.with_path(value),
-                "query" => components = components.with_query(value),
-                "fragment" => components = components.with_fragment(value),
-                "params" => components = components.with_params(value),
-                k => {
-                    return Err(RqxError::InvalidURL(format!(
-                        "'{}' is an invalid keyword argument for URL()",
-                        k
-                    )));
-                }
-            }
-        }
-        Ok(components)
-    }
-
-    fn component_field_str(v: &Option<UrlComponentValue>) -> Option<String> {
-        v.as_ref().map(UrlComponentValue::to_string)
-    }
-
-    fn component_field_u16(v: &Option<UrlComponentValue>) -> Result<Option<u16>, RqxError> {
-        match v {
-            None => Ok(None),
-            Some(UrlComponentValue::Int(n)) => Ok(Some(*n)),
-            Some(_v) => Err(RqxError::InvalidURL(format!(
-                "Component value must be u16 for u16 field, but got {}",
-                _v.type_name()
-            ))),
-        }
-    }
-
-    fn with_scheme(mut self, v: &Option<UrlComponentValue>) -> Self {
-        self.scheme = Self::component_field_str(v);
-        self
-    }
-
-    fn with_username(mut self, v: &Option<UrlComponentValue>) -> Self {
-        self.username = Self::component_field_str(v);
-        self
-    }
-
-    fn with_password(mut self, v: &Option<UrlComponentValue>) -> Self {
-        self.password = Self::component_field_str(v);
-        self
-    }
-
-    fn with_host(mut self, v: &Option<UrlComponentValue>) -> Self {
-        self.host = Self::component_field_str(v);
-        self
-    }
-
-    fn with_port(mut self, v: &Option<UrlComponentValue>) -> Result<Self, RqxError> {
-        self.port = Some(Self::component_field_u16(v)?);
-        Ok(self)
-    }
-
-    fn with_path(mut self, v: &Option<UrlComponentValue>) -> Self {
-        self.path = Self::component_field_str(v);
-        self
-    }
-
-    fn with_query(mut self, v: &Option<UrlComponentValue>) -> Self {
-        self.query = Self::component_field_str(v);
-        self
-    }
-
-    fn with_fragment(mut self, v: &Option<UrlComponentValue>) -> Self {
-        self.fragment = Self::component_field_str(v);
-        self
-    }
-
-    fn with_params(mut self, v: &Option<UrlComponentValue>) -> Self {
-        self.query = Self::component_field_str(v);
-        self
     }
 }
