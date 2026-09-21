@@ -1,19 +1,16 @@
-use reqwest::tls::Identity;
-use reqwest::{Client, ClientBuilder, Request, Response};
-
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use reqwest::tls::Identity;
+use reqwest::{Client, ClientBuilder, Request, Response};
 use tokio::sync::Semaphore;
 
 use crate::error::*;
 use crate::http::protocol::HttpVersionConfig;
-use crate::http::proxy::ProxyParser;
 use crate::http::tls::VerifyConfig;
 use crate::request::RequestSpec;
 use crate::response::PendingResponse;
 use crate::retry::{FailureKind, Retry, RetryCounts};
-use crate::timeout::Timeout;
 
 #[derive(Clone)]
 pub struct Transport {

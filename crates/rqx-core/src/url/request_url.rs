@@ -24,7 +24,7 @@ impl BaseUrl {
     }
 
     pub fn get_inner(&self) -> Url {
-        self.0
+        self.0.clone()
     }
 }
 

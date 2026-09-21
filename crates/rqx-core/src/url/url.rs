@@ -22,10 +22,13 @@ impl RqxClientUrl {
     }
 
     // TODO: rename this to something better (is called py_new in the other impl)
-    pub fn from_url_and_kwargs(url: String, kwargs: HashMap<String, Option<UrlComponentValue>>) {
+    pub fn from_url_and_kwargs(
+        url: String,
+        kwargs: HashMap<String, Option<UrlComponentValue>>,
+    ) -> Result<UrlReference, RqxError> {
         let reference = &UrlReference::parse(url.as_str())?;
         let components = UrlComponents::from_hash_map(kwargs)?;
-        UrlReference::compose(Some(reference), components);
+        UrlReference::compose(Some(reference), components)
     }
 }
 
@@ -63,8 +66,8 @@ impl RqxClientUrl {
         self.reference.params()
     }
 
-    pub fn raw_path(&self) -> &[u8] {
-        self.reference.raw_path().as_bytes()
+    pub fn raw_path(&self) -> Vec<u8> {
+        self.reference.raw_path().as_bytes().to_owned()
     }
 
     pub fn fragment(&self) -> &str {
@@ -87,7 +90,7 @@ impl RqxClientUrl {
         kwargs: Option<HashMap<String, Option<UrlComponentValue>>>,
     ) -> Result<Self, RqxError> {
         let components = match kwargs {
-            Some(kwargs) => UrlComponents::extract(kwargs)?,
+            Some(kwargs) => UrlComponents::from_hash_map(kwargs)?,
             None => UrlComponents::default(),
         };
         Ok(Self::new(UrlReference::compose(
