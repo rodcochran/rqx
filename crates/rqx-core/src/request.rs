@@ -7,7 +7,7 @@ use reqwest::{Client, Request, RequestBuilder};
 use url::Url;
 
 use super::error::*;
-use super::request_headers::RequestHeaders;
+use super::headers::Headers;
 
 /// The one body a request can have. `content`, `data` and `json` are three
 /// ways of naming it, and at most one of them may be set.
@@ -24,19 +24,15 @@ impl RequestBody {
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
     ) -> Result<Self, RqxError> {
-        match (
-            content, data, json,
-        ) {
+        match (content, data, json) {
             (None, None, None) => Ok(Self::Empty),
             (Some(content), None, None) => Ok(Self::Content(content.to_vec())),
             (None, Some(data), None) => Ok(Self::Form(data)),
             (None, None, Some(json)) => Ok(Self::Json(json)),
-            _ => Err(
-                RequestError::RequestError(
-                    "Only one of content, data, or json may be set".to_string(),
-                )
-                .into(),
-            ),
+            _ => Err(RequestError::RequestError(
+                "Only one of content, data, or json may be set".to_string(),
+            )
+            .into()),
         }
     }
 
@@ -66,11 +62,8 @@ impl RequestSpec {
         method: &str,
         url: Url,
         body: RequestBody,
-        headers: Option<RequestHeaders>,
-        auth: Option<(
-            String,
-            String,
-        )>,
+        headers: Option<Headers>,
+        auth: Option<(String, String)>,
         auth_bearer: Option<&str>,
         timeout: f64,
     ) -> Result<Self, RqxError> {
@@ -78,20 +71,13 @@ impl RequestSpec {
         let method = Method::from_bytes(method.to_ascii_uppercase().as_bytes())
             .map_err(|e| RequestError::RequestError(format!("invalid method {method:?}: {e}")))?;
 
-        let mut builder = body.apply(
-            http_client.request(
-                method, url,
-            ),
-        );
+        let mut builder = body.apply(http_client.request(method, url));
 
         if let Some(headers) = headers {
-            builder = builder.headers(headers.into_map());
+            builder = builder.headers(headers.inner);
         }
         if let Some((username, password)) = auth {
-            builder = builder.basic_auth(
-                username,
-                Some(password),
-            );
+            builder = builder.basic_auth(username, Some(password));
         }
         if let Some(token) = auth_bearer {
             builder = builder.bearer_auth(token);
@@ -113,30 +99,23 @@ impl RequestSpec {
     }
 
     pub fn clone_request(&self) -> Result<Request, RqxError> {
-        self.prototype.try_clone().ok_or_else(
-            || {
-                RequestError::RequestError(
-                    "Streaming request bodies cannot be replayed".to_string(),
-                )
+        self.prototype.try_clone().ok_or_else(|| {
+            RequestError::RequestError("Streaming request bodies cannot be replayed".to_string())
                 .into()
-            },
-        )
+        })
     }
 
     pub fn redirect_target(&self, location: &str) -> Result<Url, RqxError> {
-        self.url().join(location).map_err(
-            |e| RequestError::RequestError(format!("Error parsing url from redirect: {e}")).into(),
-        )
+        self.url().join(location).map_err(|e| {
+            RequestError::RequestError(format!("Error parsing url from redirect: {e}")).into()
+        })
     }
 
     /// Next hop. Body kept when the method is kept (307/308), dropped with its
     /// headers on a downgrade to GET (302/303).
     pub fn redirected(&self, status: u16, url: Url) -> Result<Self, RqxError> {
         let mut next = self.clone_request()?;
-        let method = Self::redirect_method(
-            next.method(),
-            status,
-        );
+        let method = Self::redirect_method(next.method(), status);
         if method != *next.method() {
             *next.body_mut() = None;
             for name in [CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING] {
