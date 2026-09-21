@@ -1,6 +1,5 @@
 use url::{ParseError, Url};
 
-use super::url::PyURL;
 use super::reference::UrlReference;
 use crate::error::*;
 
@@ -24,8 +23,8 @@ impl BaseUrl {
         Ok(Self(url))
     }
 
-    pub fn to_py(&self) -> PyURL {
-        PyURL::new(UrlReference::from_url(self.0.clone()))
+    pub fn get_inner(&self) -> Url {
+        self.0
     }
 }
 

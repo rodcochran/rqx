@@ -7,22 +7,22 @@ use super::reference::UrlReference;
 use crate::error::RqxError;
 use crate::query_params::QueryPairs;
 
-pub struct Url {
+pub struct RqxClientUrl {
     reference: UrlReference,
 }
 
 // Initialization
-impl Url {
+impl RqxClientUrl {
     pub fn new(reference: UrlReference) -> Self {
         Self { reference }
     }
 
-    fn with_params(&self, params: QueryPairs) -> Result<Self, RqxError> {
+    pub fn with_params(&self, params: QueryPairs) -> Result<Self, RqxError> {
         Ok(Self::new(self.reference.with_params(&params)?))
     }
 
     // TODO: rename this to something better (is called py_new in the other impl)
-    fn from_url_and_kwargs(url: String, kwargs: HashMap<String, Option<UrlComponentValue>>) {
+    pub fn from_url_and_kwargs(url: String, kwargs: HashMap<String, Option<UrlComponentValue>>) {
         let reference = &UrlReference::parse(url.as_str())?;
         let components = UrlComponents::from_hash_map(kwargs)?;
         UrlReference::compose(Some(reference), components);
@@ -30,59 +30,59 @@ impl Url {
 }
 
 // Getters
-impl Url {
-    fn scheme(&self) -> &str {
+impl RqxClientUrl {
+    pub fn scheme(&self) -> &str {
         self.reference.scheme()
     }
 
-    fn username(&self) -> &str {
+    pub fn username(&self) -> &str {
         self.reference.username()
     }
 
-    fn password(&self) -> &str {
+    pub fn password(&self) -> &str {
         self.reference.password()
     }
 
-    fn host(&self) -> String {
+    pub fn host(&self) -> String {
         self.reference.host().into_owned()
     }
 
-    fn port(&self) -> Option<u16> {
+    pub fn port(&self) -> Option<u16> {
         self.reference.port()
     }
 
-    fn path(&self) -> String {
+    pub fn path(&self) -> String {
         self.reference.path().into_owned()
     }
 
-    fn query(&self) -> &[u8] {
+    pub fn query(&self) -> &[u8] {
         self.reference.query().as_bytes()
     }
 
-    fn params(&self) -> QueryPairs {
+    pub fn params(&self) -> QueryPairs {
         self.reference.params()
     }
 
-    fn raw_path(&self) -> &[u8] {
+    pub fn raw_path(&self) -> &[u8] {
         self.reference.raw_path().as_bytes()
     }
 
-    fn fragment(&self) -> &str {
+    pub fn fragment(&self) -> &str {
         self.reference.fragment()
     }
 
-    fn is_absolute_url(&self) -> bool {
+    pub fn is_absolute_url(&self) -> bool {
         self.reference.is_absolute()
     }
 
-    fn is_relative_url(&self) -> bool {
+    pub fn is_relative_url(&self) -> bool {
         !self.reference.is_absolute()
     }
 }
 
 // Creating copies with different settings
-impl Url {
-    fn copy_with(
+impl RqxClientUrl {
+    pub fn copy_with(
         &self,
         kwargs: Option<HashMap<String, Option<UrlComponentValue>>>,
     ) -> Result<Self, RqxError> {
@@ -96,7 +96,7 @@ impl Url {
         )?))
     }
 
-    fn copy_set_param(
+    pub fn copy_set_param(
         &self,
         key: &str,
         value: Option<UrlComponentValue>,
@@ -108,7 +108,7 @@ impl Url {
         )
     }
 
-    fn copy_add_param(
+    pub fn copy_add_param(
         &self,
         key: &str,
         value: Option<UrlComponentValue>,
@@ -120,36 +120,40 @@ impl Url {
         )
     }
 
-    fn copy_remove_param(&self, key: &str) -> Result<Self, RqxError> {
+    pub fn copy_remove_param(&self, key: &str) -> Result<Self, RqxError> {
         self.with_params(self.reference.params().remove(key))
     }
 
-    fn copy_merge_params(&self, params: Option<QueryPairs>) -> Result<Self, RqxError> {
+    pub fn copy_merge_params(&self, params: Option<QueryPairs>) -> Result<Self, RqxError> {
         match params {
             Some(params) => self.with_params(self.reference.params().merge(&params)),
             None => Ok(Self::new(self.reference.clone())),
         }
     }
 
-    fn join(&self, url: &str) -> Result<Self, RqxError> {
+    pub fn join(&self, url: &str) -> Result<Self, RqxError> {
         Ok(Self::new(self.reference.join(url)?))
     }
 
-    fn equals(&self, other: &str) -> bool {
+    pub fn equals(&self, other: &str) -> bool {
         match UrlReference::parse(other) {
             Ok(other) => self.reference == other,
             Err(_) => false,
         }
     }
 
-    fn hash(&self) -> u64 {
+    pub fn hash(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
         self.reference.to_string().hash(&mut hasher);
         hasher.finish()
     }
+
+    pub fn masked(&self) -> String {
+        self.reference.masked()
+    }
 }
 
-impl fmt::Display for Url {
+impl fmt::Display for RqxClientUrl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.reference.to_string())
     }

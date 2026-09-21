@@ -245,7 +245,6 @@ impl UrlReference {
         )
     }
 
-    /// `__repr__`'s form, with any password replaced.
     pub fn masked(&self) -> String {
         let text = self.to_string();
         match UriReferenceStr::new(&text) {

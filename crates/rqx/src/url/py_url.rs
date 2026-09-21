@@ -4,18 +4,22 @@ use std::hash::{Hash, Hasher};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyString};
+use url::Url;
 
-use super::reference::{UrlComponents, UrlReference};
-use crate::query_params::{PyQueryParams, QueryPairs};
+use crate::query_params::PyQueryParams;
+
+use rqx_core::query_params::QueryPairs;
+use rqx_core::url::BaseUrl;
+use rqx_core::url::{components::UrlComponents, reference::UrlReference, url::RqxClientUrl};
 
 #[pyclass(name = "URL", module = "rqx", frozen)]
 pub struct PyURL {
-    reference: UrlReference,
+    inner: RqxClientUrl,
 }
 
 impl PyURL {
-    pub fn new(reference: UrlReference) -> Self {
-        Self { reference }
+    pub fn new(url: RqxClientUrl) -> Self {
+        Self { inner: url }
     }
 
     pub fn extract_reference(obj: &Bound<'_, PyAny>) -> PyResult<UrlReference> {
@@ -23,7 +27,7 @@ impl PyURL {
             return Ok(url.get().reference.clone());
         }
         match obj.cast::<PyString>() {
-            Ok(s) => UrlReference::parse(&s.to_cow()?),
+            Ok(s) => UrlReference::parse(&s.to_cow()?).map_err(op),
             Err(_) => Err(PyTypeError::new_err(format!(
                 "Invalid type for url. Expected str or rqx.URL, got {}",
                 obj.get_type().name()?
@@ -32,74 +36,80 @@ impl PyURL {
     }
 
     fn with_params(&self, params: QueryPairs) -> PyResult<Self> {
-        Ok(Self::new(self.reference.with_params(&params)?))
+        Ok(Self::new(self.inner.with_params(params)?))
+    }
+
+    fn from_base_url(base_url: BaseUrl) -> Self {
+        let url_reference = UrlReference::from_url(base_url.get_inner().clone());
+        let client_url = RqxClientUrl::new(reference);
+        Self::new(client_url)
     }
 }
 
 #[pymethods]
 impl PyURL {
-    #[new]
-    #[pyo3(signature = (url=None, **kwargs))]
-    fn py_new(
-        url: Option<&Bound<'_, PyAny>>,
-        kwargs: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<Self> {
-        let base = url.map(Self::extract_reference).transpose()?;
-        match kwargs {
-            None => Ok(Self::new(match base {
-                Some(reference) => reference,
-                None => UrlReference::parse("")?,
-            })),
-            Some(kwargs) => Ok(Self::new(UrlReference::compose(
-                base.as_ref(),
-                UrlComponents::extract(kwargs)?,
-            )?)),
-        }
-    }
+    // #[new]
+    // #[pyo3(signature = (url=None, **kwargs))]
+    // fn py_new(
+    //     url: Option<&Bound<'_, PyAny>>,
+    //     kwargs: Option<&Bound<'_, PyDict>>,
+    // ) -> PyResult<Self> {
+    //     let base = url.map(Self::extract_reference).transpose()?;
+    //     match kwargs {
+    //         None => Ok(Self::new(match base {
+    //             Some(reference) => reference,
+    //             None => UrlReference::parse("")?,
+    //         })),
+    //         Some(kwargs) => Ok(Self::new(UrlReference::compose(
+    //             base.as_ref(),
+    //             UrlComponents::extract(kwargs)?,
+    //         )?)),
+    //     }
+    // }
 
     #[getter]
     fn scheme(&self) -> &str {
-        self.reference.scheme()
+        self.inner.scheme()
     }
 
     #[getter]
     fn username(&self) -> &str {
-        self.reference.username()
+        self.inner.username()
     }
 
     #[getter]
     fn password(&self) -> &str {
-        self.reference.password()
+        self.inner.password()
     }
 
     #[getter]
     fn host(&self) -> String {
-        self.reference.host().into_owned()
+        self.inner.host()
     }
 
     #[getter]
     fn port(&self) -> Option<u16> {
-        self.reference.port()
+        self.inner.port()
     }
 
     #[getter]
     fn path(&self) -> String {
-        self.reference.path().into_owned()
+        self.inner.path()
     }
 
     #[getter]
     fn query<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, self.reference.query().as_bytes())
+        PyBytes::new(py, self.inner.query())
     }
 
     #[getter]
     fn params(&self) -> PyQueryParams {
-        PyQueryParams::new(self.reference.params())
+        PyQueryParams::new(self.inner.params())
     }
 
     #[getter]
     fn raw_path<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, self.reference.raw_path().as_bytes())
+        PyBytes::new(py, self.iner.raw_path())
     }
 
     #[getter]
@@ -131,11 +141,7 @@ impl PyURL {
 
     #[pyo3(signature = (key, value=None))]
     fn copy_set_param(&self, key: &str, value: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
-        self.with_params(
-            self.reference
-                .params()
-                .set(key, QueryPairs::scalar_or_empty(value)?),
-        )
+        self.inner.copy_set_param()
     }
 
     #[pyo3(signature = (key, value=None))]
@@ -162,31 +168,35 @@ impl PyURL {
     /// A `str` joins as written: parsing it first would resolve its dot
     /// segments against nothing and lose them.
     fn join(&self, url: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let other = match url.cast::<PyString>() {
-            Ok(text) => text.to_cow()?.into_owned(),
+        match url.cast::<PyString>() {
+            Ok(text) => match text.to_str() {
+                Ok(t) => self.inner.join(&t),
+                Err(_) => todo!(),
+            },
             Err(_) => Self::extract_reference(url)?.to_string(),
-        };
-        Ok(Self::new(self.reference.join(&other)?))
+        }
     }
 
     fn __str__(&self) -> String {
-        self.reference.to_string()
+        self.inner.to_string()
     }
 
     fn __repr__(&self) -> String {
-        format!("URL('{}')", self.reference.masked())
+        format!("URL('{}')", self.inner.masked())
     }
 
     fn __eq__(&self, other: &Bound<'_, PyAny>) -> bool {
-        match Self::extract_reference(other) {
-            Ok(other) => self.reference == other,
+        match other.cast::<PyString>() {
+            Ok(url) => match url.to_str() {
+                Ok(u) => self.inner.equals(u),
+                // prob need a proper error raised instead of just going false.
+                Err(_) => false,
+            },
             Err(_) => false,
         }
     }
 
     fn __hash__(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        self.reference.to_string().hash(&mut hasher);
-        hasher.finish()
+        self.inner.hash()
     }
 }
