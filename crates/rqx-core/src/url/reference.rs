@@ -2,8 +2,10 @@
 //! (https://github.com/rodcochran/rqx/issues/59).
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fmt;
 
+use bytes::Bytes;
 use iri_string::components::AuthorityComponents;
 use iri_string::percent_encode::PercentEncoded;
 use iri_string::spec::UriSpec;
@@ -29,11 +31,7 @@ impl UrlReference {
         match Url::parse(input) {
             Ok(url) => Ok(Self::Absolute(url)),
             Err(ParseError::RelativeUrlWithoutBase) => Self::parse_relative(input),
-            Err(e) => Err(
-                Self::invalid(
-                    input, &e,
-                ),
-            ),
+            Err(e) => Err(Self::invalid(input, &e)),
         }
     }
 
@@ -50,11 +48,7 @@ impl UrlReference {
         let encoded = Self::encode_relative(input);
         match UriRelativeStr::new(&encoded) {
             Ok(reference) => Ok(Self::Relative(reference.to_owned())),
-            Err(e) => Err(
-                Self::invalid(
-                    input, &e,
-                ),
-            ),
+            Err(e) => Err(Self::invalid(input, &e)),
         }
     }
 
@@ -75,10 +69,7 @@ impl UrlReference {
         ) else {
             return Self::encode_path(input);
         };
-        let parsed = match (
-            ftp.port(),
-            ws.port(),
-        ) {
+        let parsed = match (ftp.port(), ws.port()) {
             (None, Some(_)) => ws,
             _ => ftp,
         };
@@ -96,22 +87,12 @@ impl UrlReference {
 
     fn encode_path(input: &str) -> String {
         let (head, fragment) = match input.split_once('#') {
-            Some((head, fragment)) => (
-                head,
-                Some(fragment),
-            ),
-            None => (
-                input, None,
-            ),
+            Some((head, fragment)) => (head, Some(fragment)),
+            None => (input, None),
         };
         let (path, query) = match head.split_once('?') {
-            Some((path, query)) => (
-                path,
-                Some(query),
-            ),
-            None => (
-                head, None,
-            ),
+            Some((path, query)) => (path, Some(query)),
+            None => (head, None),
         };
 
         let mut encoded = PercentEncoded::<_, UriSpec>::from_path(path).to_string();
@@ -165,20 +146,11 @@ impl UrlReference {
         }
     }
 
-    fn userinfo(
-        &self,
-    ) -> (
-        &str,
-        &str,
-    ) {
+    fn userinfo(&self) -> (&str, &str) {
         let Some(userinfo) = self.authority().and_then(|authority| authority.userinfo()) else {
-            return (
-                "", "",
-            );
+            return ("", "");
         };
-        userinfo.split_once(':').unwrap_or((
-            userinfo, "",
-        ))
+        userinfo.split_once(':').unwrap_or((userinfo, ""))
     }
 
     /// The unicode form: `str(url)` carries punycode, `url.host` doesn't.
@@ -200,10 +172,7 @@ impl UrlReference {
     fn encoded_host(&self) -> &str {
         match self {
             Self::Absolute(url) => url.host_str().unwrap_or_default(),
-            Self::Relative(_) => self.authority().map_or(
-                "",
-                |authority| authority.host(),
-            ),
+            Self::Relative(_) => self.authority().map_or("", |authority| authority.host()),
         }
     }
 
@@ -298,20 +267,10 @@ impl UrlReference {
             return Ok(self.clone());
         }
         match self {
-            Self::Absolute(url) => Ok(
-                Self::Absolute(
-                    url.join(other).map_err(
-                        |e| {
-                            Self::invalid(
-                                other, &e,
-                            )
-                        },
-                    )?,
-                ),
-            ),
-            Self::Relative(reference) => Self::join_relative(
-                reference, other,
-            ),
+            Self::Absolute(url) => Ok(Self::Absolute(
+                url.join(other).map_err(|e| Self::invalid(other, &e))?,
+            )),
+            Self::Relative(reference) => Self::join_relative(reference, other),
         }
     }
 
@@ -329,29 +288,14 @@ impl UrlReference {
         // The query is anchored too: RFC 3986 §5.3 keeps the base's query for
         // an empty or fragment-only reference.
         let path = reference.path_str();
-        let mut anchored_base = format!(
-            "{ANCHOR}/{}",
-            path.trim_start_matches('/')
-        );
+        let mut anchored_base = format!("{ANCHOR}/{}", path.trim_start_matches('/'));
         if let Some(query) = reference.query_str() {
             anchored_base.push('?');
             anchored_base.push_str(query);
         }
-        let anchored = Url::parse(&anchored_base).map_err(
-            |e| {
-                Self::invalid(
-                    reference.as_str(),
-                    &e,
-                )
-            },
-        )?;
-        let joined = anchored.join(other).map_err(
-            |e| {
-                Self::invalid(
-                    other, &e,
-                )
-            },
-        )?;
+        let anchored =
+            Url::parse(&anchored_base).map_err(|e| Self::invalid(reference.as_str(), &e))?;
+        let joined = anchored.join(other).map_err(|e| Self::invalid(other, &e))?;
         let tail = joined
             .as_str()
             .strip_prefix(ANCHOR)
@@ -442,9 +386,34 @@ impl PartialEq for UrlReference {
     }
 }
 
-/// The pieces `URL(**kwargs)` and `copy_with(**kwargs)` can set. `None` is
-/// "not given, keep what's there", and an empty string is a cleared component
-/// — which is what an explicit Python `None` extracts to.
+pub enum UrlComponentValue {
+    String(String),
+    Bytes(Bytes),
+    Int(u16),
+    QueryPairs(QueryPairs),
+}
+
+impl std::fmt::Display for UrlComponentValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::String(s) => f.write_str(s),
+            Self::Bytes(b) => f.write_str(&String::from_utf8_lossy(b)),
+            Self::Int(i) => f.write_str(&i.to_string()),
+            Self::QueryPairs(qp) => write!(f, "{qp}"),
+        }
+    }
+}
+
+impl UrlComponentValue {
+    fn type_name(&self) -> &'static str {
+        match self {
+            Self::String(_) => "str",
+            Self::Bytes(_) => "bytes",
+            Self::Int(_) => "int",
+            Self::QueryPairs(_) => "QueryPairs",
+        }
+    }
+}
 #[derive(Default)]
 pub struct UrlComponents {
     pub scheme: Option<String>,
@@ -458,58 +427,89 @@ pub struct UrlComponents {
 }
 
 impl UrlComponents {
-    pub fn extract(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
+    pub fn from_hash_map(
+        map: HashMap<String, Option<UrlComponentValue>>,
+    ) -> Result<Self, RqxError> {
         let mut components = Self::default();
-        for (key, value) in kwargs.iter() {
-            match key.extract::<String>()?.as_str() {
-                "scheme" => components.scheme = Some(Self::text(&value)?),
-                "username" => components.username = Some(Self::text(&value)?),
-                "password" => components.password = Some(Self::text(&value)?),
-                "host" => components.host = Some(Self::text(&value)?),
-                "port" => {
-                    components.port = Some(
-                        if value.is_none() {
-                            None
-                        } else {
-                            Some(value.extract()?)
-                        },
-                    );
-                }
-                "path" => components.path = Some(Self::text(&value)?),
-                "query" => components.query = Some(Self::text(&value)?),
-                "fragment" => components.fragment = Some(Self::text(&value)?),
-                "params" => {
-                    components.query = Some(value.extract::<QueryPairs>()?.to_string());
-                }
-                key => {
-                    return Err(
-                        PyTypeError::new_err(
-                            format!("'{key}' is an invalid keyword argument for URL()"),
-                        ),
-                    );
+        for (key, value) in &map {
+            match key.as_str() {
+                "scheme" => components = components.with_scheme(value),
+                "username" => components = components.with_username(value),
+                "password" => components = components.with_password(value),
+                "host" => components = components.with_host(value),
+                "port" => components = components.with_port(value)?,
+                "path" => components = components.with_path(value),
+                "query" => components = components.with_query(value),
+                "fragment" => components = components.with_fragment(value),
+                "params" => components = components.with_params(value),
+                k => {
+                    return Err(RqxError::InvalidURL(format!(
+                        "'{}' is an invalid keyword argument for URL()",
+                        k
+                    )));
                 }
             }
         }
         Ok(components)
     }
 
-    fn text(value: &Bound<'_, PyAny>) -> PyResult<String> {
-        if value.is_none() {
-            return Ok(String::new());
+    fn component_field_str(v: &Option<UrlComponentValue>) -> Option<String> {
+        v.as_ref().map(UrlComponentValue::to_string)
+    }
+
+    fn component_field_u16(v: &Option<UrlComponentValue>) -> Result<Option<u16>, RqxError> {
+        match v {
+            None => Ok(None),
+            Some(UrlComponentValue::Int(n)) => Ok(Some(*n)),
+            Some(_v) => Err(RqxError::InvalidURL(format!(
+                "Component value must be u16 for u16 field, but got {}",
+                _v.type_name()
+            ))),
         }
-        if let Ok(text) = value.cast::<PyString>() {
-            return Ok(text.to_cow()?.into_owned());
-        }
-        if let Ok(raw) = value.cast::<PyBytes>() {
-            return Ok(String::from_utf8_lossy(raw.as_bytes()).into_owned());
-        }
-        Err(
-            PyTypeError::new_err(
-                format!(
-                    "URL components must be str, bytes, or None, got {}",
-                    value.get_type().name()?
-                ),
-            ),
-        )
+    }
+
+    fn with_scheme(mut self, v: &Option<UrlComponentValue>) -> Self {
+        self.scheme = Self::component_field_str(v);
+        self
+    }
+
+    fn with_username(mut self, v: &Option<UrlComponentValue>) -> Self {
+        self.username = Self::component_field_str(v);
+        self
+    }
+
+    fn with_password(mut self, v: &Option<UrlComponentValue>) -> Self {
+        self.password = Self::component_field_str(v);
+        self
+    }
+
+    fn with_host(mut self, v: &Option<UrlComponentValue>) -> Self {
+        self.host = Self::component_field_str(v);
+        self
+    }
+
+    fn with_port(mut self, v: &Option<UrlComponentValue>) -> Result<Self, RqxError> {
+        self.port = Some(Self::component_field_u16(v)?);
+        Ok(self)
+    }
+
+    fn with_path(mut self, v: &Option<UrlComponentValue>) -> Self {
+        self.path = Self::component_field_str(v);
+        self
+    }
+
+    fn with_query(mut self, v: &Option<UrlComponentValue>) -> Self {
+        self.query = Self::component_field_str(v);
+        self
+    }
+
+    fn with_fragment(mut self, v: &Option<UrlComponentValue>) -> Self {
+        self.fragment = Self::component_field_str(v);
+        self
+    }
+
+    fn with_params(mut self, v: &Option<UrlComponentValue>) -> Self {
+        self.query = Self::component_field_str(v);
+        self
     }
 }
