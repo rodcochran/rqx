@@ -433,10 +433,11 @@ impl Client {
 
             if redirects_used + 1 >= self.max_redirects {
                 if raise_on_redirect {
-                    return Err(TooManyRedirects::new_err(format!(
+                    return Err(RequestError::TooManyRedirects(format!(
                         "Exceeded max redirects {}",
                         self.max_redirects
-                    )));
+                    ))
+                    .into());
                 }
                 return Ok(hop.with_retries(num_retries, retry_history));
             }
@@ -446,7 +447,11 @@ impl Client {
                 .headers
                 .get_first("location")
                 .map(String::from)
-                .ok_or_else(|| RqxError::new_err("3xx response missing Location header"))?;
+                .ok_or_else(|| {
+                    ProtocolError::RemoteProtocolError(
+                        "3xx response missing Location header".to_string(),
+                    )
+                })?;
 
             // Drain the 3xx body to release the connection back to the pool.
             hop.drain().await;
