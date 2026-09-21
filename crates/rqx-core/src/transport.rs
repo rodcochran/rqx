@@ -80,10 +80,11 @@ impl Transport {
             let attempt = used.total;
 
             if start_time.elapsed().as_secs_f64() > total_timeout {
-                return Err(MaxRetriesExceeded::new_err(format!(
+                return Err(HTTPError::MaxRetriesExceeded(format!(
                     "total timeout of {}s exceeded after {} retries",
                     total_timeout, attempt,
-                )));
+                ))
+                .into());
             }
 
             if attempt > 0 {
@@ -178,11 +179,11 @@ impl Transport {
                 //   caller can inspect status_code / headers / body.
                 let status = cr.status().as_u16();
                 if r.status_forcelist.contains(&status) && r.raise_on_status {
-                    return Err(MaxRetriesExceeded::new_err(exhausted));
+                    return Err(HTTPError::MaxRetriesExceeded(exhausted).into());
                 }
                 Ok(PendingResponse::new(cr).with_retries(used.total as u32, retry_history))
             }
-            None => Err(MaxRetriesExceeded::new_err(exhausted)),
+            None => Err(HTTPError::MaxRetriesExceeded(exhausted).into()),
         }
     }
 
