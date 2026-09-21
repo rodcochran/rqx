@@ -8,7 +8,7 @@ use futures::{Stream, StreamExt};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::Notify;
 
-use crate::error::RqxError;
+use crate::error::{RqxError, StreamError};
 
 /// Streaming HTTP body source. `Pin<Box<dyn ...>>` is standard practice for
 /// storing an erased, async-trait-object Stream: `dyn Stream` is unsized
@@ -46,13 +46,13 @@ impl LiveStream {
         let mut slot = self.0.stream.lock().await;
         self.check_open()?;
         let Some(stream) = slot.as_mut() else {
-            return Err(RqxError::StreamClosed("response closed"));
+            return Err(StreamError::StreamClosed("response closed".to_string()).into());
         };
         let next = tokio::select! {
             biased;
             _ = self.0.close_signal.notified() => {
                 *slot = None;
-                return Err(RqxError::StreamClosed("response closed"));
+                return Err(StreamError::StreamClosed("response closed".to_string()).into());
             }
             next = stream.next() => next,
         };
@@ -92,7 +92,7 @@ impl LiveStream {
     /// not served after a close, only after the stream's own end.
     pub(crate) fn check_open(&self) -> Result<(), RqxError> {
         if self.0.closed.load(Ordering::Acquire) {
-            return Err(RqxError::StreamClosed("response closed"));
+            return Err(StreamError::StreamClosed("response closed".to_string()).into());
         }
         Ok(())
     }
