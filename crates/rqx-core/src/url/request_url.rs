@@ -1,6 +1,6 @@
 use url::{ParseError, Url};
 
-use super::py_url::PyURL;
+use super::url::PyURL;
 use super::reference::UrlReference;
 use crate::error::*;
 

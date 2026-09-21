@@ -1,8 +1,8 @@
-mod components;
-mod py_url;
+mod url;
 mod reference;
 mod request_url;
 
-// pub use py_url::PyURL;
+pub mod components;
+
 pub use reference::UrlReference;
 pub use request_url::{BaseUrl, RequestUrl};

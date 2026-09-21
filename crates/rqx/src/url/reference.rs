@@ -17,6 +17,8 @@ use url::{ParseError, Url};
 use crate::exceptions::InvalidURL;
 use crate::query_params::QueryPairs;
 
+use rqx_core::url::components::{UrlComponentValue, UrlComponents};
+
 /// `url::Url` gives WHATWG normalization — default ports dropped, hosts
 /// lowercased and punycoded, paths percent-encoded — but can't hold a URL
 /// without a host. `iri-string` holds a relative reference exactly as
@@ -384,69 +386,5 @@ impl fmt::Display for UrlReference {
 impl PartialEq for UrlReference {
     fn eq(&self, other: &Self) -> bool {
         self.to_string() == other.to_string()
-    }
-}
-
-/// The pieces `URL(**kwargs)` and `copy_with(**kwargs)` can set. `None` is
-/// "not given, keep what's there", and an empty string is a cleared component
-/// — which is what an explicit Python `None` extracts to.
-#[derive(Default)]
-pub struct UrlComponents {
-    pub scheme: Option<String>,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub host: Option<String>,
-    pub port: Option<Option<u16>>,
-    pub path: Option<String>,
-    pub query: Option<String>,
-    pub fragment: Option<String>,
-}
-
-impl UrlComponents {
-    pub fn extract(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
-        let mut components = Self::default();
-        for (key, value) in kwargs.iter() {
-            match key.extract::<String>()?.as_str() {
-                "scheme" => components.scheme = Some(Self::text(&value)?),
-                "username" => components.username = Some(Self::text(&value)?),
-                "password" => components.password = Some(Self::text(&value)?),
-                "host" => components.host = Some(Self::text(&value)?),
-                "port" => {
-                    components.port = Some(if value.is_none() {
-                        None
-                    } else {
-                        Some(value.extract()?)
-                    });
-                }
-                "path" => components.path = Some(Self::text(&value)?),
-                "query" => components.query = Some(Self::text(&value)?),
-                "fragment" => components.fragment = Some(Self::text(&value)?),
-                "params" => {
-                    components.query = Some(value.extract::<QueryPairs>()?.to_string());
-                }
-                key => {
-                    return Err(PyTypeError::new_err(format!(
-                        "'{key}' is an invalid keyword argument for URL()"
-                    )));
-                }
-            }
-        }
-        Ok(components)
-    }
-
-    fn text(value: &Bound<'_, PyAny>) -> PyResult<String> {
-        if value.is_none() {
-            return Ok(String::new());
-        }
-        if let Ok(text) = value.cast::<PyString>() {
-            return Ok(text.to_cow()?.into_owned());
-        }
-        if let Ok(raw) = value.cast::<PyBytes>() {
-            return Ok(String::from_utf8_lossy(raw.as_bytes()).into_owned());
-        }
-        Err(PyTypeError::new_err(format!(
-            "URL components must be str, bytes, or None, got {}",
-            value.get_type().name()?
-        )))
     }
 }
