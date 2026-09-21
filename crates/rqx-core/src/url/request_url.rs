@@ -1,11 +1,9 @@
-// use pyo3::pybacked::PyBackedStr;
-
 use url::{ParseError, Url};
 
 use super::py_url::PyURL;
 use super::reference::UrlReference;
 use crate::error::*;
-// use crate::exceptions::{InvalidURL, UnsupportedProtocol};
+
 use crate::query_params::QueryPairs;
 
 /// A `Client(base_url=)`, canonicalized.
@@ -31,23 +29,13 @@ impl BaseUrl {
     }
 }
 
-/// A URL argument: `str` or `rqx.URL`, resolved against the client's base and
-/// checked for a scheme rqx can send.
-///
-/// A `str` is used where it lies — `PyBackedStr` keeps the Python object alive
-/// and points at its buffer, so no per-request copy. Only an `rqx.URL`, which
-/// has to be serialized, brings a `String` of its own.
-///
-/// TODO: determine if above is even valid, why not just copy...
 pub enum RequestUrl {
-    // Text(PyBackedStr),
     Url(String),
 }
 
 impl RequestUrl {
     pub fn as_str(&self) -> &str {
         match self {
-            // Self::Text(text) => text,
             Self::Url(url) => url,
         }
     }

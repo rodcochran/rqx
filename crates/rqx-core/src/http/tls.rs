@@ -32,9 +32,9 @@ impl VerifyConfig {
     }
 }
 
-pub struct TlsIdentity {}
+pub struct IdentityParser {}
 
-impl TlsIdentity {
+impl IdentityParser {
     pub fn from_path_str(path: String) -> Result<Identity, RqxError> {
         let pem_bytes = std::fs::read(&path)
             .map_err(|e| RqxError::TLSConfigError(format!("failed to read client cert: {e}")))?;

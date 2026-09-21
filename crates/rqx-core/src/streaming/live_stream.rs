@@ -46,13 +46,13 @@ impl LiveStream {
         let mut slot = self.0.stream.lock().await;
         self.check_open()?;
         let Some(stream) = slot.as_mut() else {
-            return Err(StreamClosed::new_err("response closed"));
+            return Err(RqxError::StreamClosed("response closed"));
         };
         let next = tokio::select! {
             biased;
             _ = self.0.close_signal.notified() => {
                 *slot = None;
-                return Err(StreamClosed::new_err("response closed"));
+                return Err(RqxError::StreamClosed("response closed"));
             }
             next = stream.next() => next,
         };
@@ -60,7 +60,7 @@ impl LiveStream {
             Some(Ok(bytes)) => Ok(Some(bytes)),
             Some(Err(e)) => {
                 *slot = None;
-                Err(map_reqwest_error(e))
+                Err(RqxError::from(e))
             }
             None => {
                 *slot = None;
@@ -72,33 +72,33 @@ impl LiveStream {
     /// Mark closed and wake a pending read, then drop the stream. The flag and
     /// the wake-up come first so a read waiting on the network gives up the
     /// lock instead of holding this call until data arrives.
-    async fn close(&self) {
+    pub(crate) async fn close(&self) {
         self.mark_closed();
         *self.0.stream.lock().await = None;
     }
 
     /// For the sync response, which closes from the Python thread, off the runtime.
-    fn close_blocking(&self) {
+    pub(crate) fn close_blocking(&self) {
         self.mark_closed();
         *self.0.stream.blocking_lock() = None;
     }
 
-    fn mark_closed(&self) {
+    pub(crate) fn mark_closed(&self) {
         self.0.closed.store(true, Ordering::Release);
         self.0.close_signal.notify_one();
     }
 
     /// Raise if the response was closed under the iterator; buffered pieces are
     /// not served after a close, only after the stream's own end.
-    pub fn check_open(&self) -> Result<(), RqxError> {
+    pub(crate) fn check_open(&self) -> Result<(), RqxError> {
         if self.0.closed.load(Ordering::Acquire) {
-            return Err(StreamClosed::new_err("response closed"));
+            return Err(RqxError::StreamClosed("response closed"));
         }
         Ok(())
     }
 
     /// Closed, or read to the end. A poll in flight holds the lock; that counts as open.
-    fn is_closed(&self) -> bool {
+    pub(crate) fn is_closed(&self) -> bool {
         self.0.closed.load(Ordering::Acquire)
             || self
                 .0

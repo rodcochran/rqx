@@ -10,13 +10,13 @@ use tokio::sync::Semaphore;
 
 use crate::exceptions::*;
 use crate::http::protocol::HttpVersionConfig;
-use crate::http::proxy::parse_proxies;
 use crate::http::tls::{VerifyConfig, parse_identity};
 use crate::request::RequestSpec;
 use crate::response::PendingResponse;
 use crate::retry::{FailureKind, PyRetry, RetryCounts};
 use crate::timeout::PyTimeout;
 
+use rqx_core::http::proxy::ProxyParser;
 use rqx_core::transport::{RqxClientBuilder, Transport};
 
 /// Orchestrates the full builder chain from Python-flavored config args
@@ -43,7 +43,7 @@ pub fn build_http_client(
     let verify_cfg = verify.map(VerifyConfig::from_py_any).transpose()?;
     let identity = cert.map(parse_identity).transpose()?;
     let http_version = HttpVersionConfig::from_args(http1, http2)?;
-    let proxies = parse_proxies(proxy)?;
+    let proxies = ProxyParser::from_hash_map(proxy)?;
 
     let client = RqxClientBuilder::new()
         .with_pool(max_keepalive_connections, keepalive_expiry, pool_timeout)

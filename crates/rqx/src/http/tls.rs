@@ -6,7 +6,7 @@ use reqwest::tls::Certificate;
 
 use crate::exceptions::*;
 
-use rqx_core::http::tls::{TlsIdentity, VerifyConfig};
+use rqx_core::http::tls::{IdentityParser, VerifyConfig};
 
 pub fn parse_verify_config_from_py(verify: &Bound<'_, PyAny>) -> PyResult<VerifyConfig> {
     if verify.is_instance_of::<PyBool>() {
@@ -41,17 +41,17 @@ pub fn parse_identity(cert: &Bound<'_, PyAny>) -> PyResult<Identity> {
         let path: String = cert
             .extract()
             .map_err(|e| RqxError::new_err(format!("failed to parse client cert path: {e}")))?;
-        TlsIdentity::from_path_str(path)?
+        IdentityParser::from_path_str(path)?
     } else if cert.is_instance_of::<PyBytes>() {
         let bytes= cert.extract()
             .map_err(|e| RqxError::new_err(format!("failed to read cert bytes: {e}")))?
-        TlsIdentity::from_pem_bytes(path)?
+        IdentityParser::from_pem_bytes(path)?
 
     } else if cert.is_instance_of::<PyTuple>() {
         let (cert_path, key_path): (String, String) = cert
             .extract()
             .map_err(|e| RqxError::new_err(format!("failed to parse cert, key tuple: {e}")))?;
-        TlsIdentity::from_tuple((cert_path, key_path))?
+        IdentityParser::from_tuple((cert_path, key_path))?
 
     } else {
         return Err(RqxError::new_err(format!(
