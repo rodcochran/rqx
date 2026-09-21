@@ -6,6 +6,7 @@ pub enum RqxError {
     InvalidURL(String),
     JSONDecodeError(String),
     StreamError(StreamError),
+    TLSConfigError(String),
 }
 
 impl Error for RqxError {}
@@ -13,22 +14,11 @@ impl Error for RqxError {}
 impl std::fmt::Display for RqxError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            RqxError::HTTPError(e) => write!(
-                f,
-                "{e}"
-            ),
-            RqxError::InvalidURL(e) => write!(
-                f,
-                "{e}"
-            ),
-            RqxError::JSONDecodeError(e) => write!(
-                f,
-                "{e}"
-            ),
-            RqxError::StreamError(e) => write!(
-                f,
-                "{e}"
-            ),
+            RqxError::HTTPError(e) => write!(f, "{e}"),
+            RqxError::InvalidURL(e) => write!(f, "{e}"),
+            RqxError::JSONDecodeError(e) => write!(f, "{e}"),
+            RqxError::StreamError(e) => write!(f, "{e}"),
+            RqxError::TLSConfigError(e) => write!(f, "{e}"),
         }
     }
 }
@@ -51,18 +41,9 @@ impl From<HTTPError> for RqxError {
 impl std::fmt::Display for HTTPError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            HTTPError::RequestError(e) => write!(
-                f,
-                "{e}"
-            ),
-            HTTPError::HTTPStatusError(e) => write!(
-                f,
-                "{e}"
-            ),
-            HTTPError::MaxRetriesExceeded(e) => write!(
-                f,
-                "{e}"
-            ),
+            HTTPError::RequestError(e) => write!(f, "{e}"),
+            HTTPError::HTTPStatusError(e) => write!(f, "{e}"),
+            HTTPError::MaxRetriesExceeded(e) => write!(f, "{e}"),
         }
     }
 }
@@ -86,22 +67,10 @@ impl From<RequestError> for RqxError {
 impl std::fmt::Display for RequestError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            RequestError::TransportError(e) => write!(
-                f,
-                "{e}"
-            ),
-            RequestError::DecodingError(e) => write!(
-                f,
-                "{e}"
-            ),
-            RequestError::TooManyRedirects(e) => write!(
-                f,
-                "{e}"
-            ),
-            RequestError::RequestError(e) => write!(
-                f,
-                "{e}"
-            ),
+            RequestError::TransportError(e) => write!(f, "{e}"),
+            RequestError::DecodingError(e) => write!(f, "{e}"),
+            RequestError::TooManyRedirects(e) => write!(f, "{e}"),
+            RequestError::RequestError(e) => write!(f, "{e}"),
         }
     }
 }
@@ -126,26 +95,11 @@ impl From<TransportError> for RqxError {
 impl std::fmt::Display for TransportError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            TransportError::TimeoutException(e) => write!(
-                f,
-                "{e}"
-            ),
-            TransportError::NetworkError(e) => write!(
-                f,
-                "{e}"
-            ),
-            TransportError::ProtocolError(e) => write!(
-                f,
-                "{e}"
-            ),
-            TransportError::ProxyError(e) => write!(
-                f,
-                "{e}"
-            ),
-            TransportError::UnsupportedProtocol(e) => write!(
-                f,
-                "{e}"
-            ),
+            TransportError::TimeoutException(e) => write!(f, "{e}"),
+            TransportError::NetworkError(e) => write!(f, "{e}"),
+            TransportError::ProtocolError(e) => write!(f, "{e}"),
+            TransportError::ProxyError(e) => write!(f, "{e}"),
+            TransportError::UnsupportedProtocol(e) => write!(f, "{e}"),
         }
     }
 }
@@ -169,22 +123,10 @@ impl From<TimeoutException> for RqxError {
 impl std::fmt::Display for TimeoutException {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            TimeoutException::ConnectTimeout(e) => write!(
-                f,
-                "{e}"
-            ),
-            TimeoutException::ReadTimeout(e) => write!(
-                f,
-                "{e}"
-            ),
-            TimeoutException::WriteTimeout(e) => write!(
-                f,
-                "{e}"
-            ),
-            TimeoutException::PoolTimeout(e) => write!(
-                f,
-                "{e}"
-            ),
+            TimeoutException::ConnectTimeout(e) => write!(f, "{e}"),
+            TimeoutException::ReadTimeout(e) => write!(f, "{e}"),
+            TimeoutException::WriteTimeout(e) => write!(f, "{e}"),
+            TimeoutException::PoolTimeout(e) => write!(f, "{e}"),
         }
     }
 }
@@ -207,18 +149,9 @@ impl From<NetworkError> for RqxError {
 impl std::fmt::Display for NetworkError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            NetworkError::ConnectError(e) => write!(
-                f,
-                "{e}"
-            ),
-            NetworkError::ReadError(e) => write!(
-                f,
-                "{e}"
-            ),
-            NetworkError::WriteError(e) => write!(
-                f,
-                "{e}"
-            ),
+            NetworkError::ConnectError(e) => write!(f, "{e}"),
+            NetworkError::ReadError(e) => write!(f, "{e}"),
+            NetworkError::WriteError(e) => write!(f, "{e}"),
         }
     }
 }
@@ -239,10 +172,7 @@ impl From<ProtocolError> for RqxError {
 impl std::fmt::Display for ProtocolError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            ProtocolError::RemoteProtocolError(e) => write!(
-                f,
-                "{e}"
-            ),
+            ProtocolError::RemoteProtocolError(e) => write!(f, "{e}"),
         }
     }
 }
@@ -264,22 +194,10 @@ impl From<StreamError> for RqxError {
 impl std::fmt::Display for StreamError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            StreamError::StreamConsumed(e) => write!(
-                f,
-                "{e}"
-            ),
-            StreamError::StreamClosed(e) => write!(
-                f,
-                "{e}"
-            ),
-            StreamError::ResponseNotRead(e) => write!(
-                f,
-                "{e}"
-            ),
-            StreamError::StreamError(e) => write!(
-                f,
-                "{e}"
-            ),
+            StreamError::StreamConsumed(e) => write!(f, "{e}"),
+            StreamError::StreamClosed(e) => write!(f, "{e}"),
+            StreamError::ResponseNotRead(e) => write!(f, "{e}"),
+            StreamError::StreamError(e) => write!(f, "{e}"),
         }
     }
 }
@@ -293,12 +211,7 @@ const TUNNEL_REFUSED: [&str; 2] = [
 impl From<reqwest::Error> for RqxError {
     fn from(value: reqwest::Error) -> Self {
         let msg = format!("{value}");
-        let sources = || {
-            std::iter::successors(
-                value.source(),
-                |s| (*s).source(),
-            )
-        };
+        let sources = || std::iter::successors(value.source(), |s| (*s).source());
 
         if value.is_timeout() {
             // Timeout — disambiguate connect-phase vs read-phase. Write timeouts

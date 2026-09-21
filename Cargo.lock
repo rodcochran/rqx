@@ -1271,8 +1271,6 @@ dependencies = [
  "iri-string",
  "mime",
  "percent-encoding",
- "pyo3",
- "pyo3-async-runtimes",
  "rand",
  "reqwest",
  "serde",

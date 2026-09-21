@@ -14,27 +14,15 @@ impl Headers {
 
         if let Some(map) = raw_headers {
             for (k, v) in map {
-                let name = HeaderName::from_str(&k).map_err(
-                    |e| {
-                        ProtocolError::RemoteProtocolError(
-                            format!("invalid header name {k:?}: {e}"),
-                        )
-                    },
-                )?;
-                let value = HeaderValue::from_str(&v).map_err(
-                    |e| {
-                        ProtocolError::RemoteProtocolError(
-                            format!("invalid header value {v:?}: {e}"),
-                        )
-                    },
-                )?;
-                inner
-                    .try_insert(
-                        name, value,
-                    )
-                    .map_err(
-                        |_| ProtocolError::RemoteProtocolError("too many headers".to_string()),
-                    )?;
+                let name = HeaderName::from_str(&k).map_err(|e| {
+                    ProtocolError::RemoteProtocolError(format!("invalid header name {k:?}: {e}"))
+                })?;
+                let value = HeaderValue::from_str(&v).map_err(|e| {
+                    ProtocolError::RemoteProtocolError(format!("invalid header value {v:?}: {e}"))
+                })?;
+                inner.try_insert(name, value).map_err(|_| {
+                    ProtocolError::RemoteProtocolError("too many headers".to_string())
+                })?;
             }
         }
         Ok(Self { inner })
@@ -44,24 +32,14 @@ impl Headers {
 impl Headers {
     /// Build from `Vec<(name, value)>` — used by response construction where
     /// the data came from reqwest's iteration.
-    pub fn from_pairs(
-        items: Vec<(
-            String,
-            String,
-        )>,
-    ) -> Self {
+    pub fn from_pairs(items: Vec<(String, String)>) -> Self {
         let mut inner = HeaderMap::try_with_capacity(items.len()).unwrap_or_default();
         for (k, v) in items {
             // Skip malformed names/values defensively. reqwest's HeaderMap
             // shouldn't ever produce them, but we don't want to panic if
             // something pathological slips through. Same for the entry cap.
-            if let (Ok(name), Ok(value)) = (
-                HeaderName::from_str(&k),
-                HeaderValue::from_str(&v),
-            ) {
-                let _ = inner.try_append(
-                    name, value,
-                ); // append preserves multi-values
+            if let (Ok(name), Ok(value)) = (HeaderName::from_str(&k), HeaderValue::from_str(&v)) {
+                let _ = inner.try_append(name, value); // append preserves multi-values
             }
         }
         Self { inner }
@@ -89,9 +67,7 @@ impl Headers {
             .map_err(|e| PyValueError::new_err(format!("invalid header value {value:?}: {e}")))?;
         // Replaces existing entries with this name.
         self.inner
-            .try_insert(
-                name, val,
-            )
+            .try_insert(name, val)
             .map_err(|_| PyValueError::new_err("too many headers"))?;
         Ok(())
     }
@@ -125,23 +101,11 @@ impl Headers {
             .collect()
     }
 
-    pub fn items(
-        &self,
-    ) -> Vec<(
-        String,
-        String,
-    )> {
+    pub fn items(&self) -> Vec<(String, String)> {
         // Includes duplicates (Set-Cookie, etc.) — same as iterating HeaderMap directly.
         self.inner
             .iter()
-            .map(
-                |(k, v)| {
-                    (
-                        k.as_str().to_string(),
-                        v.to_str().unwrap_or("").to_string(),
-                    )
-                },
-            )
+            .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
             .collect()
     }
 }

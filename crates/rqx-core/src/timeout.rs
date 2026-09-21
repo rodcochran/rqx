@@ -34,4 +34,17 @@ impl Timeout {
             pool,
         }
     }
+
+    pub fn per_request_total(&self) -> Option<f64> {
+        if let Some(r) = self.read {
+            return Some(r);
+        }
+        let mut max: Option<f64> = None;
+        for v in [self.connect, self.write, self.pool] {
+            if let Some(x) = v {
+                max = Some(max.map_or(x, |m| m.max(x)));
+            }
+        }
+        max
+    }
 }

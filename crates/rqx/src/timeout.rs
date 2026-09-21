@@ -21,12 +21,7 @@ impl PyTimeout {
         pool: Option<f64>,
     ) -> Self {
         Self {
-            inner: Timeout::new(
-                connect.or(all),
-                read.or(all),
-                write.or(all),
-                pool.or(all),
-            ),
+            inner: Timeout::new(connect.or(all), read.or(all), write.or(all), pool.or(all)),
         }
     }
 
@@ -65,21 +60,7 @@ impl PyTimeout {
     /// taking too long" phase. Fall back to the max of any other set fields.
     /// Returns None when all phases are None.
     pub fn per_request_total(&self) -> Option<f64> {
-        if let Some(r) = self.inner.read {
-            return Some(r);
-        }
-        let mut max: Option<f64> = None;
-        for v in [self.inner.connect, self.inner.write, self.inner.pool] {
-            if let Some(x) = v {
-                max = Some(
-                    max.map_or(
-                        x,
-                        |m| m.max(x),
-                    ),
-                );
-            }
-        }
-        max
+        self.inner.per_request_total()
     }
 
     /// Extract a PyTimeout from a Python value: int, float, or PyTimeout.
@@ -89,18 +70,18 @@ impl PyTimeout {
             return Ok(t.borrow().clone());
         }
         if let Ok(n) = value.extract::<f64>() {
-            return Ok(
-                Self {
-                    inner: Timeout {
-                        connect: Some(n),
-                        read: Some(n),
-                        write: Some(n),
-                        pool: Some(n),
-                    },
+            return Ok(Self {
+                inner: Timeout {
+                    connect: Some(n),
+                    read: Some(n),
+                    write: Some(n),
+                    pool: Some(n),
                 },
-            );
+            });
         }
-        Err(PyTypeError::new_err("timeout must be a number or rqx.Timeout instance"))
+        Err(PyTypeError::new_err(
+            "timeout must be a number or rqx.Timeout instance",
+        ))
     }
 
     /// Resolve a per-request `timeout=` kwarg to a seconds value for

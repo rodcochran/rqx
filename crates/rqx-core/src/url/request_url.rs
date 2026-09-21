@@ -1,4 +1,4 @@
-use pyo3::pybacked::PyBackedStr;
+// use pyo3::pybacked::PyBackedStr;
 
 use url::{ParseError, Url};
 
@@ -21,12 +21,7 @@ impl BaseUrl {
         let mut url = Url::parse(input)
             .map_err(|e| RqxError::InvalidURL(format!("invalid base_url {input:?}: {e}")))?;
         if !url.path().ends_with('/') {
-            url.set_path(
-                &format!(
-                    "{}/",
-                    url.path()
-                ),
-            );
+            url.set_path(&format!("{}/", url.path()));
         }
         Ok(Self(url))
     }
@@ -42,15 +37,17 @@ impl BaseUrl {
 /// A `str` is used where it lies — `PyBackedStr` keeps the Python object alive
 /// and points at its buffer, so no per-request copy. Only an `rqx.URL`, which
 /// has to be serialized, brings a `String` of its own.
+///
+/// TODO: determine if above is even valid, why not just copy...
 pub enum RequestUrl {
-    Text(PyBackedStr),
+    // Text(PyBackedStr),
     Url(String),
 }
 
 impl RequestUrl {
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Text(text) => text,
+            // Self::Text(text) => text,
             Self::Url(url) => url,
         }
     }
@@ -64,44 +61,32 @@ impl RequestUrl {
             Ok(url) if url.has_authority() => Some(url),
             Ok(_) | Err(ParseError::RelativeUrlWithoutBase) => None,
             Err(e) => {
-                return Err(
-                    RqxError::InvalidURL(
-                        format!(
-                            "invalid URL {:?}: {e}",
-                            self.as_str()
-                        ),
-                    ),
-                );
+                return Err(RqxError::InvalidURL(format!(
+                    "invalid URL {:?}: {e}",
+                    self.as_str()
+                )));
             }
         };
 
-        let mut url = match (
-            absolute, base,
-        ) {
+        let mut url = match (absolute, base) {
             (Some(url), _) => url,
             (None, Some(base)) => {
                 // A reference contributes its path and query only. An authority
                 // it carries (`//other.example/x`) is not a host rqx will
                 // target, which is how httpx merges it too.
                 let path = UrlReference::parse(self.as_str())?.raw_path();
-                base.0.join(path.trim_start_matches('/')).map_err(
-                    |e| {
-                        RqxError::InvalidURL(
-                            format!(
-                                "could not join base_url with {:?}: {e}",
-                                self.as_str()
-                            ),
-                        )
-                    },
-                )?
+                base.0.join(path.trim_start_matches('/')).map_err(|e| {
+                    RqxError::InvalidURL(format!(
+                        "could not join base_url with {:?}: {e}",
+                        self.as_str()
+                    ))
+                })?
             }
             (None, None) => {
-                return Err(
-                    TransportError::UnsupportedProtocol(
-                        "Request URL is missing an 'http://' or 'https://' protocol.".to_string(),
-                    )
-                    .into(),
-                );
+                return Err(TransportError::UnsupportedProtocol(
+                    "Request URL is missing an 'http://' or 'https://' protocol.".to_string(),
+                )
+                .into());
             }
         };
 
@@ -113,12 +98,10 @@ impl RequestUrl {
 
         match url.scheme() {
             "http" | "https" => Ok(url),
-            scheme => Err(
-                TransportError::UnsupportedProtocol(
-                    format!("Request URL has an unsupported protocol '{scheme}://'."),
-                )
-                .into(),
-            ),
+            scheme => Err(TransportError::UnsupportedProtocol(format!(
+                "Request URL has an unsupported protocol '{scheme}://'."
+            ))
+            .into()),
         }
     }
 }
