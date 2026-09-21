@@ -1,16 +1,19 @@
 use reqwest::tls::Identity;
 use reqwest::{Client, ClientBuilder, Request, Response};
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
 use crate::error::*;
 use crate::http::protocol::HttpVersionConfig;
+use crate::http::proxy::ProxyParser;
 use crate::http::tls::VerifyConfig;
 use crate::request::RequestSpec;
 use crate::response::PendingResponse;
 use crate::retry::{FailureKind, Retry, RetryCounts};
+use crate::timeout::Timeout;
 
 #[derive(Clone)]
 pub struct Transport {
@@ -194,8 +197,13 @@ impl Transport {
 
 impl Default for Transport {
     fn default() -> Self {
-        let client = build_http_client(None, None, None, None, None, None, None, None)
-            .expect("Error building http client");
+        let client = RqxClientBuilder::new()
+            .with_pool(None, None, None)
+            .with_http_version(HttpVersionConfig::default())
+            .with_phase_timeouts(None, None)
+            .with_proxy(Vec::new())
+            .with_tls(None, None)
+            .build();
 
         Self {
             client,

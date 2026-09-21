@@ -25,8 +25,13 @@ impl HttpVersionConfig {
             (false, true) => Ok(Self::Http2Only),
             (false, false) => Err(RequestError::RequestError(
                 "at least one of http1, http2 must be true".to_string(),
-            ))
-            .into(),
+            ))?,
         }
+    }
+}
+
+impl Default for HttpVersionConfig {
+    fn default() -> Self {
+        HttpVersionConfig::Negotiate
     }
 }
