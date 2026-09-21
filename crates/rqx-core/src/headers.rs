@@ -14,15 +14,9 @@ impl Headers {
 
         if let Some(map) = raw_headers {
             for (k, v) in map {
-                let name = HeaderName::from_str(&k).map_err(|e| {
-                    ProtocolError::RemoteProtocolError(format!("invalid header name {k:?}: {e}"))
-                })?;
-                let value = HeaderValue::from_str(&v).map_err(|e| {
-                    ProtocolError::RemoteProtocolError(format!("invalid header value {v:?}: {e}"))
-                })?;
-                inner.try_insert(name, value).map_err(|_| {
-                    ProtocolError::RemoteProtocolError("too many headers".to_string())
-                })?;
+                let name = HeaderName::from_str(&k)?;
+                let value = HeaderValue::from_str(&v)?;
+                inner.try_insert(name, value)?;
             }
         }
         Ok(Self { inner })
@@ -61,21 +55,17 @@ impl Headers {
 
 impl Headers {
     pub fn set_item(&mut self, key: &str, value: String) -> Result<(), RqxError> {
-        let name = HeaderName::from_str(key)
-            .map_err(|e| PyValueError::new_err(format!("invalid header name {key:?}: {e}")))?;
-        let val = HeaderValue::from_str(&value)
-            .map_err(|e| PyValueError::new_err(format!("invalid header value {value:?}: {e}")))?;
+        let name = HeaderName::from_str(key)?;
+        let val = HeaderValue::from_str(&value)?;
         // Replaces existing entries with this name.
-        self.inner
-            .try_insert(name, val)
-            .map_err(|_| PyValueError::new_err("too many headers"))?;
+        self.inner.try_insert(name, val)?;
         Ok(())
     }
 
     pub fn delete_item(&mut self, key: &str) -> Result<(), RqxError> {
-        let name = HeaderName::from_str(key).map_err(|_| PyKeyError::new_err(key.to_string()))?;
+        let name = HeaderName::from_str(key)?;
         if self.inner.remove(&name).is_none() {
-            return Err(PyKeyError::new_err(key.to_string()));
+            return Err(ProtocolError::RemoteProtocolError(key.to_string()).into());
         }
         Ok(())
     }

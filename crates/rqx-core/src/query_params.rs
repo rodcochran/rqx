@@ -1,13 +1,13 @@
 //! `rqx.QueryParams`: an immutable multi-dict, httpx's semantics
 //! (https://github.com/rodcochran/rqx/issues/59).
 
-use std::collections::hash_map::DefaultHasher;
 use std::fmt;
-use std::hash::{Hash, Hasher};
+use std::hash::Hasher;
 
-use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError};
-use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyIterator, PyList, PyString, PyTuple};
+// use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError};
+// use pyo3::prelude::*;
+// use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyIterator, PyList, PyString, PyTuple};
+
 use url::form_urlencoded;
 
 #[derive(Clone, Default)]

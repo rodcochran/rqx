@@ -1,3 +1,4 @@
+use http::header::{InvalidHeaderName, InvalidHeaderValue, MaxSizeReached};
 use std::error::Error;
 
 #[derive(Debug)]
@@ -257,5 +258,23 @@ impl From<reqwest::Error> for RqxError {
         // Anything else still failed before a response arrived, so it stays
         // under RequestError and `except HTTPError` catches it.
         RequestError::RequestError(format!("request failed: {value}")).into()
+    }
+}
+
+impl From<InvalidHeaderName> for RqxError {
+    fn from(value: InvalidHeaderName) -> Self {
+        ProtocolError::RemoteProtocolError(format!("invalid header name: {}", value)).into()
+    }
+}
+
+impl From<InvalidHeaderValue> for RqxError {
+    fn from(value: InvalidHeaderValue) -> Self {
+        ProtocolError::RemoteProtocolError(format!("invalid header value: {}", value)).into()
+    }
+}
+
+impl From<MaxSizeReached> for RqxError {
+    fn from(value: MaxSizeReached) -> Self {
+        ProtocolError::RemoteProtocolError(format!("too many headers: {}", value)).into()
     }
 }
