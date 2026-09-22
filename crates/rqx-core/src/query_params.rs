@@ -1,13 +1,12 @@
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
 use url::form_urlencoded;
-
-use crate::error::RqxError;
 
 pub enum ScalarValue {
     Bool(bool),
     String(String),
-    Int(u16),
+    Int(i64),
     Float(f64),
 }
 
@@ -143,38 +142,26 @@ impl QueryPairs {
 
     /// Equality ignores order, within a key as well as across keys, so the
     /// hash is built from the same thing.
-    pub fn sorted(&self) -> Vec<&(String, String)> {
+    fn sorted(&self) -> Vec<&(String, String)> {
         let mut pairs: Vec<&(String, String)> = self.0.iter().collect();
         pairs.sort();
         pairs
     }
 
-    fn from_items(items: Vec<(String, ScalarValue)>) -> Result<Self, RqxError> {
+    pub fn from_items(items: Vec<(String, Vec<Option<ScalarValue>>)>) -> Self {
         let mut pairs = Self::default();
-        for (key, value) in items {
-            let key = &key;
-            for value in Self::values(&value)? {
-                pairs.push(key.clone(), value);
+        for (key, values) in items {
+            for value in values {
+                pairs.push(key.clone(), Self::scalar(value));
             }
         }
-        Ok(pairs)
-    }
-
-    fn values(value: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
-        if value.is_instance_of::<PyList>() || value.is_instance_of::<PyTuple>() {
-            return value
-                .try_iter()?
-                .map(|item| Self::scalar(&item?))
-                .collect::<PyResult<Vec<_>>>();
-        }
-        Ok(vec![Self::scalar(value)?])
+        pairs
     }
 
     pub fn scalar(value: Option<ScalarValue>) -> String {
-        if let Some(v) = value {
-            v.to_string()
-        } else {
-            String::new()
+        match value {
+            Some(v) => v.to_string(),
+            None => String::new(),
         }
     }
 }
@@ -192,5 +179,13 @@ impl fmt::Display for QueryPairs {
 impl PartialEq for QueryPairs {
     fn eq(&self, other: &Self) -> bool {
         self.sorted() == other.sorted()
+    }
+}
+
+impl Eq for QueryPairs {}
+
+impl Hash for QueryPairs {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.sorted().hash(state);
     }
 }
