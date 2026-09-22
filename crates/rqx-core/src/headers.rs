@@ -1,52 +1,47 @@
 use http::header::{HeaderMap, HeaderName, HeaderValue};
 use std::collections::HashMap;
+use std::fmt;
 use std::str::FromStr;
 
 use crate::error::*;
 
+#[derive(Clone, PartialEq)]
 pub struct Headers {
-    pub inner: HeaderMap,
+    pub(crate) inner: HeaderMap,
 }
 
 impl Headers {
     pub fn new(raw_headers: Option<HashMap<String, String>>) -> Result<Self, RqxError> {
-        let mut inner = HeaderMap::new();
+        match raw_headers {
+            Some(map) => Self::try_from_pairs(map.into_iter().collect()),
+            None => Ok(Self::from_header_map(HeaderMap::new())),
+        }
+    }
 
-        if let Some(map) = raw_headers {
-            for (k, v) in map {
-                let name = HeaderName::from_str(&k)?;
-                let value = HeaderValue::from_str(&v)?;
-                inner.try_insert(name, value)?;
-            }
+    pub fn try_from_pairs(pairs: Vec<(String, String)>) -> Result<Self, RqxError> {
+        let mut inner = HeaderMap::try_with_capacity(pairs.len()).unwrap_or_default();
+        for (key, value) in pairs {
+            let name = match HeaderName::from_str(&key) {
+                Ok(name) => name,
+                Err(e) => return Err(HeaderError::InvalidName(format!("{key:?}: {e}")).into()),
+            };
+            let value = match HeaderValue::from_str(&value) {
+                Ok(value) => value,
+                Err(e) => return Err(HeaderError::InvalidValue(format!("{value:?}: {e}")).into()),
+            };
+            inner.try_append(name, value)?;
         }
         Ok(Self { inner })
     }
-}
 
-impl Headers {
-    /// Build from `Vec<(name, value)>` — used by response construction where
-    /// the data came from reqwest's iteration.
-    pub fn from_pairs(items: Vec<(String, String)>) -> Self {
-        let mut inner = HeaderMap::try_with_capacity(items.len()).unwrap_or_default();
-        for (k, v) in items {
-            // Skip malformed names/values defensively. reqwest's HeaderMap
-            // shouldn't ever produce them, but we don't want to panic if
-            // something pathological slips through. Same for the entry cap.
-            if let (Ok(name), Ok(value)) = (HeaderName::from_str(&k), HeaderValue::from_str(&v)) {
-                let _ = inner.try_append(name, value); // append preserves multi-values
-            }
-        }
-        Self { inner }
+    pub fn from_header_map(header_map: HeaderMap) -> Self {
+        Self { inner: header_map }
     }
 
     /// Return the first value matching `key` (case-insensitive). Used by
     /// Rust-side code that just wants a single header for internal logic.
     pub fn get_first(&self, key: &str) -> Option<&str> {
         self.inner.get(key)?.to_str().ok()
-    }
-
-    pub fn from_header_map(header_map: HeaderMap) -> Self {
-        Self { inner: header_map }
     }
 
     /// Every value for `key`, joined with `, ` the way httpx presents them.
@@ -62,9 +57,7 @@ impl Headers {
             false => Ok(values.join(", ")),
         }
     }
-}
 
-impl Headers {
     pub fn set_item(&mut self, key: &str, value: String) -> Result<(), RqxError> {
         let name = HeaderName::from_str(key)?;
         let val = HeaderValue::from_str(&value)?;
@@ -105,5 +98,11 @@ impl Headers {
             .iter()
             .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
             .collect()
+    }
+}
+
+impl fmt::Debug for Headers {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.inner)
     }
 }
