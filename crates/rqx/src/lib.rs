@@ -15,7 +15,6 @@ mod headers;
 mod http;
 mod py_json;
 mod query_params;
-mod request;
 mod request_headers;
 mod response;
 mod retry;

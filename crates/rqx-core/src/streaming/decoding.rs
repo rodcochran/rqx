@@ -5,16 +5,16 @@ use encoding_rs::{Decoder, Encoding};
 /// String's existing spare capacity and returns `OutputFull`, writing nothing,
 /// if there's none — it does NOT grow the String). Held by the text and line
 /// iterators so both decode identically.
-struct TextDecoder(Decoder);
+pub struct TextDecoder(Decoder);
 
 impl TextDecoder {
-    fn new(encoding: &'static Encoding) -> Self {
+    pub fn new(encoding: &'static Encoding) -> Self {
         Self(encoding.new_decoder())
     }
 
     /// Decode one chunk of bytes to text. `last` flushes any partial character
     /// the decoder is holding at end of stream.
-    fn decode(&mut self, src: &[u8], last: bool) -> String {
+    pub fn decode(&mut self, src: &[u8], last: bool) -> String {
         let mut out = String::new();
         if let Some(needed) = self.0.max_utf8_buffer_length(src.len()) {
             out.reserve(needed);
@@ -30,7 +30,7 @@ impl TextDecoder {
 /// chunk boundaries. Port of httpx's `LineDecoder`. Pure — no I/O, no pyo3 — so
 /// the cross-chunk behavior is unit-testable with hand-fed `&str` chunks.
 #[derive(Default)]
-struct LineDecoder {
+pub struct LineDecoder {
     /// The partial trailing line carried across `feed` calls.
     buffer: String,
     /// A trailing `\r` deferred to the next `feed`, so a `\r\n` split across a
@@ -81,7 +81,7 @@ impl LineDecoder {
         lines
     }
 
-    fn feed(&mut self, text: &str) -> Vec<String> {
+    pub fn feed(&mut self, text: &str) -> Vec<String> {
         let mut text = if self.trailing_cr {
             self.trailing_cr = false;
             format!("\r{text}")
@@ -122,7 +122,7 @@ impl LineDecoder {
     }
 
     /// Emit the final partial line at end of stream, if any.
-    fn flush(&mut self) -> Option<String> {
+    pub fn flush(&mut self) -> Option<String> {
         if self.buffer.is_empty() && !self.trailing_cr {
             return None;
         }

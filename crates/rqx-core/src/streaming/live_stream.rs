@@ -90,7 +90,7 @@ impl LiveStream {
 
     /// Raise if the response was closed under the iterator; buffered pieces are
     /// not served after a close, only after the stream's own end.
-    pub(crate) fn check_open(&self) -> Result<(), RqxError> {
+    pub fn check_open(&self) -> Result<(), RqxError> {
         if self.0.closed.load(Ordering::Acquire) {
             return Err(StreamError::StreamClosed("response closed".to_string()).into());
         }
@@ -98,7 +98,7 @@ impl LiveStream {
     }
 
     /// Closed, or read to the end. A poll in flight holds the lock; that counts as open.
-    pub(crate) fn is_closed(&self) -> bool {
+    pub fn is_closed(&self) -> bool {
         self.0.closed.load(Ordering::Acquire)
             || self
                 .0

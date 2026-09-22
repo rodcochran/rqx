@@ -1,12 +1,8 @@
 use std::collections::{HashMap, VecDeque};
-use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use bytes::{Bytes, BytesMut};
-use encoding_rs::{Decoder, Encoding};
-use futures::{Stream, StreamExt};
+use bytes::Bytes;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::{
     Py, PyAny, PyAnyMethods, PyRef, PyRefMut, PyResult, Python, pyclass, pymethods,
@@ -15,17 +11,19 @@ use pyo3::sync::PyOnceLock;
 use pyo3::types::PyBytes;
 use pyo3::{Bound, IntoPyObject, PyErr};
 use tokio::sync::Mutex as TokioMutex;
-use tokio::sync::Notify;
+
+use rqx_core::response::{PendingResponse, ResponseParts};
+use rqx_core::streaming::body::Body;
+use rqx_core::streaming::chunking::{ByteChunker, TextChunker};
+use rqx_core::streaming::decoding::{LineDecoder, TextDecoder};
+use rqx_core::streaming::live_stream::LiveStream;
 
 use super::client::block_on_inner;
 use super::exceptions::*;
 use super::headers::PyHeaders;
 use super::py_json::value_to_py;
-use super::response::{PendingResponse, ResponseParts};
 use super::runtime::RUNTIME;
 use super::url::PyURL;
-
-use rqx_core::stream::*;
 
 #[pyclass]
 struct PyByteIterator {
@@ -40,7 +38,7 @@ impl PyByteIterator {
         slf
     }
 
-    fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<Py<PyBytes>>> {
+    fn __next__(mut slf: PyRefMut<'_, Self>) -> Result<Option<Py<PyBytes>>, PyRqxError> {
         let py = slf.py();
         let stream = slf.stream.clone();
         loop {
@@ -48,31 +46,15 @@ impl PyByteIterator {
                 stream.check_open()?;
             }
             if let Some(piece) = slf.chunker.next_full() {
-                return Ok(
-                    Some(
-                        PyBytes::new(
-                            py, &piece,
-                        )
-                        .unbind(),
-                    ),
-                );
+                return Ok(Some(PyBytes::new(py, &piece).unbind()));
             }
             if slf.finished {
-                return Ok(
-                    slf.chunker.flush().map(
-                        |piece| {
-                            PyBytes::new(
-                                py, &piece,
-                            )
-                            .unbind()
-                        },
-                    ),
-                );
+                return Ok(slf
+                    .chunker
+                    .flush()
+                    .map(|piece| PyBytes::new(py, &piece).unbind()));
             }
-            match block_on_inner(
-                py,
-                stream.next_chunk(),
-            )? {
+            match block_on_inner(py, stream.next_chunk())? {
                 Some(bytes) => slf.chunker.feed(bytes),
                 None => slf.finished = true,
             }
@@ -94,7 +76,7 @@ impl PyTextIterator {
         slf
     }
 
-    fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<String>> {
+    fn __next__(mut slf: PyRefMut<'_, Self>) -> Result<Option<String>, PyRqxError> {
         let py = slf.py();
         let stream = slf.stream.clone();
         loop {
@@ -107,23 +89,15 @@ impl PyTextIterator {
             if slf.finished {
                 return Ok(slf.chunker.flush());
             }
-            match block_on_inner(
-                py,
-                stream.next_chunk(),
-            )? {
+            match block_on_inner(py, stream.next_chunk())? {
                 Some(src) => {
-                    let text = slf.decoder.decode(
-                        &src, false,
-                    );
+                    let text = slf.decoder.decode(&src, false);
                     slf.chunker.feed(&text);
                 }
                 // End of stream: flush any character the decoder still holds.
                 None => {
                     slf.finished = true;
-                    let text = slf.decoder.decode(
-                        &[],
-                        true,
-                    );
+                    let text = slf.decoder.decode(&[], true);
                     slf.chunker.feed(&text);
                 }
             }
@@ -148,7 +122,7 @@ impl PyLineIterator {
         slf
     }
 
-    fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<String>> {
+    fn __next__(mut slf: PyRefMut<'_, Self>) -> Result<Option<String>, PyRqxError> {
         let py = slf.py();
         let stream = slf.stream.clone();
 
@@ -164,16 +138,11 @@ impl PyLineIterator {
                 return Ok(None);
             }
 
-            let chunk = block_on_inner(
-                py,
-                stream.next_chunk(),
-            )?;
+            let chunk = block_on_inner(py, stream.next_chunk())?;
 
             match chunk {
                 Some(src) => {
-                    let text = slf.decoder.decode(
-                        &src, false,
-                    );
+                    let text = slf.decoder.decode(&src, false);
                     let lines = slf.lines.feed(&text);
                     slf.pending.extend(lines);
                 }
@@ -181,10 +150,7 @@ impl PyLineIterator {
                     // End of stream: flush the byte decoder, feed any final
                     // text through the line splitter, THEN flush the line
                     // buffer. Both flushes are required, in this order.
-                    let text = slf.decoder.decode(
-                        &[],
-                        true,
-                    );
+                    let text = slf.decoder.decode(&[], true);
                     let lines = slf.lines.feed(&text);
                     slf.pending.extend(lines);
                     if let Some(last) = slf.lines.flush() {
@@ -209,11 +175,7 @@ impl<'py> IntoPyObject<'py> for PyBytesChunk {
     type Error = PyErr;
 
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-        Ok(
-            PyBytes::new(
-                py, &self.0,
-            ),
-        )
+        Ok(PyBytes::new(py, &self.0))
     }
 }
 
@@ -236,30 +198,29 @@ impl PyAsyncByteIterator {
 
     fn __anext__<'py>(slf: PyRef<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
         let state = Arc::clone(&slf.state);
-        RUNTIME.future_into_py(
-            slf.py(),
-            async move {
-                let mut s = state.lock().await;
-                loop {
-                    if !s.finished {
-                        s.stream.check_open()?;
-                    }
-                    if let Some(piece) = s.chunker.next_full() {
-                        return Ok(Some(PyBytesChunk(piece)));
-                    }
-                    if s.finished {
-                        return match s.chunker.flush() {
-                            Some(piece) => Ok(Some(PyBytesChunk(piece))),
-                            None => Err(pyo3::exceptions::PyStopAsyncIteration::new_err(())),
-                        };
-                    }
-                    match s.stream.next_chunk().await? {
-                        Some(bytes) => s.chunker.feed(bytes),
-                        None => s.finished = true,
-                    }
+        RUNTIME.future_into_py(slf.py(), async move {
+            let mut s = state.lock().await;
+            loop {
+                if !s.finished {
+                    s.stream.check_open()?;
                 }
-            },
-        )
+                if let Some(piece) = s.chunker.next_full() {
+                    return Ok(Some(PyBytesChunk(piece)));
+                }
+                if s.finished {
+                    return match s.chunker.flush() {
+                        Some(piece) => Ok(Some(PyBytesChunk(piece))),
+                        None => Err(PyRqxError::from(
+                            pyo3::exceptions::PyStopAsyncIteration::new_err(()),
+                        )),
+                    };
+                }
+                match s.stream.next_chunk().await? {
+                    Some(bytes) => s.chunker.feed(bytes),
+                    None => s.finished = true,
+                }
+            }
+        })
     }
 }
 
@@ -283,44 +244,38 @@ impl PyAsyncTextIterator {
 
     fn __anext__<'py>(slf: PyRef<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
         let state = Arc::clone(&slf.state);
-        RUNTIME.future_into_py(
-            slf.py(),
-            async move {
-                // Held across the chunk-pull await, so a tokio mutex (not std).
-                let mut s = state.lock().await;
-                loop {
-                    if !s.finished {
-                        s.stream.check_open()?;
+        RUNTIME.future_into_py(slf.py(), async move {
+            // Held across the chunk-pull await, so a tokio mutex (not std).
+            let mut s = state.lock().await;
+            loop {
+                if !s.finished {
+                    s.stream.check_open()?;
+                }
+                if let Some(piece) = s.chunker.next_full() {
+                    return Ok(piece);
+                }
+                if s.finished {
+                    return match s.chunker.flush() {
+                        Some(piece) => Ok(piece),
+                        None => Err(PyRqxError::from(
+                            pyo3::exceptions::PyStopAsyncIteration::new_err(()),
+                        )),
+                    };
+                }
+                let chunk = s.stream.next_chunk().await?;
+                match chunk {
+                    Some(src) => {
+                        let text = s.decoder.decode(&src, false);
+                        s.chunker.feed(&text);
                     }
-                    if let Some(piece) = s.chunker.next_full() {
-                        return Ok(piece);
-                    }
-                    if s.finished {
-                        return match s.chunker.flush() {
-                            Some(piece) => Ok(piece),
-                            None => Err(pyo3::exceptions::PyStopAsyncIteration::new_err(())),
-                        };
-                    }
-                    let chunk = s.stream.next_chunk().await?;
-                    match chunk {
-                        Some(src) => {
-                            let text = s.decoder.decode(
-                                &src, false,
-                            );
-                            s.chunker.feed(&text);
-                        }
-                        None => {
-                            s.finished = true;
-                            let text = s.decoder.decode(
-                                &[],
-                                true,
-                            );
-                            s.chunker.feed(&text);
-                        }
+                    None => {
+                        s.finished = true;
+                        let text = s.decoder.decode(&[], true);
+                        s.chunker.feed(&text);
                     }
                 }
-            },
-        )
+            }
+        })
     }
 }
 
@@ -345,47 +300,41 @@ impl PyAsyncLineIterator {
 
     fn __anext__<'py>(slf: PyRef<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
         let state = Arc::clone(&slf.state);
-        RUNTIME.future_into_py(
-            slf.py(),
-            async move {
-                let mut s = state.lock().await;
-                loop {
-                    if !s.finished {
-                        s.stream.check_open()?;
+        RUNTIME.future_into_py(slf.py(), async move {
+            let mut s = state.lock().await;
+            loop {
+                if !s.finished {
+                    s.stream.check_open()?;
+                }
+                if let Some(line) = s.pending.pop_front() {
+                    return Ok(line);
+                }
+                if s.finished {
+                    return Err(PyRqxError::from(
+                        pyo3::exceptions::PyStopAsyncIteration::new_err(()),
+                    ));
+                }
+                let chunk = s.stream.next_chunk().await?;
+                match chunk {
+                    Some(src) => {
+                        let text = s.decoder.decode(&src, false);
+                        let lines = s.lines.feed(&text);
+                        s.pending.extend(lines);
                     }
-                    if let Some(line) = s.pending.pop_front() {
-                        return Ok(line);
-                    }
-                    if s.finished {
-                        return Err(pyo3::exceptions::PyStopAsyncIteration::new_err(()));
-                    }
-                    let chunk = s.stream.next_chunk().await?;
-                    match chunk {
-                        Some(src) => {
-                            let text = s.decoder.decode(
-                                &src, false,
-                            );
-                            let lines = s.lines.feed(&text);
-                            s.pending.extend(lines);
+                    None => {
+                        // EOF: flush the byte decoder, feed the final text, then
+                        // flush the line buffer — same two flushes as the sync path.
+                        let text = s.decoder.decode(&[], true);
+                        let lines = s.lines.feed(&text);
+                        s.pending.extend(lines);
+                        if let Some(last) = s.lines.flush() {
+                            s.pending.push_back(last);
                         }
-                        None => {
-                            // EOF: flush the byte decoder, feed the final text, then
-                            // flush the line buffer — same two flushes as the sync path.
-                            let text = s.decoder.decode(
-                                &[],
-                                true,
-                            );
-                            let lines = s.lines.feed(&text);
-                            s.pending.extend(lines);
-                            if let Some(last) = s.lines.flush() {
-                                s.pending.push_back(last);
-                            }
-                            s.finished = true;
-                        }
+                        s.finished = true;
                     }
                 }
-            },
-        )
+            }
+        })
     }
 }
 
@@ -395,6 +344,7 @@ pub struct PyStreamResponse {
     pub(crate) body: Option<Body>,
     pub content_cache: PyOnceLock<Py<PyBytes>>,
     pub headers_cache: PyOnceLock<Py<PyHeaders>>,
+    pub url_cache: PyOnceLock<Py<PyURL>>,
 }
 
 #[pymethods]
@@ -413,13 +363,11 @@ impl PyStreamResponse {
     fn iter_bytes(&mut self, chunk_size: Option<usize>) -> PyResult<PyByteIterator> {
         let chunker = ByteChunker::new(Self::checked_chunk_size(chunk_size)?);
         let stream = self.start_stream()?;
-        Ok(
-            PyByteIterator {
-                stream,
-                chunker,
-                finished: false,
-            },
-        )
+        Ok(PyByteIterator {
+            stream,
+            chunker,
+            finished: false,
+        })
     }
 
     /// Iterate over the decoded body as it arrives, or in pieces of exactly
@@ -428,67 +376,54 @@ impl PyStreamResponse {
     fn iter_text(&mut self, chunk_size: Option<usize>) -> PyResult<PyTextIterator> {
         let chunker = TextChunker::new(Self::checked_chunk_size(chunk_size)?);
         let stream = self.start_stream()?;
-        Ok(
-            PyTextIterator {
-                stream,
-                decoder: TextDecoder::new(self.parts.resolved_encoding()),
-                chunker,
-                finished: false,
-            },
-        )
+        Ok(PyTextIterator {
+            stream,
+            decoder: TextDecoder::new(self.parts.resolved_encoding()),
+            chunker,
+            finished: false,
+        })
     }
 
     /// Iterate over the decoded body line by line, terminators removed.
     fn iter_lines(&mut self) -> PyResult<PyLineIterator> {
         let stream = self.start_stream()?;
-        Ok(
-            PyLineIterator {
-                stream,
-                decoder: TextDecoder::new(self.parts.resolved_encoding()),
-                lines: LineDecoder::default(),
-                pending: VecDeque::new(),
-                finished: false,
-            },
-        )
+        Ok(PyLineIterator {
+            stream,
+            decoder: TextDecoder::new(self.parts.resolved_encoding()),
+            lines: LineDecoder::default(),
+            pending: VecDeque::new(),
+            finished: false,
+        })
     }
 
-    fn read(&mut self, py: Python<'_>) -> PyResult<Py<PyBytes>> {
+    fn read(&mut self, py: Python<'_>) -> Result<Py<PyBytes>, PyRqxError> {
         match self.body.take() {
             Some(Body::Live(response)) => {
                 let bytes = py
                     .detach(|| RUNTIME.block_on(async { response.bytes().await }))?
-                    .map_err(map_reqwest_error)?;
+                    .map_err(rqx_core::error::RqxError::from)?;
                 self.body = Some(Body::Buffered(bytes));
             }
             Some(Body::Streaming(stream)) => {
                 self.body = Some(Body::Streaming(stream));
-                return Err(StreamConsumed::new_err("response already consumed"));
+                return Err(StreamConsumed::new_err("response already consumed").into());
             }
             Some(buffered) => self.body = Some(buffered), // already Buffered — restore unchanged
-            None => return Err(StreamClosed::new_err("response closed")),
+            None => return Err(StreamClosed::new_err("response closed").into()),
         }
-        self.content(py) // single, cached materialization — shared with the .content getter
+        Ok(self.content(py)?) // single, cached materialization — shared with the .content getter
     }
 
     #[getter]
     fn content(&self, py: Python<'_>) -> PyResult<Py<PyBytes>> {
         match &self.body {
-            Some(Body::Buffered(bytes)) => Ok(
-                self.content_cache
-                    .get_or_init(
-                        py,
-                        || {
-                            PyBytes::new(
-                                py, bytes,
-                            )
-                            .unbind()
-                        },
-                    )
-                    .clone_ref(py),
-            ),
-            Some(Body::Live(_) | Body::Streaming(_)) => {
-                Err(ResponseNotRead::new_err("response not read; call read() first"))
-            }
+            Some(Body::Buffered(bytes)) => Ok(self
+                .content_cache
+                .get_or_init(py, || PyBytes::new(py, bytes).unbind())
+                .clone_ref(py)),
+            Some(Body::Live(_) | Body::Streaming(_)) => Err(ResponseNotRead::new_err(
+                "response not read; call read() first",
+            )),
             None => Err(StreamClosed::new_err("response closed")),
         }
     }
@@ -496,36 +431,21 @@ impl PyStreamResponse {
     #[getter]
     fn text(&self) -> PyResult<String> {
         match &self.body {
-            Some(Body::Buffered(bytes)) => {
-                let encoding = self.parts.resolved_encoding();
-                let (decoded, _, _) = encoding.decode(bytes);
-                Ok(decoded.into_owned())
-            }
-            Some(Body::Live(_) | Body::Streaming(_)) => {
-                Err(ResponseNotRead::new_err("response not read; call read() first"))
-            }
+            Some(Body::Buffered(bytes)) => Ok(self.parts.text(bytes)),
+            Some(Body::Live(_) | Body::Streaming(_)) => Err(ResponseNotRead::new_err(
+                "response not read; call read() first",
+            )),
             None => Err(StreamClosed::new_err("response closed")),
         }
     }
 
-    fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    fn json(&self, py: Python<'_>) -> Result<Py<PyAny>, PyRqxError> {
         match &self.body {
-            Some(Body::Buffered(bytes)) => {
-                let value = serde_json::from_slice(bytes).map_err(
-                    |e| {
-                        self.parts.json_decode_error(
-                            bytes, &e,
-                        )
-                    },
-                )?;
-                value_to_py(
-                    py, value,
-                )
-            }
+            Some(Body::Buffered(bytes)) => Ok(value_to_py(py, self.parts.json(bytes)?)?),
             Some(Body::Live(_) | Body::Streaming(_)) => {
-                Err(ResponseNotRead::new_err("response not read; call read() first"))
+                Err(ResponseNotRead::new_err("response not read; call read() first").into())
             }
-            None => Err(StreamClosed::new_err("response closed")),
+            None => Err(StreamClosed::new_err("response closed").into()),
         }
     }
 
@@ -540,21 +460,17 @@ impl PyStreamResponse {
         // read-only. Repeat access is then a refcount bump, and
         // `resp.headers is resp.headers` holds (matching httpx).
         self.headers_cache
-            .get_or_try_init(
-                py,
-                || {
-                    Py::new(
-                        py,
-                        PyHeaders::from_header_map(self.parts.headers.clone()),
-                    )
-                },
-            )
+            .get_or_try_init(py, || {
+                Py::new(py, PyHeaders::new(self.parts.headers.clone()))
+            })
             .map(|h| h.clone_ref(py))
     }
 
     #[getter]
     fn url(&self, py: Python<'_>) -> PyResult<Py<PyURL>> {
-        self.parts.py_url(py)
+        self.url_cache
+            .get_or_try_init(py, || Py::new(py, PyURL::new(self.parts.url.clone())))
+            .map(|url| url.clone_ref(py))
     }
 
     #[getter]
@@ -568,9 +484,8 @@ impl PyStreamResponse {
         let Some(error) = slf.borrow().parts.status_error() else {
             return Ok(slf);
         };
-        error.value(slf.py()).setattr(
-            "response", &slf,
-        )?;
+        let error = PyErr::from(PyRqxError::from(error));
+        error.value(slf.py()).setattr("response", &slf)?;
         Err(error)
     }
 
@@ -580,12 +495,7 @@ impl PyStreamResponse {
     }
 
     #[getter]
-    fn retry_history(
-        &self,
-    ) -> &[(
-        String,
-        f64,
-    )] {
+    fn retry_history(&self) -> &[(String, f64)] {
         &self.parts.retry_history
     }
 
@@ -653,10 +563,7 @@ impl PyStreamResponse {
 
     #[getter]
     fn is_consumed(&self) -> bool {
-        !matches!(
-            self.body,
-            Some(Body::Live(_))
-        )
+        !matches!(self.body, Some(Body::Live(_)))
     }
 }
 
@@ -682,11 +589,9 @@ impl PyStreamResponse {
             }
             Some(buffered) => {
                 self.body = Some(buffered);
-                Err(
-                    StreamConsumed::new_err(
-                        "response already read into memory; use .content, .text or .json()",
-                    ),
-                )
+                Err(StreamConsumed::new_err(
+                    "response already read into memory; use .content, .text or .json()",
+                ))
             }
             None => Err(StreamClosed::new_err("response closed")),
         }
@@ -699,6 +604,7 @@ impl PyStreamResponse {
             body: Some(Body::Live(response)),
             content_cache: PyOnceLock::new(),
             headers_cache: PyOnceLock::new(),
+            url_cache: PyOnceLock::new(),
         }
     }
 }
@@ -713,6 +619,7 @@ pub struct PyAsyncStreamResponse {
     pub(crate) body: Arc<Mutex<Option<Body>>>,
     pub content_cache: PyOnceLock<Py<PyBytes>>,
     pub headers_cache: PyOnceLock<Py<PyHeaders>>,
+    pub url_cache: PyOnceLock<Py<PyURL>>,
 }
 
 #[pymethods]
@@ -723,19 +630,13 @@ impl PyAsyncStreamResponse {
     fn aiter_bytes(&mut self, chunk_size: Option<usize>) -> PyResult<PyAsyncByteIterator> {
         let chunker = ByteChunker::new(PyStreamResponse::checked_chunk_size(chunk_size)?);
         let stream = self.start_stream()?;
-        Ok(
-            PyAsyncByteIterator {
-                state: Arc::new(
-                    TokioMutex::new(
-                        AsyncByteState {
-                            stream,
-                            chunker,
-                            finished: false,
-                        },
-                    ),
-                ),
-            },
-        )
+        Ok(PyAsyncByteIterator {
+            state: Arc::new(TokioMutex::new(AsyncByteState {
+                stream,
+                chunker,
+                finished: false,
+            })),
+        })
     }
 
     /// Iterate over the decoded body as it arrives, or in pieces of exactly
@@ -744,109 +645,76 @@ impl PyAsyncStreamResponse {
     fn aiter_text(&mut self, chunk_size: Option<usize>) -> PyResult<PyAsyncTextIterator> {
         let chunker = TextChunker::new(PyStreamResponse::checked_chunk_size(chunk_size)?);
         let stream = self.start_stream()?;
-        Ok(
-            PyAsyncTextIterator {
-                state: Arc::new(
-                    TokioMutex::new(
-                        AsyncTextState {
-                            stream,
-                            decoder: TextDecoder::new(self.parts.resolved_encoding()),
-                            chunker,
-                            finished: false,
-                        },
-                    ),
-                ),
-            },
-        )
+        Ok(PyAsyncTextIterator {
+            state: Arc::new(TokioMutex::new(AsyncTextState {
+                stream,
+                decoder: TextDecoder::new(self.parts.resolved_encoding()),
+                chunker,
+                finished: false,
+            })),
+        })
     }
 
     /// Iterate over the decoded body line by line, terminators removed.
     fn aiter_lines(&mut self) -> PyResult<PyAsyncLineIterator> {
         let stream = self.start_stream()?;
-        Ok(
-            PyAsyncLineIterator {
-                state: Arc::new(
-                    TokioMutex::new(
-                        AsyncLineState {
-                            stream,
-                            decoder: TextDecoder::new(self.parts.resolved_encoding()),
-                            lines: LineDecoder::default(),
-                            pending: VecDeque::new(),
-                            finished: false,
-                        },
-                    ),
-                ),
-            },
-        )
+        Ok(PyAsyncLineIterator {
+            state: Arc::new(TokioMutex::new(AsyncLineState {
+                stream,
+                decoder: TextDecoder::new(self.parts.resolved_encoding()),
+                lines: LineDecoder::default(),
+                pending: VecDeque::new(),
+                finished: false,
+            })),
+        })
     }
 
     /// Read the entire remaining body into memory and return it as `bytes`.
     /// Buffers in place, so `.content`/`.text`/`.json()` work afterward.
     fn aread<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let body = Arc::clone(&self.body);
-        RUNTIME.future_into_py(
-            py,
-            async move {
-                // Take the live handle under the lock, but never hold the lock
-                // across the await or a GIL acquisition.
-                let live = {
-                    let mut guard = body.lock().unwrap();
-                    match guard.take() {
-                        Some(Body::Live(r)) => r,
-                        Some(Body::Buffered(b)) => {
-                            // Already read — restore and return the same bytes.
-                            *guard = Some(Body::Buffered(b.clone()));
-                            drop(guard);
-                            return Python::attach(
-                                |py| {
-                                    Ok(
-                                        PyBytes::new(
-                                            py, &b,
-                                        )
-                                        .unbind(),
-                                    )
-                                },
-                            );
-                        }
-                        Some(Body::Streaming(stream)) => {
-                            *guard = Some(Body::Streaming(stream));
-                            return Err(StreamConsumed::new_err("response already consumed"));
-                        }
-                        None => {
-                            return Err(StreamClosed::new_err("response closed"));
-                        }
+        RUNTIME.future_into_py(py, async move {
+            // Take the live handle under the lock, but never hold the lock
+            // across the await or a GIL acquisition.
+            let live = {
+                let mut guard = body.lock().unwrap();
+                match guard.take() {
+                    Some(Body::Live(r)) => r,
+                    Some(Body::Buffered(b)) => {
+                        // Already read — restore and return the same bytes.
+                        *guard = Some(Body::Buffered(b.clone()));
+                        drop(guard);
+                        return Python::attach(|py| Ok(PyBytes::new(py, &b).unbind()));
                     }
-                };
-                let bytes = live.bytes().await.map_err(map_reqwest_error)?;
-                *body.lock().unwrap() = Some(Body::Buffered(bytes.clone()));
-                Python::attach(
-                    |py| {
-                        Ok(
-                            PyBytes::new(
-                                py, &bytes,
-                            )
-                            .unbind(),
-                        )
-                    },
-                )
-            },
-        )
+                    Some(Body::Streaming(stream)) => {
+                        *guard = Some(Body::Streaming(stream));
+                        return Err(StreamConsumed::new_err("response already consumed"));
+                    }
+                    None => {
+                        return Err(StreamClosed::new_err("response closed"));
+                    }
+                }
+            };
+            let bytes = live
+                .bytes()
+                .await
+                .map_err(|e| PyRqxError::from(rqx_core::error::RqxError::from(e)))?;
+            *body.lock().unwrap() = Some(Body::Buffered(bytes.clone()));
+            Python::attach(|py| Ok(PyBytes::new(py, &bytes).unbind()))
+        })
     }
 
     /// Release the connection (or drop the buffer) early. An iterator still
     /// reading it raises on its next chunk.
     fn aclose<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let body = Arc::clone(&self.body);
-        RUNTIME.future_into_py(
-            py,
-            async move {
-                let taken = body.lock().unwrap().take();
-                if let Some(taken) = taken {
-                    taken.close().await;
-                }
-                Ok(())
-            },
-        )
+        RUNTIME.future_into_py(py, async move {
+            let taken = body.lock().unwrap().take();
+            if let Some(taken) = taken {
+                taken.close().await;
+            }
+            Ok::<_, PyRqxError>(())
+        })
     }
 
     #[getter]
@@ -854,23 +722,16 @@ impl PyAsyncStreamResponse {
         let bytes = match &*self.body.lock().unwrap() {
             Some(Body::Buffered(b)) => b.clone(),
             Some(Body::Live(_) | Body::Streaming(_)) => {
-                return Err(ResponseNotRead::new_err("response not read; call aread() first"));
+                return Err(ResponseNotRead::new_err(
+                    "response not read; call aread() first",
+                ));
             }
             None => return Err(StreamClosed::new_err("response closed")),
         };
-        Ok(
-            self.content_cache
-                .get_or_init(
-                    py,
-                    || {
-                        PyBytes::new(
-                            py, &bytes,
-                        )
-                        .unbind()
-                    },
-                )
-                .clone_ref(py),
-        )
+        Ok(self
+            .content_cache
+            .get_or_init(py, || PyBytes::new(py, &bytes).unbind())
+            .clone_ref(py))
     }
 
     #[getter]
@@ -878,32 +739,26 @@ impl PyAsyncStreamResponse {
         let bytes = match &*self.body.lock().unwrap() {
             Some(Body::Buffered(b)) => b.clone(),
             Some(Body::Live(_) | Body::Streaming(_)) => {
-                return Err(ResponseNotRead::new_err("response not read; call aread() first"));
+                return Err(ResponseNotRead::new_err(
+                    "response not read; call aread() first",
+                ));
             }
             None => return Err(StreamClosed::new_err("response closed")),
         };
-        let (decoded, _, _) = self.parts.resolved_encoding().decode(&bytes);
-        Ok(decoded.into_owned())
+        Ok(self.parts.text(&bytes))
     }
 
-    fn json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    fn json(&self, py: Python<'_>) -> Result<Py<PyAny>, PyRqxError> {
         let bytes = match &*self.body.lock().unwrap() {
             Some(Body::Buffered(b)) => b.clone(),
             Some(Body::Live(_) | Body::Streaming(_)) => {
-                return Err(ResponseNotRead::new_err("response not read; call aread() first"));
+                return Err(
+                    ResponseNotRead::new_err("response not read; call aread() first").into(),
+                );
             }
-            None => return Err(StreamClosed::new_err("response closed")),
+            None => return Err(StreamClosed::new_err("response closed").into()),
         };
-        let value = serde_json::from_slice(&bytes).map_err(
-            |e| {
-                self.parts.json_decode_error(
-                    &bytes, &e,
-                )
-            },
-        )?;
-        value_to_py(
-            py, value,
-        )
+        Ok(value_to_py(py, self.parts.json(&bytes)?)?)
     }
 
     #[getter]
@@ -917,21 +772,17 @@ impl PyAsyncStreamResponse {
         // read-only. Repeat access is then a refcount bump, and
         // `resp.headers is resp.headers` holds (matching httpx).
         self.headers_cache
-            .get_or_try_init(
-                py,
-                || {
-                    Py::new(
-                        py,
-                        PyHeaders::from_header_map(self.parts.headers.clone()),
-                    )
-                },
-            )
+            .get_or_try_init(py, || {
+                Py::new(py, PyHeaders::new(self.parts.headers.clone()))
+            })
             .map(|h| h.clone_ref(py))
     }
 
     #[getter]
     fn url(&self, py: Python<'_>) -> PyResult<Py<PyURL>> {
-        self.parts.py_url(py)
+        self.url_cache
+            .get_or_try_init(py, || Py::new(py, PyURL::new(self.parts.url.clone())))
+            .map(|url| url.clone_ref(py))
     }
 
     #[getter]
@@ -945,9 +796,8 @@ impl PyAsyncStreamResponse {
         let Some(error) = slf.borrow().parts.status_error() else {
             return Ok(slf);
         };
-        error.value(slf.py()).setattr(
-            "response", &slf,
-        )?;
+        let error = PyErr::from(PyRqxError::from(error));
+        error.value(slf.py()).setattr("response", &slf)?;
         Err(error)
     }
 
@@ -957,12 +807,7 @@ impl PyAsyncStreamResponse {
     }
 
     #[getter]
-    fn retry_history(
-        &self,
-    ) -> &[(
-        String,
-        f64,
-    )] {
+    fn retry_history(&self) -> &[(String, f64)] {
         &self.parts.retry_history
     }
 
@@ -1034,10 +879,7 @@ impl PyAsyncStreamResponse {
 
     #[getter]
     fn is_consumed(&self) -> bool {
-        !matches!(
-            *self.body.lock().unwrap(),
-            Some(Body::Live(_))
-        )
+        !matches!(*self.body.lock().unwrap(), Some(Body::Live(_)))
     }
 }
 
@@ -1062,11 +904,9 @@ impl PyAsyncStreamResponse {
             }
             Some(buffered) => {
                 *guard = Some(buffered);
-                Err(
-                    StreamConsumed::new_err(
-                        "response already read into memory; use .content, .text or .json()",
-                    ),
-                )
+                Err(StreamConsumed::new_err(
+                    "response already read into memory; use .content, .text or .json()",
+                ))
             }
             None => Err(StreamClosed::new_err("response closed")),
         }
@@ -1079,6 +919,7 @@ impl PyAsyncStreamResponse {
             body: Arc::new(Mutex::new(Some(Body::Live(response)))),
             content_cache: PyOnceLock::new(),
             headers_cache: PyOnceLock::new(),
+            url_cache: PyOnceLock::new(),
         }
     }
 }
