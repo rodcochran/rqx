@@ -1,6 +1,4 @@
-use std::error::Error as _;
-
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyValueError};
 use pyo3::prelude::{Bound, PyAny, PyAnyMethods, PyModule, PyModuleMethods, PyResult};
 use pyo3::types::{PyDict, PyType};
 use pyo3::{PyErr, create_exception, import_exception};
@@ -147,63 +145,119 @@ impl StdlibBackedExceptions {
     }
 }
 
-// hyper-util keeps its tunnel error type private, so its text is all there is to match.
-const TUNNEL_REFUSED: [&str; 2] = [
-    "tunnel error: unsuccessful",
-    "tunnel error: proxy authorization required",
-];
+/// The error a pymethod returns: `?` works on both core results and pyo3
+/// results, and pyo3 converts it to the matching Python exception on the way out.
+pub enum PyRqxError {
+    Core(rqx_core::error::RqxError),
+    Py(PyErr),
+}
 
-/// Map a reqwest error to the most specific rqx exception type.
-///
-/// reqwest's predicates (`is_timeout`, `is_connect`, `is_decode`, ...) go
-/// first; where they lump different failures together, the error underneath
-/// decides.
-pub fn map_reqwest_error(e: reqwest::Error) -> PyErr {
-    let msg = format!("{e}");
-    let sources = || std::iter::successors(e.source(), |s| (*s).source());
+impl From<rqx_core::error::RqxError> for PyRqxError {
+    fn from(value: rqx_core::error::RqxError) -> Self {
+        PyRqxError::Core(value)
+    }
+}
 
-    if e.is_timeout() {
-        // Timeout — disambiguate connect-phase vs read-phase. Write timeouts
-        // are rare enough that we don't try to detect them; they'll surface
-        // as ReadTimeout, which is acceptable for v0.
-        if e.is_connect() {
-            return ConnectTimeout::new_err(msg);
+impl From<PyErr> for PyRqxError {
+    fn from(value: PyErr) -> Self {
+        PyRqxError::Py(value)
+    }
+}
+
+impl From<PyRqxError> for PyErr {
+    fn from(value: PyRqxError) -> Self {
+        match value {
+            PyRqxError::Py(e) => e,
+            PyRqxError::Core(e) => PyRqxError::core(e),
         }
-        return ReadTimeout::new_err(msg);
     }
+}
 
-    if e.is_connect() {
-        if sources().any(|s| TUNNEL_REFUSED.contains(&s.to_string().as_str())) {
-            return ProxyError::new_err(msg);
+impl PyRqxError {
+    fn core(e: rqx_core::error::RqxError) -> PyErr {
+        match e {
+            rqx_core::error::RqxError::HTTPError(e) => Self::http(e),
+            rqx_core::error::RqxError::InvalidURL(m) => InvalidURL::new_err(m),
+            rqx_core::error::RqxError::JSONDecodeError(e) => {
+                JSONDecodeError::new_err((e.message, e.doc, e.pos))
+            }
+            rqx_core::error::RqxError::StreamError(e) => Self::stream(e),
+            rqx_core::error::RqxError::TLSConfigError(m) => RqxError::new_err(m),
+            rqx_core::error::RqxError::HeaderError(e) => Self::header(e),
         }
-        return ConnectError::new_err(msg);
     }
 
-    if e.is_redirect() {
-        return TooManyRedirects::new_err(msg);
-    }
-
-    if let Some(hyper) = sources().find_map(|s| s.downcast_ref::<hyper::Error>()) {
-        // The server broke HTTP, unless the network failed underneath hyper.
-        if hyper.is_parse() || hyper.is_incomplete_message() {
-            return RemoteProtocolError::new_err(msg);
+    fn http(e: rqx_core::error::HTTPError) -> PyErr {
+        match e {
+            rqx_core::error::HTTPError::RequestError(e) => Self::request(e),
+            rqx_core::error::HTTPError::HTTPStatusError(m) => HTTPStatusError::new_err(m),
+            rqx_core::error::HTTPError::MaxRetriesExceeded(m) => MaxRetriesExceeded::new_err(m),
         }
-        let os_error = hyper
-            .source()
-            .and_then(|s| s.downcast_ref::<std::io::Error>())
-            .and_then(|io| io.raw_os_error());
-        return match os_error {
-            Some(_) => ReadError::new_err(msg),
-            None => RemoteProtocolError::new_err(msg),
-        };
     }
 
-    if e.is_body() || e.is_decode() {
-        // No transport error underneath: the decompressor rejected the body.
-        return DecodingError::new_err(msg);
+    fn request(e: rqx_core::error::RequestError) -> PyErr {
+        match e {
+            rqx_core::error::RequestError::TransportError(e) => Self::transport(e),
+            rqx_core::error::RequestError::DecodingError(m) => DecodingError::new_err(m),
+            rqx_core::error::RequestError::TooManyRedirects(m) => TooManyRedirects::new_err(m),
+            rqx_core::error::RequestError::RequestError(m) => RequestError::new_err(m),
+        }
     }
 
-    // Anything else still failed before a response arrived, so it stays
-    // under RequestError and `except HTTPError` catches it.
-    RequestError::new_err(format!("request failed: {e}"))
+    fn transport(e: rqx_core::error::TransportError) -> PyErr {
+        match e {
+            rqx_core::error::TransportError::TimeoutException(e) => Self::timeout(e),
+            rqx_core::error::TransportError::NetworkError(e) => Self::network(e),
+            rqx_core::error::TransportError::ProtocolError(e) => Self::protocol(e),
+            rqx_core::error::TransportError::ProxyError(m) => ProxyError::new_err(m),
+            rqx_core::error::TransportError::UnsupportedProtocol(m) => {
+                UnsupportedProtocol::new_err(m)
+            }
+        }
+    }
+
+    fn timeout(e: rqx_core::error::TimeoutException) -> PyErr {
+        match e {
+            rqx_core::error::TimeoutException::ConnectTimeout(m) => ConnectTimeout::new_err(m),
+            rqx_core::error::TimeoutException::ReadTimeout(m) => ReadTimeout::new_err(m),
+            rqx_core::error::TimeoutException::WriteTimeout(m) => WriteTimeout::new_err(m),
+            rqx_core::error::TimeoutException::PoolTimeout(m) => PoolTimeout::new_err(m),
+        }
+    }
+
+    fn network(e: rqx_core::error::NetworkError) -> PyErr {
+        match e {
+            rqx_core::error::NetworkError::ConnectError(m) => ConnectError::new_err(m),
+            rqx_core::error::NetworkError::ReadError(m) => ReadError::new_err(m),
+            rqx_core::error::NetworkError::WriteError(m) => WriteError::new_err(m),
+        }
+    }
+
+    fn protocol(e: rqx_core::error::ProtocolError) -> PyErr {
+        match e {
+            rqx_core::error::ProtocolError::RemoteProtocolError(m) => {
+                RemoteProtocolError::new_err(m)
+            }
+        }
+    }
+
+    fn stream(e: rqx_core::error::StreamError) -> PyErr {
+        match e {
+            rqx_core::error::StreamError::StreamConsumed(m) => StreamConsumed::new_err(m),
+            rqx_core::error::StreamError::StreamClosed(m) => StreamClosed::new_err(m),
+            rqx_core::error::StreamError::ResponseNotRead(m) => ResponseNotRead::new_err(m),
+            rqx_core::error::StreamError::StreamError(m) => StreamError::new_err(m),
+        }
+    }
+
+    fn header(e: rqx_core::error::HeaderError) -> PyErr {
+        match e {
+            rqx_core::error::HeaderError::MissingKey(key) => PyKeyError::new_err(key),
+            rqx_core::error::HeaderError::InvalidName(_)
+            | rqx_core::error::HeaderError::InvalidValue(_)
+            | rqx_core::error::HeaderError::MaxSizeReached(_) => {
+                PyValueError::new_err(e.to_string())
+            }
+        }
+    }
 }
