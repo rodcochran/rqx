@@ -134,9 +134,11 @@ impl<'py> FromPyObject<'_, 'py> for PyScalarValue {
                 }),
             };
         }
-        if let Ok(f) = obj.cast::<PyFloat>() {
+        // Python's `str()` spelling goes on the wire (`1.0`, `1e+16`, `nan`),
+        // so the float is sent as that text rather than re-formatted in Rust.
+        if obj.is_instance_of::<PyFloat>() {
             return Ok(Self {
-                inner: ScalarValue::Float(f.value()),
+                inner: ScalarValue::String(obj.str()?.to_cow()?.into_owned()),
             });
         }
         Err(PyTypeError::new_err(format!(

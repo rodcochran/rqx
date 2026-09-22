@@ -30,10 +30,9 @@ impl RequestBody {
             (Some(content), None, None) => Ok(Self::Content(content.to_vec())),
             (None, Some(data), None) => Ok(Self::Form(data)),
             (None, None, Some(json)) => Ok(Self::Json(json)),
-            _ => Err(RequestError::RequestError(
+            _ => Err(RqxError::InvalidArgument(
                 "Only one of content, data, or json may be set".to_string(),
-            )
-            .into()),
+            )),
         }
     }
 
@@ -71,7 +70,7 @@ impl RequestSpec {
     ) -> Result<Self, RqxError> {
         // Uppercased like httpx, so `request("get", ...)` is GET on the wire.
         let method = Method::from_bytes(method.to_ascii_uppercase().as_bytes())
-            .map_err(|e| RequestError::RequestError(format!("invalid method {method:?}: {e}")))?;
+            .map_err(|e| RqxError::InvalidArgument(format!("invalid method {method:?}: {e}")))?;
 
         if !matches!(url.scheme(), "http" | "https") {
             return Err(TransportError::UnsupportedProtocol(format!(

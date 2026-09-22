@@ -9,6 +9,8 @@ pub enum RqxError {
     StreamError(StreamError),
     TLSConfigError(String),
     HeaderError(HeaderError),
+    InvalidArgument(String),
+    UnknownKeyword(String),
 }
 
 impl Error for RqxError {}
@@ -22,6 +24,8 @@ impl std::fmt::Display for RqxError {
             RqxError::StreamError(e) => write!(f, "{e}"),
             RqxError::TLSConfigError(e) => write!(f, "{e}"),
             RqxError::HeaderError(e) => write!(f, "{e}"),
+            RqxError::InvalidArgument(e) => write!(f, "{e}"),
+            RqxError::UnknownKeyword(e) => write!(f, "{e}"),
         }
     }
 }
@@ -301,8 +305,8 @@ impl From<HeaderError> for RqxError {
 impl std::fmt::Display for HeaderError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            HeaderError::InvalidName(e) => write!(f, "invalid header name: {e}"),
-            HeaderError::InvalidValue(e) => write!(f, "invalid header value: {e}"),
+            HeaderError::InvalidName(e) => write!(f, "invalid header name {e}"),
+            HeaderError::InvalidValue(e) => write!(f, "invalid header value {e}"),
             HeaderError::MaxSizeReached(e) => write!(f, "too many headers: {e}"),
             HeaderError::MissingKey(e) => write!(f, "{e}"),
         }

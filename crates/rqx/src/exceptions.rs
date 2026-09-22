@@ -1,4 +1,4 @@
-use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::{Bound, PyAny, PyAnyMethods, PyModule, PyModuleMethods, PyResult};
 use pyo3::types::{PyDict, PyType};
 use pyo3::{PyErr, create_exception, import_exception};
@@ -184,6 +184,8 @@ impl PyRqxError {
             rqx_core::error::RqxError::StreamError(e) => Self::stream(e),
             rqx_core::error::RqxError::TLSConfigError(m) => RqxError::new_err(m),
             rqx_core::error::RqxError::HeaderError(e) => Self::header(e),
+            rqx_core::error::RqxError::InvalidArgument(m) => PyValueError::new_err(m),
+            rqx_core::error::RqxError::UnknownKeyword(m) => PyTypeError::new_err(m),
         }
     }
 

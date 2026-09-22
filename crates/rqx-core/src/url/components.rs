@@ -61,7 +61,7 @@ impl UrlComponents {
                 "fragment" => components = components.with_fragment(value),
                 "params" => components = components.with_params(value),
                 k => {
-                    return Err(RqxError::InvalidURL(format!(
+                    return Err(RqxError::UnknownKeyword(format!(
                         "'{}' is an invalid keyword argument for URL()",
                         k
                     )));
@@ -71,8 +71,12 @@ impl UrlComponents {
         Ok(components)
     }
 
+    // `None` clears the component; `compose` reads an empty string as "not set".
     fn component_field_str(v: &Option<UrlComponentValue>) -> Option<String> {
-        v.as_ref().map(UrlComponentValue::to_string)
+        match v {
+            Some(value) => Some(value.to_string()),
+            None => Some(String::new()),
+        }
     }
 
     fn component_field_u16(v: &Option<UrlComponentValue>) -> Result<Option<u16>, RqxError> {
