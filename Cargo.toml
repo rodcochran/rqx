@@ -1,4 +1,3 @@
-
 [workspace]
 resolver = "2"
 members = [
@@ -6,3 +5,40 @@ members = [
     "crates/rqx",
 ]
 
+[workspace.package]
+version = "0.3.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+bytes = "1.11.1"
+encoding_rs = "0.8"
+futures = "0.3.32"
+http = "1.4.0"
+hyper = "1"
+idna = "1.1.0"
+iri-string = "0.7.12"
+mime = "0.3"
+percent-encoding = "2.3.2"
+pyo3 = "0.29.2"
+pyo3-async-runtimes = { version = "0.29.0", features = ["tokio-runtime"] }
+rand = "0.10"
+reqwest = { version = "0.13.2", features = [
+    "json",
+    "query",
+    "form",
+    "http2",
+    "cookies",
+    "stream",
+    "gzip",
+    "brotli",
+    "zstd",
+    "deflate",
+] }
+rqx-core = { path = "crates/rqx-core" }
+# preserve_order: dict order on the wire and in response.json(), like stdlib.
+# float_roundtrip: correctly-rounded float parsing; the default is best-effort
+# and can return a value one ulp off the document (found by hypothesis, #44).
+serde_json = { version = "1.0.149", features = ["preserve_order", "float_roundtrip"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+url = "2.5.8"
