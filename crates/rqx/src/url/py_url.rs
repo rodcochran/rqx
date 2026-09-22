@@ -7,14 +7,13 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyString};
 
-use rqx_core::query_params::QueryPairs;
 use rqx_core::url::request_url::BaseUrl;
 use rqx_core::url::{
     client_url::RqxClientUrl, components::UrlComponentValue, reference::UrlReference,
 };
 
 use crate::exceptions::PyRqxError;
-use crate::query_params::{PyQueryParams, PyScalarValue};
+use crate::query_params::{PyQueryParams, PyScalarValue, RequestQueryParams};
 
 struct UrlKwargs {
     inner: HashMap<String, Option<UrlComponentValue>>,
@@ -43,13 +42,11 @@ impl UrlKwargs {
                 raw.as_bytes(),
             ))));
         }
-        if let Ok(params) = value.cast::<PyQueryParams>() {
-            return Ok(Some(UrlComponentValue::QueryPairs(
-                params.get().pairs().clone(),
-            )));
-        }
         if let Ok(n) = value.extract::<u16>() {
             return Ok(Some(UrlComponentValue::Int(n)));
+        }
+        if let Ok(params) = value.extract::<RequestQueryParams>() {
+            return Ok(Some(UrlComponentValue::QueryPairs(params.inner)));
         }
         Err(PyTypeError::new_err(format!(
             "URL components must be str, bytes, int, QueryParams or None, got {}",
@@ -174,8 +171,10 @@ impl PyURL {
     }
 
     #[pyo3(signature = (params=None))]
-    fn copy_merge_params(&self, params: Option<QueryPairs>) -> Result<Self, PyRqxError> {
-        Ok(Self::new(self.inner.copy_merge_params(params)?))
+    fn copy_merge_params(&self, params: Option<RequestQueryParams>) -> Result<Self, PyRqxError> {
+        Ok(Self::new(
+            self.inner.copy_merge_params(params.map(|p| p.inner))?,
+        ))
     }
 
     /// A `str` joins as written: parsing it first would resolve its dot
