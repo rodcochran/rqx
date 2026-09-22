@@ -121,7 +121,7 @@ impl RqxClientUrl {
 
 impl fmt::Display for RqxClientUrl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.reference.to_string())
+        write!(f, "{}", self.reference)
     }
 }
 

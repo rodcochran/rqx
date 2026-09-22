@@ -13,10 +13,10 @@ pub enum ScalarValue {
 impl fmt::Display for ScalarValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ScalarValue::Bool(v) => f.write_str(&v.to_string()),
+            ScalarValue::Bool(v) => write!(f, "{v}"),
             ScalarValue::String(v) => f.write_str(v),
-            ScalarValue::Int(v) => f.write_str(&v.to_string()),
-            ScalarValue::Float(v) => f.write_str(&v.to_string()),
+            ScalarValue::Int(v) => write!(f, "{v}"),
+            ScalarValue::Float(v) => write!(f, "{v}"),
         }
     }
 }

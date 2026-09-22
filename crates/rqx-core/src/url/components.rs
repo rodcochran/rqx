@@ -16,7 +16,7 @@ impl std::fmt::Display for UrlComponentValue {
         match self {
             Self::String(s) => f.write_str(s),
             Self::Bytes(b) => f.write_str(&String::from_utf8_lossy(b)),
-            Self::Int(i) => f.write_str(&i.to_string()),
+            Self::Int(i) => write!(f, "{i}"),
             Self::QueryPairs(qp) => write!(f, "{qp}"),
         }
     }
