@@ -8,6 +8,7 @@ pub enum RqxError {
     JSONDecodeError(JSONDecodeError),
     StreamError(StreamError),
     TLSConfigError(String),
+    HeaderError(HeaderError),
 }
 
 impl Error for RqxError {}
@@ -20,6 +21,7 @@ impl std::fmt::Display for RqxError {
             RqxError::JSONDecodeError(e) => write!(f, "{e}"),
             RqxError::StreamError(e) => write!(f, "{e}"),
             RqxError::TLSConfigError(e) => write!(f, "{e}"),
+            RqxError::HeaderError(e) => write!(f, "{e}"),
         }
     }
 }
@@ -280,20 +282,47 @@ impl From<reqwest::Error> for RqxError {
     }
 }
 
+#[derive(Debug)]
+pub enum HeaderError {
+    InvalidName(String),
+    InvalidValue(String),
+    MaxSizeReached(String),
+    MissingKey(String),
+}
+
+impl Error for HeaderError {}
+
+impl From<HeaderError> for RqxError {
+    fn from(value: HeaderError) -> Self {
+        RqxError::HeaderError(value)
+    }
+}
+
+impl std::fmt::Display for HeaderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            HeaderError::InvalidName(e) => write!(f, "invalid header name: {e}"),
+            HeaderError::InvalidValue(e) => write!(f, "invalid header value: {e}"),
+            HeaderError::MaxSizeReached(e) => write!(f, "too many headers: {e}"),
+            HeaderError::MissingKey(e) => write!(f, "{e}"),
+        }
+    }
+}
+
 impl From<InvalidHeaderName> for RqxError {
     fn from(value: InvalidHeaderName) -> Self {
-        ProtocolError::RemoteProtocolError(format!("invalid header name: {}", value)).into()
+        HeaderError::InvalidName(value.to_string()).into()
     }
 }
 
 impl From<InvalidHeaderValue> for RqxError {
     fn from(value: InvalidHeaderValue) -> Self {
-        ProtocolError::RemoteProtocolError(format!("invalid header value: {}", value)).into()
+        HeaderError::InvalidValue(value.to_string()).into()
     }
 }
 
 impl From<MaxSizeReached> for RqxError {
     fn from(value: MaxSizeReached) -> Self {
-        ProtocolError::RemoteProtocolError(format!("too many headers: {}", value)).into()
+        HeaderError::MaxSizeReached(value.to_string()).into()
     }
 }

@@ -42,14 +42,25 @@ impl Headers {
     /// Return the first value matching `key` (case-insensitive). Used by
     /// Rust-side code that just wants a single header for internal logic.
     pub fn get_first(&self, key: &str) -> Option<&str> {
-        HeaderName::from_str(key)
-            .ok()
-            .and_then(|name| self.inner.get(&name))
-            .and_then(|v| v.to_str().ok())
+        self.inner.get(key)?.to_str().ok()
     }
 
     pub fn from_header_map(header_map: HeaderMap) -> Self {
         Self { inner: header_map }
+    }
+
+    /// Every value for `key`, joined with `, ` the way httpx presents them.
+    pub fn get_joined_values_for_key(&self, key: &str) -> Result<String, RqxError> {
+        let values: Vec<&str> = self
+            .inner
+            .get_all(key)
+            .iter()
+            .map(|v| v.to_str().unwrap_or(""))
+            .collect();
+        match values.is_empty() {
+            true => Err(HeaderError::MissingKey(key.to_string()).into()),
+            false => Ok(values.join(", ")),
+        }
     }
 }
 
@@ -63,17 +74,14 @@ impl Headers {
     }
 
     pub fn delete_item(&mut self, key: &str) -> Result<(), RqxError> {
-        let name = HeaderName::from_str(key)?;
-        if self.inner.remove(&name).is_none() {
-            return Err(ProtocolError::RemoteProtocolError(key.to_string()).into());
+        match self.inner.remove(key) {
+            Some(_) => Ok(()),
+            None => Err(HeaderError::MissingKey(key.to_string()).into()),
         }
-        Ok(())
     }
 
     pub fn contains(&self, key: &str) -> bool {
-        HeaderName::from_str(key)
-            .map(|name| self.inner.contains_key(&name))
-            .unwrap_or(false)
+        self.inner.contains_key(key)
     }
 
     pub fn length(&self) -> usize {
