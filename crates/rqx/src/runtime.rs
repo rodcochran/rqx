@@ -48,7 +48,7 @@ use pyo3_async_runtimes::generic::{self, ContextExt};
 use tokio::runtime::{Builder, Handle, Runtime as TokioRuntime};
 use tokio::task;
 
-use crate::exceptions::RqxError;
+use crate::exceptions::{PyRqxError, RqxError};
 
 /// How long `shutdown` waits for already-running blocking tasks (the ones
 /// delivering results back to Python) before giving up on them.
@@ -115,10 +115,15 @@ impl Runtime {
 
     /// Convert a Rust future into an asyncio future, spawning it on the
     /// runtime for the calling process.
-    pub fn future_into_py<'py, F, T>(&self, py: Python<'py>, fut: F) -> PyResult<Bound<'py, PyAny>>
+    pub fn future_into_py<'py, F, T, E>(
+        &self,
+        py: Python<'py>,
+        fut: F,
+    ) -> PyResult<Bound<'py, PyAny>>
     where
-        F: Future<Output = PyResult<T>> + Send + 'static,
+        F: Future<Output = Result<T, E>> + Send + 'static,
         T: for<'a> IntoPyObject<'a> + Send + 'static,
+        E: Into<PyRqxError> + Send + 'static,
     {
         // Build (or rebuild after fork) here, where an error can be returned
         // as a Python exception, and hand the result to `Bridge::spawn`
@@ -129,7 +134,9 @@ impl Runtime {
         // thread before returning.
         let handle = self.handle()?;
         SPAWN_HANDLE.with(|slot| *slot.borrow_mut() = Some(handle));
-        let result = generic::future_into_py::<Bridge, F, T>(py, fut);
+        let result = generic::future_into_py::<Bridge, _, T>(py, async move {
+            fut.await.map_err(|e| PyErr::from(e.into()))
+        });
         SPAWN_HANDLE.with(|slot| slot.borrow_mut().take());
         result
     }

@@ -13,7 +13,7 @@ use rqx_core::url::{client_url::RqxClientUrl, components::UrlComponents, referen
 
 #[pyclass(name = "URL", module = "rqx", frozen, skip_from_py_object)]
 pub struct PyURL {
-    inner: RqxClientUrl,
+    pub(crate) inner: RqxClientUrl,
 }
 
 impl PyURL {
@@ -25,10 +25,10 @@ impl PyURL {
         Ok(Self::new(self.inner.with_params(&params)?))
     }
 
-    fn from_base_url(base_url: BaseUrl) -> Self {
-        let url_reference = UrlReference::from_url(base_url.get_inner().clone());
-        let client_url = RqxClientUrl::new(reference);
-        Self::new(client_url)
+    pub(crate) fn from_base_url(base_url: &BaseUrl) -> Self {
+        Self::new(RqxClientUrl::new(UrlReference::from_url(
+            base_url.get_inner(),
+        )))
     }
 }
 
