@@ -10,7 +10,52 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyIterator, PyList, PyString, PyTuple};
 use url::form_urlencoded;
 
-use rqx_core::query_params::QueryPairs;
+use rqx_core::query_params::{QueryPairs, ScalarValue};
+
+use crate::exceptions::PyRqxError;
+
+/// A param value: httpx's `primitive_value_to_str` rule, applied on the way out.
+pub struct PyScalarValue {
+    pub(crate) inner: ScalarValue,
+}
+
+impl<'py> FromPyObject<'_, 'py> for PyScalarValue {
+    type Error = PyRqxError;
+
+    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
+        // bool before int: Python's bool is an int subclass.
+        if let Ok(b) = obj.cast::<PyBool>() {
+            return Ok(Self {
+                inner: ScalarValue::Bool(b.is_true()),
+            });
+        }
+        if let Ok(s) = obj.cast::<PyString>() {
+            return Ok(Self {
+                inner: ScalarValue::String(s.to_cow()?.into_owned()),
+            });
+        }
+        if obj.is_instance_of::<PyInt>() {
+            return match obj.extract::<i64>() {
+                Ok(n) => Ok(Self {
+                    inner: ScalarValue::Int(n),
+                }),
+                Err(_) => Ok(Self {
+                    inner: ScalarValue::String(obj.str()?.to_cow()?.into_owned()),
+                }),
+            };
+        }
+        if let Ok(f) = obj.cast::<PyFloat>() {
+            return Ok(Self {
+                inner: ScalarValue::Float(f.value()),
+            });
+        }
+        Err(PyTypeError::new_err(format!(
+            "params values must be str, int, float, bool, or None, got {}",
+            obj.get_type().name()?
+        ))
+        .into())
+    }
+}
 
 #[pyclass(name = "QueryParams", module = "rqx", frozen)]
 pub struct PyQueryParams {

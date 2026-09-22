@@ -1,15 +1,63 @@
-use std::hash::Hash;
+use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
+use bytes::Bytes;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyString};
 
-use crate::exceptions::PyRqxError;
-use crate::query_params::PyQueryParams;
-
 use rqx_core::query_params::QueryPairs;
 use rqx_core::url::request_url::BaseUrl;
-use rqx_core::url::{client_url::RqxClientUrl, components::UrlComponents, reference::UrlReference};
+use rqx_core::url::{
+    client_url::RqxClientUrl, components::UrlComponentValue, reference::UrlReference,
+};
+
+use crate::exceptions::PyRqxError;
+use crate::query_params::{PyQueryParams, PyScalarValue};
+
+struct UrlKwargs {
+    inner: HashMap<String, Option<UrlComponentValue>>,
+}
+
+impl UrlKwargs {
+    fn extract(kwargs: Option<&Bound<'_, PyDict>>) -> Result<Self, PyRqxError> {
+        let mut inner = HashMap::new();
+        if let Some(kwargs) = kwargs {
+            for (key, value) in kwargs.iter() {
+                inner.insert(key.extract::<String>()?, Self::value(&value)?);
+            }
+        }
+        Ok(Self { inner })
+    }
+
+    fn value(value: &Bound<'_, PyAny>) -> Result<Option<UrlComponentValue>, PyRqxError> {
+        if value.is_none() {
+            return Ok(None);
+        }
+        if let Ok(text) = value.cast::<PyString>() {
+            return Ok(Some(UrlComponentValue::String(text.to_cow()?.into_owned())));
+        }
+        if let Ok(raw) = value.cast::<PyBytes>() {
+            return Ok(Some(UrlComponentValue::Bytes(Bytes::copy_from_slice(
+                raw.as_bytes(),
+            ))));
+        }
+        if let Ok(params) = value.cast::<PyQueryParams>() {
+            return Ok(Some(UrlComponentValue::QueryPairs(
+                params.get().pairs().clone(),
+            )));
+        }
+        if let Ok(n) = value.extract::<u16>() {
+            return Ok(Some(UrlComponentValue::Int(n)));
+        }
+        Err(PyTypeError::new_err(format!(
+            "URL components must be str, bytes, int, QueryParams or None, got {}",
+            value.get_type().name()?
+        ))
+        .into())
+    }
+}
 
 #[pyclass(name = "URL", module = "rqx", frozen, skip_from_py_object)]
 pub struct PyURL {
@@ -21,10 +69,6 @@ impl PyURL {
         Self { inner: url }
     }
 
-    fn with_params(&self, params: QueryPairs) -> PyResult<Self> {
-        Ok(Self::new(self.inner.with_params(&params)?))
-    }
-
     pub(crate) fn from_base_url(base_url: &BaseUrl) -> Self {
         Self::new(RqxClientUrl::new(UrlReference::from_url(
             base_url.get_inner(),
@@ -34,24 +78,15 @@ impl PyURL {
 
 #[pymethods]
 impl PyURL {
-    // #[new]
-    // #[pyo3(signature = (url=None, **kwargs))]
-    // fn py_new(
-    //     url: Option<&Bound<'_, PyAny>>,
-    //     kwargs: Option<&Bound<'_, PyDict>>,
-    // ) -> PyResult<Self> {
-    //     let base = url.map(Self::extract_reference).transpose()?;
-    //     match kwargs {
-    //         None => Ok(Self::new(match base {
-    //             Some(reference) => reference,
-    //             None => UrlReference::parse("")?,
-    //         })),
-    //         Some(kwargs) => Ok(Self::new(UrlReference::compose(
-    //             base.as_ref(),
-    //             UrlComponents::extract(kwargs)?,
-    //         )?)),
-    //     }
-    // }
+    #[new]
+    #[pyo3(signature = (url=None, **kwargs))]
+    fn py_new(url: Option<PyURL>, kwargs: Option<&Bound<'_, PyDict>>) -> Result<Self, PyRqxError> {
+        let base = match url {
+            Some(url) => url,
+            None => Self::new(RqxClientUrl::parse("")?),
+        };
+        base.copy_with(kwargs)
+    }
 
     #[getter]
     fn scheme(&self) -> &str {
@@ -85,7 +120,7 @@ impl PyURL {
 
     #[getter]
     fn query<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, self.inner.query())
+        PyBytes::new(py, self.inner.query().as_bytes())
     }
 
     #[getter]
@@ -95,72 +130,62 @@ impl PyURL {
 
     #[getter]
     fn raw_path<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, self.iner.raw_path())
+        PyBytes::new(py, self.inner.raw_path().as_bytes())
     }
 
     #[getter]
     fn fragment(&self) -> &str {
-        self.reference.fragment()
+        self.inner.fragment()
     }
 
     #[getter]
     fn is_absolute_url(&self) -> bool {
-        self.reference.is_absolute()
+        self.inner.is_absolute_url()
     }
 
     #[getter]
     fn is_relative_url(&self) -> bool {
-        !self.reference.is_absolute()
+        self.inner.is_relative_url()
     }
 
     #[pyo3(signature = (**kwargs))]
-    fn copy_with(&self, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
-        let components = match kwargs {
-            Some(kwargs) => UrlComponents::extract(kwargs)?,
-            None => UrlComponents::default(),
-        };
-        Ok(Self::new(UrlReference::compose(
-            Some(&self.reference),
-            components,
-        )?))
+    fn copy_with(&self, kwargs: Option<&Bound<'_, PyDict>>) -> Result<Self, PyRqxError> {
+        Ok(Self::new(
+            self.inner.copy_with(UrlKwargs::extract(kwargs)?.inner)?,
+        ))
     }
 
     #[pyo3(signature = (key, value=None))]
-    fn copy_set_param(&self, key: &str, value: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
-        self.inner.copy_set_param()
+    fn copy_set_param(&self, key: &str, value: Option<PyScalarValue>) -> Result<Self, PyRqxError> {
+        Ok(Self::new(
+            self.inner.copy_set_param(key, value.map(|v| v.inner))?,
+        ))
     }
 
     #[pyo3(signature = (key, value=None))]
-    fn copy_add_param(&self, key: &str, value: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
-        self.with_params(
-            self.reference
-                .params()
-                .add(key, QueryPairs::scalar_or_empty(value)?),
-        )
+    fn copy_add_param(&self, key: &str, value: Option<PyScalarValue>) -> Result<Self, PyRqxError> {
+        Ok(Self::new(
+            self.inner.copy_add_param(key, value.map(|v| v.inner))?,
+        ))
     }
 
-    fn copy_remove_param(&self, key: &str) -> PyResult<Self> {
-        self.with_params(self.reference.params().remove(key))
+    fn copy_remove_param(&self, key: &str) -> Result<Self, PyRqxError> {
+        Ok(Self::new(self.inner.copy_remove_param(key)?))
     }
 
     #[pyo3(signature = (params=None))]
-    fn copy_merge_params(&self, params: Option<QueryPairs>) -> PyResult<Self> {
-        match params {
-            Some(params) => self.with_params(self.reference.params().merge(&params)),
-            None => Ok(Self::new(self.reference.clone())),
-        }
+    fn copy_merge_params(&self, params: Option<QueryPairs>) -> Result<Self, PyRqxError> {
+        Ok(Self::new(self.inner.copy_merge_params(params)?))
     }
 
     /// A `str` joins as written: parsing it first would resolve its dot
     /// segments against nothing and lose them.
-    fn join(&self, url: &Bound<'_, PyAny>) -> PyResult<Self> {
-        match url.cast::<PyString>() {
-            Ok(text) => match text.to_str() {
-                Ok(t) => self.inner.join(&t),
-                Err(_) => todo!(),
-            },
+    fn join(&self, url: &Bound<'_, PyAny>) -> Result<Self, PyRqxError> {
+        let other = match url.cast::<PyString>() {
+            Ok(text) => text.to_cow()?.into_owned(),
             Err(_) => url.extract::<Self>()?.inner.to_string(),
-        }
+        };
+        Ok(Self::new(self.inner.join(&other)?))
     }
 
     fn __str__(&self) -> String {
@@ -179,9 +204,12 @@ impl PyURL {
     }
 
     fn __hash__(&self) -> u64 {
-        self.inner.hash()
+        let mut hasher = DefaultHasher::new();
+        self.inner.hash(&mut hasher);
+        hasher.finish()
     }
 }
+
 /// A `str` or an `rqx.URL`, either way one `PyURL`.
 impl<'py> FromPyObject<'_, 'py> for PyURL {
     type Error = PyRqxError;
