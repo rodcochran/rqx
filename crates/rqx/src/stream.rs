@@ -23,7 +23,7 @@ use super::exceptions::*;
 use super::headers::PyHeaders;
 use super::py_json::value_to_py;
 use super::runtime::RUNTIME;
-use super::url::PyURL;
+use super::url::py_url::PyURL;
 
 #[pyclass]
 struct PyByteIterator {

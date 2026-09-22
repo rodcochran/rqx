@@ -14,7 +14,7 @@ use crate::runtime::RUNTIME;
 use crate::stream_context::{PyAsyncStreamContext, PyStreamContext};
 use crate::timeout::PyTimeout;
 use crate::transport::{AsyncHTTPTransport, HTTPTransport};
-use crate::url::PyURL;
+use crate::url::py_url::PyURL;
 
 const DEFAULT_TIMEOUT: f64 = 15.0;
 const DEFAULT_FOLLOW_REDIRECTS: bool = false;

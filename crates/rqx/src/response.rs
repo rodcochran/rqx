@@ -10,7 +10,7 @@ use rqx_core::response::BufferedResponse;
 use super::exceptions::PyRqxError;
 use super::headers::PyHeaders;
 use super::py_json::value_to_py;
-use super::url::PyURL;
+use super::url::py_url::PyURL;
 
 #[pyclass]
 pub struct PyResponse {

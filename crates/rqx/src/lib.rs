@@ -36,7 +36,7 @@ use stream::{PyAsyncStreamResponse, PyStreamResponse};
 use stream_context::{PyAsyncStreamContext, PyStreamContext};
 use timeout::PyTimeout;
 use transport::{AsyncHTTPTransport, HTTPTransport};
-use url::PyURL;
+use url::py_url::PyURL;
 
 /// `atexit` hook: shut the tokio runtime down before the interpreter starts
 /// finalizing, so no tokio thread tries to attach to Python after that point
