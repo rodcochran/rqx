@@ -1,7 +1,7 @@
 use url::Url;
 
+use super::client_url::RqxClientUrl;
 use super::reference::UrlReference;
-use super::url::RqxClientUrl;
 use crate::error::RqxError;
 
 /// A `Client(base_url=)`, canonicalized.

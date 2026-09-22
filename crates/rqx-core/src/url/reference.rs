@@ -107,7 +107,7 @@ impl UrlReference {
     }
 
     fn invalid(input: &str, error: &dyn fmt::Display) -> RqxError {
-        RqxError::InvalidURL(format!("invalid URL {input:?}: {error}")).into()
+        RqxError::InvalidURL(format!("invalid URL {input:?}: {error}"))
     }
 
     /// httpx's rule: a scheme and a host, or it's a reference to somewhere else.

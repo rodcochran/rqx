@@ -12,9 +12,9 @@ use crate::request::{RequestBody, RequestSpec};
 use crate::response::{BufferedResponse, PendingResponse};
 use crate::retry::DEFAULT_RAISE_ON_REDIRECT;
 use crate::transport::Transport;
+use crate::url::client_url::RqxClientUrl;
 use crate::url::reference::UrlReference;
 use crate::url::request_url::BaseUrl;
-use crate::url::url::RqxClientUrl;
 
 const DEFAULT_TIMEOUT: f64 = 15.0;
 const DEFAULT_FOLLOW_REDIRECTS: bool = false;

@@ -102,7 +102,7 @@ impl RequestSpec {
         let request = builder
             .timeout(Duration::from_secs_f64(timeout))
             .build()
-            .map_err(|e| RqxError::from(e))?;
+            .map_err(RqxError::from)?;
         Ok(Self::from_request(request))
     }
 

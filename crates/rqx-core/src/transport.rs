@@ -194,7 +194,7 @@ impl Transport {
 
 impl Default for Transport {
     fn default() -> Self {
-        let client = RqxClientBuilder::new()
+        let client = RqxClientBuilder::default()
             .with_pool(None, None, None)
             .with_http_version(HttpVersionConfig::default())
             .with_phase_timeouts(None, None)
@@ -226,17 +226,6 @@ pub struct RqxClientBuilder {
 }
 
 impl RqxClientBuilder {
-    /// New builder seeded with rqx's baseline:
-    /// - `redirect::Policy::none()` (Client layer handles redirects)
-    /// - `cookie_store(true)`
-    pub fn new() -> Self {
-        Self {
-            inner: Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .cookie_store(true),
-        }
-    }
-
     /// Configures the connection pool. Owns every `pool_*` setter on reqwest.
     ///
     /// Resolves the precedence between `keepalive_expiry` and `timeout.pool`
@@ -321,5 +310,18 @@ impl RqxClientBuilder {
     /// input.
     pub fn build(self) -> Client {
         self.inner.build().expect("Failed to build HTTP client")
+    }
+}
+
+impl Default for RqxClientBuilder {
+    /// Seeded with rqx's baseline:
+    /// - `redirect::Policy::none()` (Client layer handles redirects)
+    /// - `cookie_store(true)`
+    fn default() -> Self {
+        Self {
+            inner: Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .cookie_store(true),
+        }
     }
 }

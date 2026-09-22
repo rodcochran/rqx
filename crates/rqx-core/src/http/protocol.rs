@@ -9,7 +9,9 @@ use crate::error::{RequestError, RqxError};
 ///
 /// The `(false, false)` combination is rejected at parse time so the builder
 /// method itself is infallible.
+#[derive(Default)]
 pub enum HttpVersionConfig {
+    #[default]
     Negotiate,
     Http1Only,
     Http2Only,
@@ -27,11 +29,5 @@ impl HttpVersionConfig {
                 "at least one of http1, http2 must be true".to_string(),
             ))?,
         }
-    }
-}
-
-impl Default for HttpVersionConfig {
-    fn default() -> Self {
-        HttpVersionConfig::Negotiate
     }
 }

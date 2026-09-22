@@ -105,7 +105,7 @@ impl Retry {
                 .unwrap_or(DEFAULT_RESPECT_RETRY_AFTER_HEADER),
             raise_on_status: raise_on_status.unwrap_or(DEFAULT_RAISE_ON_STATUS),
             raise_on_redirect: raise_on_redirect.unwrap_or(DEFAULT_RAISE_ON_REDIRECT),
-            total_timeout: total_timeout,
+            total_timeout,
         }
     }
 

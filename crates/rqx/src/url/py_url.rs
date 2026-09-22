@@ -10,7 +10,7 @@ use crate::query_params::PyQueryParams;
 
 use rqx_core::query_params::QueryPairs;
 use rqx_core::url::BaseUrl;
-use rqx_core::url::{components::UrlComponents, reference::UrlReference, url::RqxClientUrl};
+use rqx_core::url::{client_url::RqxClientUrl, components::UrlComponents, reference::UrlReference};
 
 #[pyclass(name = "URL", module = "rqx", frozen)]
 pub struct PyURL {

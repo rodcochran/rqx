@@ -11,8 +11,8 @@ use reqwest::Response;
 use super::error::*;
 use super::headers::Headers;
 
+use crate::url::client_url::RqxClientUrl;
 use crate::url::reference::UrlReference;
-use crate::url::url::RqxClientUrl;
 
 /// Headers received, body unread. Everything known before the body — status,
 /// headers, cookies, retry telemetry, elapsed — lives in `parts`. `read` buffers
@@ -96,8 +96,7 @@ impl ResponseParts {
         if let Some(label) = &self.encoding_override {
             return Encoding::for_label(label.as_bytes()).unwrap_or(encoding_rs::UTF_8);
         }
-        &self
-            .detect_encoding_from_headers()
+        self.detect_encoding_from_headers()
             .unwrap_or(encoding_rs::UTF_8)
     }
 
