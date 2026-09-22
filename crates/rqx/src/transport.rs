@@ -1,21 +1,17 @@
 use pyo3::Bound;
-use pyo3::prelude::{PyRef, PyResult, pyclass, pymethods};
+use pyo3::prelude::{PyRef, pyclass, pymethods};
 use pyo3::types::PyAny;
-use reqwest::tls::Identity;
-use reqwest::{Client, ClientBuilder, Request, Response};
+use reqwest::Client;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
-use crate::exceptions::*;
-use crate::http::protocol::HttpVersionConfig;
-use crate::http::tls::{VerifyConfig, parse_identity};
-use crate::request::RequestSpec;
-use crate::response::PendingResponse;
-use crate::retry::{FailureKind, PyRetry, RetryCounts};
+use crate::exceptions::PyRqxError;
+use crate::http::tls::{parse_identity, parse_verify_config_from_py};
+use crate::retry::PyRetry;
 use crate::timeout::PyTimeout;
 
+use rqx_core::http::protocol::HttpVersionConfig;
 use rqx_core::http::proxy::ProxyParser;
 use rqx_core::transport::{RqxClientBuilder, Transport};
 
@@ -31,21 +27,21 @@ pub fn build_http_client(
     cert: Option<&Bound<'_, PyAny>>,
     proxy: Option<HashMap<String, String>>,
     timeout: Option<&Bound<'_, PyAny>>,
-) -> PyResult<Client> {
+) -> Result<Client, PyRqxError> {
     let (connect_timeout, read_timeout, pool_timeout) = match timeout {
         Some(t) => {
             let parsed = PyTimeout::extract_any(t)?;
-            (parsed.connect, parsed.read, parsed.pool)
+            (parsed.inner.connect, parsed.inner.read, parsed.inner.pool)
         }
         None => (None, None, None),
     };
 
-    let verify_cfg = verify.map(VerifyConfig::from_py_any).transpose()?;
+    let verify_cfg = verify.map(parse_verify_config_from_py).transpose()?;
     let identity = cert.map(parse_identity).transpose()?;
     let http_version = HttpVersionConfig::from_args(http1, http2)?;
     let proxies = ProxyParser::from_hash_map(proxy)?;
 
-    let client = RqxClientBuilder::new()
+    let client = RqxClientBuilder::default()
         .with_pool(max_keepalive_connections, keepalive_expiry, pool_timeout)
         .with_http_version(http_version)
         .with_phase_timeouts(connect_timeout, read_timeout)
@@ -92,8 +88,8 @@ impl HTTPTransport {
         cert: Option<&Bound<'_, PyAny>>,
         proxy: Option<HashMap<String, String>>,
         timeout: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<Self> {
-        let retries = retries.map(|r| r.clone());
+    ) -> Result<Self, PyRqxError> {
+        let retries = retries.map(|r| r.inner.clone());
         let http_client = build_http_client(
             max_keepalive_connections,
             keepalive_expiry,
@@ -112,7 +108,7 @@ impl HTTPTransport {
 
     #[getter]
     fn retries(&self) -> Option<PyRetry> {
-        self.inner.retries.clone()
+        self.inner.retries.clone().map(PyRetry::new)
     }
 }
 
@@ -121,7 +117,7 @@ impl HTTPTransport {
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
         timeout: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> Result<Self, PyRqxError> {
         if verify.is_none() && cert.is_none() && timeout.is_none() {
             return Ok(HTTPTransport::default());
         }
@@ -172,8 +168,8 @@ impl AsyncHTTPTransport {
         cert: Option<&Bound<'_, PyAny>>,
         proxy: Option<HashMap<String, String>>,
         timeout: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<Self> {
-        let retries = retries.map(|r| r.clone());
+    ) -> Result<Self, PyRqxError> {
+        let retries = retries.map(|r| r.inner.clone());
         let http_client = build_http_client(
             max_keepalive_connections,
             keepalive_expiry,
@@ -192,7 +188,7 @@ impl AsyncHTTPTransport {
 
     #[getter]
     fn retries(&self) -> Option<PyRetry> {
-        self.inner.retries.clone()
+        self.inner.retries.clone().map(PyRetry::new)
     }
 }
 
@@ -201,7 +197,7 @@ impl AsyncHTTPTransport {
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
         timeout: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> Result<Self, PyRqxError> {
         if verify.is_none() && cert.is_none() && timeout.is_none() {
             return Ok(AsyncHTTPTransport::default());
         }

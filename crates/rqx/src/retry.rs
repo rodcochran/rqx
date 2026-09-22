@@ -9,7 +9,13 @@ use rqx_core::retry::Retry;
 #[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct PyRetry {
-    inner: Retry,
+    pub(crate) inner: Retry,
+}
+
+impl PyRetry {
+    pub fn new(inner: Retry) -> Self {
+        Self { inner }
+    }
 }
 
 #[pymethods]
@@ -45,25 +51,23 @@ impl PyRetry {
         raise_on_redirect: Option<bool>,
         total_timeout: Option<f64>,
     ) -> PyResult<Self> {
-        Ok(
-            Self {
-                inner: Retry::new(
-                    total,
-                    connect,
-                    read,
-                    status,
-                    backoff_factor,
-                    backoff_max,
-                    backoff_jitter,
-                    status_forcelist,
-                    allowed_methods,
-                    respect_retry_after_header,
-                    raise_on_status,
-                    raise_on_redirect,
-                    total_timeout,
-                ),
-            },
-        )
+        Ok(Self {
+            inner: Retry::new(
+                total,
+                connect,
+                read,
+                status,
+                backoff_factor,
+                backoff_max,
+                backoff_jitter,
+                status_forcelist,
+                allowed_methods,
+                respect_retry_after_header,
+                raise_on_status,
+                raise_on_redirect,
+                total_timeout,
+            ),
+        })
     }
 
     // maximum total retry attempts (across all failure modes)
