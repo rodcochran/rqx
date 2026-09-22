@@ -21,7 +21,7 @@ impl RqxClientUrl {
         Ok(Self::new(UrlReference::parse(input)?))
     }
 
-    fn with_params(&self, params: &QueryPairs) -> Result<Self, RqxError> {
+    pub fn with_params(&self, params: &QueryPairs) -> Result<Self, RqxError> {
         Ok(Self::new(self.reference.with_params(params)?))
     }
 

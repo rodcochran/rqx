@@ -1,18 +1,17 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyString};
-use url::Url;
 
+use crate::exceptions::PyRqxError;
 use crate::query_params::PyQueryParams;
 
 use rqx_core::query_params::QueryPairs;
-use rqx_core::url::BaseUrl;
+use rqx_core::url::request_url::BaseUrl;
 use rqx_core::url::{client_url::RqxClientUrl, components::UrlComponents, reference::UrlReference};
 
-#[pyclass(name = "URL", module = "rqx", frozen)]
+#[pyclass(name = "URL", module = "rqx", frozen, skip_from_py_object)]
 pub struct PyURL {
     inner: RqxClientUrl,
 }
@@ -22,21 +21,8 @@ impl PyURL {
         Self { inner: url }
     }
 
-    pub fn extract_reference(obj: &Bound<'_, PyAny>) -> PyResult<UrlReference> {
-        if let Ok(url) = obj.cast::<Self>() {
-            return Ok(url.get().reference.clone());
-        }
-        match obj.cast::<PyString>() {
-            Ok(s) => UrlReference::parse(&s.to_cow()?).map_err(op),
-            Err(_) => Err(PyTypeError::new_err(format!(
-                "Invalid type for url. Expected str or rqx.URL, got {}",
-                obj.get_type().name()?
-            ))),
-        }
-    }
-
     fn with_params(&self, params: QueryPairs) -> PyResult<Self> {
-        Ok(Self::new(self.inner.with_params(params)?))
+        Ok(Self::new(self.inner.with_params(&params)?))
     }
 
     fn from_base_url(base_url: BaseUrl) -> Self {
@@ -173,7 +159,7 @@ impl PyURL {
                 Ok(t) => self.inner.join(&t),
                 Err(_) => todo!(),
             },
-            Err(_) => Self::extract_reference(url)?.to_string(),
+            Err(_) => url.extract::<Self>()?.inner.to_string(),
         }
     }
 
@@ -186,17 +172,31 @@ impl PyURL {
     }
 
     fn __eq__(&self, other: &Bound<'_, PyAny>) -> bool {
-        match other.cast::<PyString>() {
-            Ok(url) => match url.to_str() {
-                Ok(u) => self.inner.equals(u),
-                // prob need a proper error raised instead of just going false.
-                Err(_) => false,
-            },
+        match other.extract::<Self>() {
+            Ok(other) => self.inner == other.inner,
             Err(_) => false,
         }
     }
 
     fn __hash__(&self) -> u64 {
         self.inner.hash()
+    }
+}
+/// A `str` or an `rqx.URL`, either way one `PyURL`.
+impl<'py> FromPyObject<'_, 'py> for PyURL {
+    type Error = PyRqxError;
+
+    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
+        if let Ok(url) = obj.cast::<Self>() {
+            return Ok(Self::new(url.get().inner.clone()));
+        }
+        match obj.cast::<PyString>() {
+            Ok(s) => Ok(Self::new(RqxClientUrl::parse(&s.to_cow()?)?)),
+            Err(_) => Err(PyTypeError::new_err(format!(
+                "Invalid type for url. Expected str or rqx.URL, got {}",
+                obj.get_type().name()?
+            ))
+            .into()),
+        }
     }
 }
