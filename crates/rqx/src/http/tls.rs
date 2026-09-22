@@ -1,28 +1,24 @@
 use pyo3::Bound;
-use pyo3::prelude::PyResult;
 use pyo3::types::{PyAny, PyAnyMethods, PyBool, PyBytes, PyString, PyTuple, PyTypeMethods};
 use reqwest::Identity;
-use reqwest::tls::Certificate;
-
-use crate::exceptions::*;
 
 use rqx_core::http::tls::{IdentityParser, VerifyConfig};
 
-pub fn parse_verify_config_from_py(verify: &Bound<'_, PyAny>) -> PyResult<VerifyConfig> {
-    if verify.is_instance_of::<PyBool>() {
-        let enabled = verify.extract::<bool>().unwrap();
-        VerifyConfig::from_bool(enabled)
+use crate::exceptions::{PyRqxError, RqxError};
 
+pub fn parse_verify_config_from_py(verify: &Bound<'_, PyAny>) -> Result<VerifyConfig, PyRqxError> {
+    if verify.is_instance_of::<PyBool>() {
+        let enabled = verify.extract::<bool>()?;
+        Ok(VerifyConfig::from_bool(enabled))
     } else if verify.is_instance_of::<PyString>() {
-        let path: String = verify
-            .extract::<String>()
-            .map_err(|e| RqxError::new_err(format!("failed to parse CA cert path: {e}")))?;
-        VerifyConfig::from_path_str(path)
+        let path: String = verify.extract::<String>()?;
+        Ok(VerifyConfig::from_path_str(path)?)
     } else {
         Err(RqxError::new_err(format!(
             "verify must be bool or str (CA cert path), got {}",
             verify.get_type().name()?,
-        )))
+        ))
+        .into())
     }
 }
 
@@ -32,31 +28,21 @@ pub fn parse_verify_config_from_py(verify: &Bound<'_, PyAny>) -> PyResult<Verify
 ///   - `str` — path to a PEM file containing cert + key
 ///   - `bytes` — PEM bytes
 ///   - `(cert_path, key_path)` tuple — separate cert and key files (concatenated)
-///
-/// Each branch normalizes its input to a `Vec<u8>` of PEM bytes; the single
-/// call to `Identity::from_pem` at the end handles construction and error
-/// reporting uniformly.
-pub fn parse_identity(cert: &Bound<'_, PyAny>) -> PyResult<Identity> {
+pub fn parse_identity(cert: &Bound<'_, PyAny>) -> Result<Identity, PyRqxError> {
     if cert.is_instance_of::<PyString>() {
-        let path: String = cert
-            .extract()
-            .map_err(|e| RqxError::new_err(format!("failed to parse client cert path: {e}")))?;
-        IdentityParser::from_path_str(path)?
+        let path: String = cert.extract()?;
+        Ok(IdentityParser::from_path_str(path)?)
     } else if cert.is_instance_of::<PyBytes>() {
-        let bytes= cert.extract()
-            .map_err(|e| RqxError::new_err(format!("failed to read cert bytes: {e}")))?
-        IdentityParser::from_pem_bytes(path)?
-
+        let bytes: Vec<u8> = cert.extract()?;
+        Ok(IdentityParser::from_pem_bytes(&bytes)?)
     } else if cert.is_instance_of::<PyTuple>() {
-        let (cert_path, key_path): (String, String) = cert
-            .extract()
-            .map_err(|e| RqxError::new_err(format!("failed to parse cert, key tuple: {e}")))?;
-        IdentityParser::from_tuple((cert_path, key_path))?
-
+        let (cert_path, key_path): (String, String) = cert.extract()?;
+        Ok(IdentityParser::from_tuple((cert_path, key_path))?)
     } else {
-        return Err(RqxError::new_err(format!(
+        Err(RqxError::new_err(format!(
             "cert must be str (path), bytes (PEM), or (cert_path, key_path) tuple, got {}",
             cert.get_type().name()?,
-        )));
+        ))
+        .into())
     }
 }
