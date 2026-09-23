@@ -1,0 +1,26 @@
+[package]
+name = "rqx"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "_rqx"
+crate-type = ["cdylib"]
+
+[features]
+# pyo3's `extension-module` tells it NOT to link libpython (correct for the
+# built wheel, where the host interpreter provides the symbols). Enabled for
+# maturin builds via [tool.maturin] `features`, but left OFF by default so
+# `cargo test`/`cargo build` link libpython normally and can run the pure-Rust
+# unit tests (notably on Linux CI, which has no `-undefined dynamic_lookup`).
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+bytes.workspace = true
+pyo3.workspace = true
+pyo3-async-runtimes.workspace = true
+reqwest.workspace = true
+rqx-core.workspace = true
+serde_json.workspace = true
+tokio.workspace = true

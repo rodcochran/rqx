@@ -8,9 +8,8 @@ xdist for reasons unrelated to the code under test.
 import os
 
 import pytest
-from hypothesis import settings
-
 import rqx
+from hypothesis import settings
 
 settings.register_profile("default", max_examples=100, deadline=None)
 settings.register_profile("nightly", max_examples=1000, deadline=None)
