@@ -10,6 +10,15 @@ version = "0.3.0"
 edition = "2024"
 publish = false
 
+# Release wheels only (the tag build in CI and `just build-release`). Fat LTO gives the
+# binding back the cross-crate inlining the rqx-core split took away: +4% throughput and
+# a 17% smaller wheel against v0.3.0, measured 2026-09-22. PR pushes keep the plain
+# `release` profile so the wheel matrix doesn't pay the LTO build time on every push.
+[profile.release-lto]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+
 [workspace.dependencies]
 bytes = "1.11.1"
 encoding_rs = "0.8"

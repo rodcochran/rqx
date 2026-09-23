@@ -17,9 +17,9 @@ install-python-deps:
 build:
     maturin develop
 
-# Build the extension in release mode (for benchmarks and TLS tests)
+# Build the extension the way a release wheel is built (for benchmarks and TLS tests)
 build-release:
-    maturin develop --release
+    maturin develop --profile release-lto
 
 # Run the test suite in parallel
 test: build
