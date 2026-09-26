@@ -33,7 +33,6 @@ impl PyRetry {
         allowed_methods=None,
         respect_retry_after_header=None,
         raise_on_status=None,
-        raise_on_redirect=None,
         total_timeout=None,
     ))]
     fn __new__(
@@ -48,7 +47,6 @@ impl PyRetry {
         allowed_methods: Option<HashSet<String>>,
         respect_retry_after_header: Option<bool>,
         raise_on_status: Option<bool>,
-        raise_on_redirect: Option<bool>,
         total_timeout: Option<f64>,
     ) -> PyResult<Self> {
         Ok(Self {
@@ -64,7 +62,6 @@ impl PyRetry {
                 allowed_methods,
                 respect_retry_after_header,
                 raise_on_status,
-                raise_on_redirect,
                 total_timeout,
             ),
         })
@@ -134,12 +131,6 @@ impl PyRetry {
     #[getter]
     pub fn raise_on_status(&self) -> bool {
         self.inner.raise_on_status
-    }
-
-    // raise TooManyRedirects when redirect loop detected
-    #[getter]
-    pub fn raise_on_redirect(&self) -> bool {
-        self.inner.raise_on_redirect
     }
 
     // raise MaxRetriesExceeded when total time in retry exceeds max

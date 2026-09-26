@@ -1,8 +1,12 @@
-use pyo3::Bound;
-use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python, pyclass, pymethods};
 use std::collections::HashMap;
 
-use rqx_core::client::Client;
+use pyo3::Bound;
+use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python, pyclass, pymethods};
+
+use rqx_core::auth::Auth;
+use rqx_core::client::{Client, ClientConfig};
+use rqx_core::redirect::RedirectPolicy;
+use rqx_core::timeout::Timeout;
 use rqx_core::url::request_url::BaseUrl;
 
 use crate::exceptions::*;
@@ -15,10 +19,6 @@ use crate::stream_context::{PyAsyncStreamContext, PyStreamContext};
 use crate::timeout::PyTimeout;
 use crate::transport::{AsyncHTTPTransport, HTTPTransport};
 use crate::url::py_url::PyURL;
-
-const DEFAULT_TIMEOUT: f64 = 15.0;
-const DEFAULT_FOLLOW_REDIRECTS: bool = false;
-const DEFAULT_MAX_REDIRECTS: u32 = 20;
 
 // ────────────────────────────────────────────────────────────────────────
 // PyClient — synchronous Python-facing client
@@ -44,10 +44,19 @@ impl PyClient {
         auth_bearer: Option<String>,
         transport: Option<PyRef<'_, HTTPTransport>>,
     ) -> Result<Self, PyRqxError> {
-        let timeout_secs = PyTimeout::resolve_request_timeout(timeout, DEFAULT_TIMEOUT)?;
-        let follow = follow_redirects.unwrap_or(DEFAULT_FOLLOW_REDIRECTS);
-        let max_r = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
         let parsed_base_url = base_url.map(|url| BaseUrl::new(&url.inner)).transpose()?;
+        let redirect_policy = RedirectPolicy::with_defaults(follow_redirects, max_redirects, None);
+        let timeout_config = match timeout {
+            Some(t) => PyTimeout::extract_any(t)?.inner,
+            None => Timeout::default(),
+        };
+        let auth_config = Auth::new(None, auth_bearer)?;
+        let config = ClientConfig::new(
+            timeout_config,
+            redirect_policy,
+            parsed_base_url,
+            auth_config,
+        );
 
         if transport.is_some() && (verify.is_some() || cert.is_some() || timeout.is_some()) {
             return Err(RqxError::new_err(
@@ -62,14 +71,7 @@ impl PyClient {
         };
 
         Ok(Self {
-            inner: Client::new(
-                transport_inner,
-                timeout_secs,
-                follow,
-                max_r,
-                parsed_base_url,
-                auth_bearer,
-            ),
+            inner: Client::new(transport_inner, config),
         })
     }
 
@@ -101,6 +103,7 @@ impl PyClient {
     ) -> Result<PyResponse, PyRqxError> {
         let json_value = json.map(JsonBody::into_value);
         let timeout_f64 = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
+        let auth_config = Auth::new(auth, auth_bearer)?;
         block_on_inner(
             py,
             self.inner.request(
@@ -111,8 +114,7 @@ impl PyClient {
                 json_value,
                 params.map(|p| p.inner),
                 headers.map(|h| h.inner),
-                auth,
-                auth_bearer,
+                Some(auth_config),
                 follow_redirects,
                 timeout_f64,
             ),
@@ -132,20 +134,20 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> Result<PyResponse, PyRqxError> {
-        let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        block_on_inner(
+        self.request(
             py,
-            self.inner.get(
-                url.inner,
-                params.map(|p| p.inner),
-                headers.map(|h| h.inner),
-                auth,
-                auth_bearer,
-                follow_redirects,
-                t,
-            ),
+            &"GET".to_string(),
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            follow_redirects,
+            timeout,
         )
-        .map(PyResponse::from)
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -160,20 +162,20 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> Result<PyResponse, PyRqxError> {
-        let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        block_on_inner(
+        self.request(
             py,
-            self.inner.options(
-                url.inner,
-                params.map(|p| p.inner),
-                headers.map(|h| h.inner),
-                auth,
-                auth_bearer,
-                follow_redirects,
-                t,
-            ),
+            &"OPTIONS".to_string(),
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            follow_redirects,
+            timeout,
         )
-        .map(PyResponse::from)
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -188,20 +190,20 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> Result<PyResponse, PyRqxError> {
-        let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        block_on_inner(
+        self.request(
             py,
-            self.inner.head(
-                url.inner,
-                params.map(|p| p.inner),
-                headers.map(|h| h.inner),
-                auth,
-                auth_bearer,
-                follow_redirects,
-                t,
-            ),
+            &"HEAD".to_string(),
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            follow_redirects,
+            timeout,
         )
-        .map(PyResponse::from)
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -216,20 +218,20 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> Result<PyResponse, PyRqxError> {
-        let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        block_on_inner(
+        self.request(
             py,
-            self.inner.delete(
-                url.inner,
-                params.map(|p| p.inner),
-                headers.map(|h| h.inner),
-                auth,
-                auth_bearer,
-                follow_redirects,
-                t,
-            ),
+            &"DELETE".to_string(),
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            follow_redirects,
+            timeout,
         )
-        .map(PyResponse::from)
     }
 
     #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -247,24 +249,20 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> Result<PyResponse, PyRqxError> {
-        let json_value = json.map(JsonBody::into_value);
-        let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        block_on_inner(
+        self.request(
             py,
-            self.inner.post(
-                url.inner,
-                content,
-                data,
-                json_value,
-                params.map(|p| p.inner),
-                headers.map(|h| h.inner),
-                auth,
-                auth_bearer,
-                follow_redirects,
-                t,
-            ),
+            &"POST".to_string(),
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            follow_redirects,
+            timeout,
         )
-        .map(PyResponse::from)
     }
 
     #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -282,24 +280,20 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> Result<PyResponse, PyRqxError> {
-        let json_value = json.map(JsonBody::into_value);
-        let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        block_on_inner(
+        self.request(
             py,
-            self.inner.put(
-                url.inner,
-                content,
-                data,
-                json_value,
-                params.map(|p| p.inner),
-                headers.map(|h| h.inner),
-                auth,
-                auth_bearer,
-                follow_redirects,
-                t,
-            ),
+            &"PUT".to_string(),
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            follow_redirects,
+            timeout,
         )
-        .map(PyResponse::from)
     }
 
     #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -317,24 +311,20 @@ impl PyClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> Result<PyResponse, PyRqxError> {
-        let json_value = json.map(JsonBody::into_value);
-        let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        block_on_inner(
+        self.request(
             py,
-            self.inner.patch(
-                url.inner,
-                content,
-                data,
-                json_value,
-                params.map(|p| p.inner),
-                headers.map(|h| h.inner),
-                auth,
-                auth_bearer,
-                follow_redirects,
-                t,
-            ),
+            &"PATCH".to_string(),
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            follow_redirects,
+            timeout,
         )
-        .map(PyResponse::from)
     }
 
     #[pyo3(signature = (method, url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -354,6 +344,7 @@ impl PyClient {
     ) -> Result<PyStreamContext, PyRqxError> {
         let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
+        let auth_config = Auth::new(auth, auth_bearer)?;
         let request = self.inner.build(
             method,
             url.inner,
@@ -362,8 +353,7 @@ impl PyClient {
             json_value,
             params.map(|p| p.inner),
             headers.map(|h| h.inner),
-            auth,
-            auth_bearer,
+            Some(auth_config),
             t,
         )?;
         Ok(PyStreamContext::new(
@@ -411,10 +401,19 @@ impl PyAsyncClient {
         auth_bearer: Option<String>,
         transport: Option<PyRef<'_, AsyncHTTPTransport>>,
     ) -> Result<Self, PyRqxError> {
-        let timeout_secs = PyTimeout::resolve_request_timeout(timeout, DEFAULT_TIMEOUT)?;
-        let follow = follow_redirects.unwrap_or(DEFAULT_FOLLOW_REDIRECTS);
-        let max_r = max_redirects.unwrap_or(DEFAULT_MAX_REDIRECTS);
         let parsed_base_url = base_url.map(|url| BaseUrl::new(&url.inner)).transpose()?;
+        let redirect_policy = RedirectPolicy::with_defaults(follow_redirects, max_redirects, None);
+        let timeout_config = match timeout {
+            Some(t) => PyTimeout::extract_any(t)?.inner,
+            None => Timeout::default(),
+        };
+        let auth_config = Auth::new(None, auth_bearer)?;
+        let config = ClientConfig::new(
+            timeout_config,
+            redirect_policy,
+            parsed_base_url,
+            auth_config,
+        );
 
         if transport.is_some() && (verify.is_some() || cert.is_some() || timeout.is_some()) {
             return Err(RqxError::new_err(
@@ -425,18 +424,11 @@ impl PyAsyncClient {
 
         let transport_inner = match transport {
             Some(t) => t.inner.clone(),
-            None => AsyncHTTPTransport::new(verify, cert, timeout)?.inner,
+            None => HTTPTransport::new(verify, cert, timeout)?.inner,
         };
 
         Ok(Self {
-            inner: Client::new(
-                transport_inner,
-                timeout_secs,
-                follow,
-                max_r,
-                parsed_base_url,
-                auth_bearer,
-            ),
+            inner: Client::new(transport_inner, config),
         })
     }
 
@@ -471,6 +463,9 @@ impl PyAsyncClient {
         let method = method.to_string();
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
+
+        let auth_config = Auth::new(auth, auth_bearer).map_err(|e| PyRqxError::Core(e))?;
+
         RUNTIME.future_into_py(py, async move {
             inner
                 .request(
@@ -481,8 +476,7 @@ impl PyAsyncClient {
                     json_value,
                     params.map(|p| p.inner),
                     headers.map(|h| h.inner),
-                    auth,
-                    auth_bearer,
+                    Some(auth_config),
                     follow_redirects,
                     t,
                 )
@@ -503,22 +497,20 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
-        let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let inner = self.inner.clone();
-        RUNTIME.future_into_py(py, async move {
-            inner
-                .get(
-                    url.inner,
-                    params.map(|p| p.inner),
-                    headers.map(|h| h.inner),
-                    auth,
-                    auth_bearer,
-                    follow_redirects,
-                    t,
-                )
-                .await
-                .map(PyResponse::from)
-        })
+        self.request(
+            py,
+            &"GET".to_string(),
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -533,22 +525,20 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
-        let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let inner = self.inner.clone();
-        RUNTIME.future_into_py(py, async move {
-            inner
-                .options(
-                    url.inner,
-                    params.map(|p| p.inner),
-                    headers.map(|h| h.inner),
-                    auth,
-                    auth_bearer,
-                    follow_redirects,
-                    t,
-                )
-                .await
-                .map(PyResponse::from)
-        })
+        self.request(
+            py,
+            &"OPTIONS".to_string(),
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -563,22 +553,20 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
-        let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let inner = self.inner.clone();
-        RUNTIME.future_into_py(py, async move {
-            inner
-                .head(
-                    url.inner,
-                    params.map(|p| p.inner),
-                    headers.map(|h| h.inner),
-                    auth,
-                    auth_bearer,
-                    follow_redirects,
-                    t,
-                )
-                .await
-                .map(PyResponse::from)
-        })
+        self.request(
+            py,
+            &"HEAD".to_string(),
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -593,22 +581,20 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
-        let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let inner = self.inner.clone();
-        RUNTIME.future_into_py(py, async move {
-            inner
-                .delete(
-                    url.inner,
-                    params.map(|p| p.inner),
-                    headers.map(|h| h.inner),
-                    auth,
-                    auth_bearer,
-                    follow_redirects,
-                    t,
-                )
-                .await
-                .map(PyResponse::from)
-        })
+        self.request(
+            py,
+            &"DELETE".to_string(),
+            url,
+            None,
+            None,
+            None,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -626,27 +612,20 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
-        let json_value = json.map(JsonBody::into_value);
-        let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let content = content.map(<[u8]>::to_vec);
-        let inner = self.inner.clone();
-        RUNTIME.future_into_py(py, async move {
-            inner
-                .post(
-                    url.inner,
-                    content.as_deref(),
-                    data,
-                    json_value,
-                    params.map(|p| p.inner),
-                    headers.map(|h| h.inner),
-                    auth,
-                    auth_bearer,
-                    follow_redirects,
-                    t,
-                )
-                .await
-                .map(PyResponse::from)
-        })
+        self.request(
+            py,
+            &"POST".to_string(),
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -664,27 +643,20 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
-        let json_value = json.map(JsonBody::into_value);
-        let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let content = content.map(<[u8]>::to_vec);
-        let inner = self.inner.clone();
-        RUNTIME.future_into_py(py, async move {
-            inner
-                .put(
-                    url.inner,
-                    content.as_deref(),
-                    data,
-                    json_value,
-                    params.map(|p| p.inner),
-                    headers.map(|h| h.inner),
-                    auth,
-                    auth_bearer,
-                    follow_redirects,
-                    t,
-                )
-                .await
-                .map(PyResponse::from)
-        })
+        self.request(
+            py,
+            &"PUT".to_string(),
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -702,27 +674,20 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
         timeout: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'a, PyAny>> {
-        let json_value = json.map(JsonBody::into_value);
-        let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let content = content.map(<[u8]>::to_vec);
-        let inner = self.inner.clone();
-        RUNTIME.future_into_py(py, async move {
-            inner
-                .patch(
-                    url.inner,
-                    content.as_deref(),
-                    data,
-                    json_value,
-                    params.map(|p| p.inner),
-                    headers.map(|h| h.inner),
-                    auth,
-                    auth_bearer,
-                    follow_redirects,
-                    t,
-                )
-                .await
-                .map(PyResponse::from)
-        })
+        self.request(
+            py,
+            &"PATCH".to_string(),
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            auth_bearer,
+            follow_redirects,
+            timeout,
+        )
     }
 
     #[pyo3(signature = (method, url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -742,6 +707,9 @@ impl PyAsyncClient {
     ) -> Result<PyAsyncStreamContext, PyRqxError> {
         let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
+
+        let auth_config = Auth::new(auth, auth_bearer).map_err(|e| PyRqxError::Core(e))?;
+
         let request = self.inner.build(
             method,
             url.inner,
@@ -750,8 +718,7 @@ impl PyAsyncClient {
             json_value,
             params.map(|p| p.inner),
             headers.map(|h| h.inner),
-            auth,
-            auth_bearer,
+            Some(auth_config),
             t,
         )?;
         Ok(PyAsyncStreamContext::new(

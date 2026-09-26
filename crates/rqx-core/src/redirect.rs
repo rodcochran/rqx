@@ -8,6 +8,21 @@ pub struct RedirectPolicy {
     pub raise_on_exceeded: bool,
 }
 
+impl RedirectPolicy {
+    pub fn with_defaults(
+        follow: Option<bool>,
+        max_redirects: Option<u32>,
+        raise_on_exceeded: Option<bool>,
+    ) -> Self {
+        let defaults = RedirectPolicy::default();
+        Self {
+            follow: follow.unwrap_or(defaults.follow),
+            max_redirects: max_redirects.unwrap_or(defaults.max_redirects),
+            raise_on_exceeded: raise_on_exceeded.unwrap_or(defaults.raise_on_exceeded),
+        }
+    }
+}
+
 impl Default for RedirectPolicy {
     fn default() -> Self {
         RedirectPolicy {
