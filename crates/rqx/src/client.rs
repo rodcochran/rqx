@@ -103,7 +103,10 @@ impl PyClient {
     ) -> Result<PyResponse, PyRqxError> {
         let json_value = json.map(JsonBody::into_value);
         let timeout_f64 = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let auth_config = Auth::new(auth, auth_bearer)?;
+        let auth_config = match (&auth, &auth_bearer) {
+            (None, None) => None,
+            _ => Some(Auth::new(auth, auth_bearer)?),
+        };
         block_on_inner(
             py,
             self.inner.request(
@@ -114,7 +117,7 @@ impl PyClient {
                 json_value,
                 params.map(|p| p.inner),
                 headers.map(|h| h.inner),
-                Some(auth_config),
+                auth_config,
                 follow_redirects,
                 timeout_f64,
             ),
@@ -344,7 +347,10 @@ impl PyClient {
     ) -> Result<PyStreamContext, PyRqxError> {
         let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
-        let auth_config = Auth::new(auth, auth_bearer)?;
+        let auth_config = match (&auth, &auth_bearer) {
+            (None, None) => None,
+            _ => Some(Auth::new(auth, auth_bearer)?),
+        };
         let request = self.inner.build(
             method,
             url.inner,
@@ -353,7 +359,7 @@ impl PyClient {
             json_value,
             params.map(|p| p.inner),
             headers.map(|h| h.inner),
-            Some(auth_config),
+            auth_config,
             t,
         )?;
         Ok(PyStreamContext::new(
@@ -464,8 +470,10 @@ impl PyAsyncClient {
         let content = content.map(<[u8]>::to_vec);
         let inner = self.inner.clone();
 
-        let auth_config = Auth::new(auth, auth_bearer).map_err(|e| PyRqxError::Core(e))?;
-
+        let auth_config = match (&auth, &auth_bearer) {
+            (None, None) => None,
+            _ => Some(Auth::new(auth, auth_bearer).map_err(|e| PyRqxError::Core(e))?),
+        };
         RUNTIME.future_into_py(py, async move {
             inner
                 .request(
@@ -476,7 +484,7 @@ impl PyAsyncClient {
                     json_value,
                     params.map(|p| p.inner),
                     headers.map(|h| h.inner),
-                    Some(auth_config),
+                    auth_config,
                     follow_redirects,
                     t,
                 )
@@ -708,7 +716,10 @@ impl PyAsyncClient {
         let json_value = json.map(JsonBody::into_value);
         let t = PyTimeout::resolve_request_timeout(timeout, self.inner.timeout_secs())?;
 
-        let auth_config = Auth::new(auth, auth_bearer).map_err(|e| PyRqxError::Core(e))?;
+        let auth_config = match (&auth, &auth_bearer) {
+            (None, None) => None,
+            _ => Some(Auth::new(auth, auth_bearer).map_err(|e| PyRqxError::Core(e))?),
+        };
 
         let request = self.inner.build(
             method,
@@ -718,7 +729,7 @@ impl PyAsyncClient {
             json_value,
             params.map(|p| p.inner),
             headers.map(|h| h.inner),
-            Some(auth_config),
+            auth_config,
             t,
         )?;
         Ok(PyAsyncStreamContext::new(

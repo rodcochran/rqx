@@ -12,7 +12,6 @@ const DEFAULT_ALLOWED_METHODS: &[&str] = &[
 ];
 const DEFAULT_RESPECT_RETRY_AFTER_HEADER: bool = true;
 const DEFAULT_RAISE_ON_STATUS: bool = true;
-// pub(crate) const DEFAULT_RAISE_ON_REDIRECT: bool = true;
 // const DEFAULT_TOTAL_TIMEOUT: Option<f64> = None;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -104,7 +103,6 @@ impl Retry {
             respect_retry_after_header: respect_retry_after_header
                 .unwrap_or(DEFAULT_RESPECT_RETRY_AFTER_HEADER),
             raise_on_status: raise_on_status.unwrap_or(DEFAULT_RAISE_ON_STATUS),
-            // raise_on_redirect: raise_on_redirect.unwrap_or(DEFAULT_RAISE_ON_REDIRECT),
             total_timeout,
         }
     }

@@ -1,5 +1,6 @@
 const DEFAULT_MAX_REDIRECTS: u32 = 20;
 const DEFAULT_FOLLOW_REDIRECTS: bool = false;
+const DEFAULT_RAISE_ON_REDIRECT: bool = true;
 
 #[derive(Clone, Copy)]
 pub struct RedirectPolicy {
@@ -28,7 +29,7 @@ impl Default for RedirectPolicy {
         RedirectPolicy {
             follow: DEFAULT_FOLLOW_REDIRECTS,
             max_redirects: DEFAULT_MAX_REDIRECTS,
-            raise_on_exceeded: false,
+            raise_on_exceeded: DEFAULT_RAISE_ON_REDIRECT,
         }
     }
 }
