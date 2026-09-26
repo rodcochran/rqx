@@ -60,7 +60,7 @@ impl PyClient {
 
         if transport.is_some() && (verify.is_some() || cert.is_some() || timeout.is_some()) {
             return Err(RqxError::new_err(
-                "Cannot specify both transport= and cert=/verify=/timeout=; pass options through one or the other".to_string(),
+                "Cannot specify both transport= and cert=/verify=/timeout=; pass options through one or the other",
             )
             .into());
         }
@@ -139,7 +139,7 @@ impl PyClient {
     ) -> Result<PyResponse, PyRqxError> {
         self.request(
             py,
-            &"GET".to_string(),
+            "GET",
             url,
             None,
             None,
@@ -167,7 +167,7 @@ impl PyClient {
     ) -> Result<PyResponse, PyRqxError> {
         self.request(
             py,
-            &"OPTIONS".to_string(),
+            "OPTIONS",
             url,
             None,
             None,
@@ -195,7 +195,7 @@ impl PyClient {
     ) -> Result<PyResponse, PyRqxError> {
         self.request(
             py,
-            &"HEAD".to_string(),
+            "HEAD",
             url,
             None,
             None,
@@ -223,7 +223,7 @@ impl PyClient {
     ) -> Result<PyResponse, PyRqxError> {
         self.request(
             py,
-            &"DELETE".to_string(),
+            "DELETE",
             url,
             None,
             None,
@@ -254,7 +254,7 @@ impl PyClient {
     ) -> Result<PyResponse, PyRqxError> {
         self.request(
             py,
-            &"POST".to_string(),
+            "POST",
             url,
             content,
             data,
@@ -285,7 +285,7 @@ impl PyClient {
     ) -> Result<PyResponse, PyRqxError> {
         self.request(
             py,
-            &"PUT".to_string(),
+            "PUT",
             url,
             content,
             data,
@@ -316,7 +316,7 @@ impl PyClient {
     ) -> Result<PyResponse, PyRqxError> {
         self.request(
             py,
-            &"PATCH".to_string(),
+            "PATCH",
             url,
             content,
             data,
@@ -423,14 +423,14 @@ impl PyAsyncClient {
 
         if transport.is_some() && (verify.is_some() || cert.is_some() || timeout.is_some()) {
             return Err(RqxError::new_err(
-                "Cannot specify both transport= and cert=/verify=/timeout=; pass options through one or the other".to_string(),
+                "Cannot specify both transport= and cert=/verify=/timeout=; pass options through one or the other",
             )
             .into());
         }
 
         let transport_inner = match transport {
             Some(t) => t.inner.clone(),
-            None => HTTPTransport::new(verify, cert, timeout)?.inner,
+            None => AsyncHTTPTransport::new(verify, cert, timeout)?.inner,
         };
 
         Ok(Self {
@@ -507,7 +507,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
-            &"GET".to_string(),
+            "GET",
             url,
             None,
             None,
@@ -535,7 +535,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
-            &"OPTIONS".to_string(),
+            "OPTIONS",
             url,
             None,
             None,
@@ -563,7 +563,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
-            &"HEAD".to_string(),
+            "HEAD",
             url,
             None,
             None,
@@ -591,7 +591,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
-            &"DELETE".to_string(),
+            "DELETE",
             url,
             None,
             None,
@@ -622,7 +622,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
-            &"POST".to_string(),
+            "POST",
             url,
             content,
             data,
@@ -653,7 +653,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
-            &"PUT".to_string(),
+            "PUT",
             url,
             content,
             data,
@@ -684,7 +684,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
-            &"PATCH".to_string(),
+            "PATCH",
             url,
             content,
             data,

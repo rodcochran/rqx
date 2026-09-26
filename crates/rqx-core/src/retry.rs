@@ -12,7 +12,6 @@ const DEFAULT_ALLOWED_METHODS: &[&str] = &[
 ];
 const DEFAULT_RESPECT_RETRY_AFTER_HEADER: bool = true;
 const DEFAULT_RAISE_ON_STATUS: bool = true;
-// const DEFAULT_TOTAL_TIMEOUT: Option<f64> = None;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FailureKind {
