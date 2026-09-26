@@ -171,7 +171,6 @@ impl Client {
         spec: RequestSpec,
         follow_redirects: Option<bool>,
     ) -> Result<PendingResponse, RqxError> {
-        // TODO: wire redirect policy through the transport
         let follow = follow_redirects.unwrap_or(self.config.redirects.follow);
         let pending = if follow {
             self.follow_redirects(spec).await?

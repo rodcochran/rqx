@@ -8,7 +8,6 @@ what the server received as [name, value] pairs, duplicates included.
 from types import MappingProxyType
 
 import pytest
-
 import rqx
 
 
