@@ -1,4 +1,4 @@
-use crate::{auth::Auth::Basic, error::RqxError};
+use crate::error::RqxError;
 
 #[derive(Clone)]
 pub enum Auth {
@@ -16,17 +16,6 @@ impl Auth {
             (Some(_), Some(_)) => Err(RqxError::InvalidArgument(
                 "Cannot specify both basic auth and a bearer token.".to_string(),
             )),
-        }
-    }
-
-    pub fn validate_coexistence(&self, other: &Auth) -> Result<(), RqxError> {
-        match (self, other) {
-            (Self::Basic { .. }, Self::Bearer(_)) | (Self::Bearer(_), Self::Basic { .. }) => {
-                Err(RqxError::InvalidArgument(
-                    "Cannot specify both basic auth and a bearer token.".to_string(),
-                ))
-            }
-            _ => Ok(()),
         }
     }
 }
