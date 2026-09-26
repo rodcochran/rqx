@@ -21,7 +21,7 @@ use crate::url::request_url::BaseUrl;
 
 const DEFAULT_TIMEOUT: f64 = 15.0;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ClientConfig {
     timeout: Timeout,
     redirects: RedirectPolicy,
@@ -41,17 +41,6 @@ impl ClientConfig {
             redirects,
             base_url,
             auth,
-        }
-    }
-}
-
-impl Default for ClientConfig {
-    fn default() -> Self {
-        ClientConfig {
-            timeout: Timeout::default(),
-            redirects: RedirectPolicy::default(),
-            base_url: None,
-            auth: Auth::default(),
         }
     }
 }
@@ -79,7 +68,7 @@ impl Client {
     pub fn new(transport: Transport, config: ClientConfig) -> Self {
         Self {
             transport,
-            config: config,
+            config,
             cookies: Arc::new(TokioMutex::new(HashMap::new())),
         }
     }

@@ -1,9 +1,13 @@
 use crate::error::RqxError;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub enum Auth {
+    #[default]
     None,
-    Basic { username: String, password: String },
+    Basic {
+        username: String,
+        password: String,
+    },
     Bearer(String),
 }
 
@@ -17,11 +21,5 @@ impl Auth {
                 "Cannot specify both basic auth and a bearer token.".to_string(),
             )),
         }
-    }
-}
-
-impl Default for Auth {
-    fn default() -> Self {
-        Auth::None
     }
 }

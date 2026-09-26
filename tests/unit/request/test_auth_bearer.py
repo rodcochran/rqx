@@ -129,7 +129,7 @@ def test_auth_and_auth_bearer_together_raises(flaky_server):
         )
 
 
-def test_client_default_bearer_is_overriden_by_per_request_basic_auth(flaky_server):
+def test_client_default_bearer_is_overidden_by_per_request_basic_auth(flaky_server):
     """Client-level bearer default + per-request basic auth = collision.
 
     The effective values are what matter: the resolver picks up the client
