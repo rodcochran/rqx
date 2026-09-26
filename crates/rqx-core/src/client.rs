@@ -148,6 +148,15 @@ impl Client {
         auth: Option<Auth>,
         timeout: f64,
     ) -> Result<RequestSpec, RqxError> {
+        if let Some(a) = &auth {
+            self.config.auth.validate_coexistence(a)?;
+        }
+
+        let auth_conf = match auth.as_ref() {
+            Some(a) => a,
+            _ => &self.config.auth,
+        };
+
         RequestSpec::build(
             self.transport.client(),
             method,
@@ -155,7 +164,7 @@ impl Client {
             params,
             RequestBody::new(content, data, json)?,
             headers,
-            auth.as_ref().unwrap_or(&self.config.auth),
+            auth_conf,
             timeout,
         )
     }

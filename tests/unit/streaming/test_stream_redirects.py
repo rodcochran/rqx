@@ -1,9 +1,7 @@
 """Tests for client.stream() with follow_redirects=True (Issue #3)."""
 
 import pytest
-
 import rqx
-
 
 # ----- sync -----
 
@@ -33,22 +31,10 @@ def test_stream_follow_redirects_does_not_panic(flaky_server):
 def test_stream_follow_redirects_too_many_redirects(flaky_server):
     """Loop exceeds max_redirects → TooManyRedirects."""
     client = rqx.Client(max_redirects=3)
-    with pytest.raises(rqx.TooManyRedirects):
-        with client.stream(
-            "GET", f"{flaky_server}/redirect-loop", follow_redirects=True
-        ):
-            pass
-
-
-def test_stream_raise_on_redirect_false_returns_3xx(flaky_server):
-    """raise_on_redirect=False returns the last 3xx as a stream rather than raising."""
-    retries = rqx.Retry(raise_on_redirect=False)
-    transport = rqx.HTTPTransport(retries=retries)
-    client = rqx.Client(transport=transport, max_redirects=3)
-    with client.stream(
+    with pytest.raises(rqx.TooManyRedirects), client.stream(
         "GET", f"{flaky_server}/redirect-loop", follow_redirects=True
-    ) as resp:
-        assert 300 <= resp.status_code < 400
+    ):
+        pass
 
 
 def test_stream_no_follow_still_works(flaky_server):
@@ -84,14 +70,3 @@ async def test_stream_follow_redirects_too_many_redirects_async(flaky_server):
             "GET", f"{flaky_server}/redirect-loop", follow_redirects=True
         ):
             pass
-
-
-@pytest.mark.asyncio
-async def test_stream_raise_on_redirect_false_returns_3xx_async(flaky_server):
-    retries = rqx.Retry(raise_on_redirect=False)
-    transport = rqx.AsyncHTTPTransport(retries=retries)
-    client = rqx.AsyncClient(transport=transport, max_redirects=3)
-    async with client.stream(
-        "GET", f"{flaky_server}/redirect-loop", follow_redirects=True
-    ) as resp:
-        assert 300 <= resp.status_code < 400

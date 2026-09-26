@@ -12,9 +12,7 @@ Coverage:
 import json
 
 import pytest
-
 import rqx
-
 
 TOKEN = "tok-abc.123"
 OTHER_TOKEN = "tok-xyz.789"
