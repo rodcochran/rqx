@@ -2,7 +2,7 @@ use pyo3::prelude::{PyResult, pyclass, pymethods};
 
 use rqx_core::redirect::RedirectPolicy;
 
-#[pyclass(name = "RedirectPolicy", from_py_object)]
+#[pyclass(name = "RedirectPolicy", from_py_object, module = "rqx", frozen)]
 #[derive(Clone)]
 pub struct PyRedirectPolicy {
     pub(crate) inner: RedirectPolicy,

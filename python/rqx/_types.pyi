@@ -239,6 +239,18 @@ class Timeout:
     ) -> None: ...
 
 # ---------------------------------------------------------------------------
+# Redirect config
+# ---------------------------------------------------------------------------
+
+class RedirectPolicy:
+    def __init__(
+        self,
+        follow: bool | None = None,
+        max_redirects: int | None = None,
+        raise_on_exceeded: bool | None = None,
+    ) -> None: ...
+
+# ---------------------------------------------------------------------------
 # Retry config
 # ---------------------------------------------------------------------------
 
@@ -456,6 +468,7 @@ class PyClient:
         base_url: URLTypes | None = None,
         auth_bearer: str | None = None,
         transport: HTTPTransport | None = None,
+        redirects: RedirectPolicy | None = None,
     ) -> None: ...
     def request(
         self,
@@ -591,6 +604,7 @@ class PyAsyncClient:
         base_url: URLTypes | None = None,
         auth_bearer: str | None = None,
         transport: AsyncHTTPTransport | None = None,
+        redirects: RedirectPolicy | None = None,
     ) -> None: ...
     def request(
         self,

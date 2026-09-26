@@ -12,6 +12,7 @@ use rqx_core::url::request_url::BaseUrl;
 use crate::exceptions::*;
 use crate::py_json::JsonBody;
 use crate::query_params::RequestQueryParams;
+use crate::redirect::PyRedirectPolicy;
 use crate::request_headers::RequestHeaders;
 use crate::response::PyResponse;
 use crate::runtime::RUNTIME;
@@ -33,7 +34,7 @@ pub struct PyClient {
 #[pymethods]
 impl PyClient {
     #[new]
-    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, base_url=None, auth_bearer=None, transport=None))]
+    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, base_url=None, auth_bearer=None, transport=None, redirects=None,))]
     fn __new__(
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
@@ -43,9 +44,15 @@ impl PyClient {
         base_url: Option<PyURL>,
         auth_bearer: Option<String>,
         transport: Option<PyRef<'_, HTTPTransport>>,
+        redirects: Option<PyRedirectPolicy>,
     ) -> Result<Self, PyRqxError> {
         let parsed_base_url = base_url.map(|url| BaseUrl::new(&url.inner)).transpose()?;
-        let redirect_policy = RedirectPolicy::with_defaults(follow_redirects, max_redirects, None);
+
+        let redirect_policy = match redirects {
+            Some(r) => r.inner,
+            None => RedirectPolicy::with_defaults(follow_redirects, max_redirects, None),
+        };
+
         let timeout_config = match timeout {
             Some(t) => PyTimeout::extract_any(t)?.inner,
             None => Timeout::default(),
@@ -396,7 +403,7 @@ pub struct PyAsyncClient {
 #[pymethods]
 impl PyAsyncClient {
     #[new]
-    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, base_url=None, auth_bearer=None, transport=None))]
+    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, base_url=None, auth_bearer=None, transport=None, redirects=None))]
     fn __new__(
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
@@ -406,9 +413,13 @@ impl PyAsyncClient {
         base_url: Option<PyURL>,
         auth_bearer: Option<String>,
         transport: Option<PyRef<'_, AsyncHTTPTransport>>,
+        redirects: Option<PyRedirectPolicy>,
     ) -> Result<Self, PyRqxError> {
         let parsed_base_url = base_url.map(|url| BaseUrl::new(&url.inner)).transpose()?;
-        let redirect_policy = RedirectPolicy::with_defaults(follow_redirects, max_redirects, None);
+        let redirect_policy = match redirects {
+            Some(r) => r.inner,
+            None => RedirectPolicy::with_defaults(follow_redirects, max_redirects, None),
+        };
         let timeout_config = match timeout {
             Some(t) => PyTimeout::extract_any(t)?.inner,
             None => Timeout::default(),
