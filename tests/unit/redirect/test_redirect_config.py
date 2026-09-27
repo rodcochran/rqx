@@ -1,0 +1,15 @@
+import rqx
+
+
+def test_raise_on_redirect_false_returns_3xx(flaky_server):
+    """raise_on_redirect=False → return the last 3xx response."""
+    redirects = rqx.RedirectPolicy(
+        follow=True,
+        max_redirects=2,
+        raise_on_exceeded=False,
+    )
+    retries = rqx.Retry()
+    transport = rqx.HTTPTransport(retries=retries)
+    client = rqx.Client(transport=transport, redirects=redirects)
+    resp = client.get(f"{flaky_server}/redirect-loop")
+    assert 300 <= resp.status_code < 400
