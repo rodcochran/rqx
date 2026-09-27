@@ -84,7 +84,7 @@ httpx is the modern successor to requests, aiohttp is the de-facto async HTTP li
 
 ## Status
 
-0.3.0, published on PyPI. Usable, but the API may still shift in small ways during 0.x. Open issues track the v0.x roadmap — anything labeled `httpx-feature-parity` is a known surface gap.
+0.4.0, published on PyPI. Usable, but the API may still shift in small ways during 0.x. Open issues track the v0.x roadmap — anything labeled `httpx-feature-parity` is a known surface gap.
 
 ## Contributing
 
