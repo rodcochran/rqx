@@ -63,9 +63,11 @@ impl PyRedirectPolicy {
         max_redirects: Option<u32>,
         raise_on_exceeded: Option<bool>,
     ) -> Self {
-        Self {
-            inner: RedirectPolicy::with_defaults(follow, max_redirects, raise_on_exceeded),
-        }
+        Self::new(RedirectPolicy::with_defaults(
+            follow,
+            max_redirects,
+            raise_on_exceeded,
+        ))
     }
 
     fn __repr__(&self) -> String {

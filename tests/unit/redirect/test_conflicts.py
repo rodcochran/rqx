@@ -24,6 +24,18 @@ def test_raise_on_max_redirects_config_conflict():
         )
 
 
+def test_agreeing_redirect_config_is_accepted():
+    """Redirect policy and client-level kwargs with the same values -> no conflict"""
+    redirects = rqx.RedirectPolicy(follow=True, max_redirects=3)
+    client = rqx.Client(
+        follow_redirects=True,
+        max_redirects=3,
+        redirects=redirects,
+    )
+    assert client.redirects.follow is True
+    assert client.redirects.max_redirects == 3
+
+
 @pytest.mark.asyncio
 async def test_raise_on_follow_redirect_config_conflict_async():
     """Redirect policy, follow = True + client-level config = False -> should raise"""
@@ -46,3 +58,16 @@ async def test_raise_on_max_redirects_config_conflict_async():
             max_redirects=3,
             redirects=redirects,
         )
+
+
+@pytest.mark.asyncio
+async def test_agreeing_redirect_config_is_accepted_async():
+    """Redirect policy and client-level kwargs with the same values -> no conflict"""
+    redirects = rqx.RedirectPolicy(follow=True, max_redirects=3)
+    client = rqx.AsyncClient(
+        follow_redirects=True,
+        max_redirects=3,
+        redirects=redirects,
+    )
+    assert client.redirects.follow is True
+    assert client.redirects.max_redirects == 3
