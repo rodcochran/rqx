@@ -33,6 +33,10 @@ test-unit:
 test-integration:
     uv run pytest tests/integration -n 8
 
+# Rust unit + integration tests across the workspace (links libpython, no extension build)
+test-rust:
+    cargo test --workspace
+
 # Hypothesis tests; HYPOTHESIS_PROFILE=nightly for the bigger budget
 test-property:
     uv run pytest tests/property -n 8
@@ -56,7 +60,7 @@ typecheck:
     uv run ty check python/
 
 # Full pre-push verification
-check: lint typecheck test
+check: lint typecheck test-rust test
 
 # Compare two commits on the streaming path (issue #108 / PR #139).
 # Runs every config by default, or one of them:
