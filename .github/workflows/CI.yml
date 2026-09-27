@@ -46,9 +46,10 @@ jobs:
       # finds it ready instead of every worker waiting ~8 s on first use.
       - run: nohup docker pull -q ghcr.io/psf/httpbin:0.10.2 >/dev/null 2>&1 &
       - uses: Swatinem/rust-cache@v2
-      # Rust unit tests (LineDecoder, etc.). Runs without the extension-module
-      # feature so the test binary links libpython (provided by setup-python).
-      - run: cargo test --lib
+      # Rust tests across the workspace, same as `just test-rust`. Runs without
+      # the extension-module feature so the test binary links libpython
+      # (provided by setup-python).
+      - run: cargo test --workspace
       # Dependencies only: installing the project here would invoke maturin as
       # the build backend and compile a release wheel (~90 s) that the next
       # step's dev build immediately replaces.

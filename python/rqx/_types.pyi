@@ -154,7 +154,6 @@ class URL:
     def copy_remove_param(self, key: str) -> URL: ...
     def copy_merge_params(self, params: QueryParamTypes | None = None) -> URL: ...
     def join(self, url: URLTypes) -> URL: ...
-    def __str__(self) -> str: ...
     def __eq__(self, other: object) -> bool: ...
     def __hash__(self) -> int: ...
 
@@ -183,7 +182,6 @@ class QueryParams:
     def __iter__(self) -> Iterator[str]: ...
     def __len__(self) -> int: ...
     def __bool__(self) -> bool: ...
-    def __str__(self) -> str: ...
     def __eq__(self, other: object) -> bool: ...
     def __hash__(self) -> int: ...
 
@@ -241,6 +239,22 @@ class Timeout:
     ) -> None: ...
 
 # ---------------------------------------------------------------------------
+# Redirect config
+# ---------------------------------------------------------------------------
+
+class RedirectPolicy:
+    follow: bool
+    max_redirects: int
+    raise_on_exceeded: bool
+
+    def __init__(
+        self,
+        follow: bool | None = None,
+        max_redirects: int | None = None,
+        raise_on_exceeded: bool | None = None,
+    ) -> None: ...
+
+# ---------------------------------------------------------------------------
 # Retry config
 # ---------------------------------------------------------------------------
 
@@ -262,7 +276,6 @@ class PyRetry:
         allowed_methods: set[str] | None = None,
         respect_retry_after_header: bool | None = None,
         raise_on_status: bool | None = None,
-        raise_on_redirect: bool | None = None,
         total_timeout: float | None = None,
     ) -> None: ...
 
@@ -459,6 +472,7 @@ class PyClient:
         base_url: URLTypes | None = None,
         auth_bearer: str | None = None,
         transport: HTTPTransport | None = None,
+        redirects: RedirectPolicy | None = None,
     ) -> None: ...
     def request(
         self,
@@ -594,6 +608,7 @@ class PyAsyncClient:
         base_url: URLTypes | None = None,
         auth_bearer: str | None = None,
         transport: AsyncHTTPTransport | None = None,
+        redirects: RedirectPolicy | None = None,
     ) -> None: ...
     def request(
         self,

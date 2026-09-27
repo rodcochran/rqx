@@ -12,7 +12,7 @@
 ///
 /// Construct with a single `all` value to set every phase, or pass per-phase
 /// kwargs. Per-phase kwargs take precedence over `all` when both are given.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Timeout {
     pub connect: Option<f64>,
     pub read: Option<f64>,

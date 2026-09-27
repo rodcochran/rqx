@@ -12,6 +12,7 @@ from ._api import (
     stream,
 )
 from ._rqx import (
+    URL,
     AsyncHTTPTransport,
     ConnectError,
     ConnectTimeout,
@@ -33,6 +34,7 @@ from ._rqx import (
     QueryParams,
     ReadError,
     ReadTimeout,
+    RedirectPolicy,
     RemoteProtocolError,
     RequestError,
     ResponseNotRead,
@@ -44,7 +46,6 @@ from ._rqx import (
     TimeoutException,
     TooManyRedirects,
     TransportError,
-    URL,
     UnsupportedProtocol,
     WriteError,
     WriteTimeout,
@@ -57,6 +58,7 @@ Headers = PyHeaders
 Retry = PyRetry
 
 __all__ = [
+    "URL",
     "AsyncClient",
     "AsyncHTTPTransport",
     "Client",
@@ -77,6 +79,7 @@ __all__ = [
     "QueryParams",
     "ReadError",
     "ReadTimeout",
+    "RedirectPolicy",
     "RemoteProtocolError",
     "RequestError",
     "ResponseNotRead",
@@ -89,7 +92,6 @@ __all__ = [
     "TimeoutException",
     "TooManyRedirects",
     "TransportError",
-    "URL",
     "UnsupportedProtocol",
     "WriteError",
     "WriteTimeout",

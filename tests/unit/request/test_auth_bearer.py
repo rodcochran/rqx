@@ -12,9 +12,7 @@ Coverage:
 import json
 
 import pytest
-
 import rqx
-
 
 TOKEN = "tok-abc.123"
 OTHER_TOKEN = "tok-xyz.789"
@@ -123,7 +121,7 @@ def test_no_bearer_means_no_authorization_header(flaky_server):
 
 def test_auth_and_auth_bearer_together_raises(flaky_server):
     client = rqx.Client()
-    with pytest.raises(rqx.RqxError, match="auth"):
+    with pytest.raises(ValueError, match="basic auth and a bearer token"):
         client.get(
             f"{flaky_server}/echo-auth",
             auth=("user", "pass"),
@@ -131,15 +129,12 @@ def test_auth_and_auth_bearer_together_raises(flaky_server):
         )
 
 
-def test_client_default_bearer_collides_with_per_request_basic_auth(flaky_server):
-    """Client-level bearer default + per-request basic auth = collision.
+def test_client_default_bearer_is_overridden_by_per_request_basic_auth(flaky_server):
+    """Client-level bearer default + per-request basic auth = override."""
 
-    The effective values are what matter: the resolver picks up the client
-    default for bearer, then the collision check sees both set and raises.
-    """
     client = rqx.Client(auth_bearer=TOKEN)
-    with pytest.raises(rqx.RqxError, match="auth"):
-        client.get(f"{flaky_server}/echo-auth", auth=("user", "pass"))
+    resp = client.get(f"{flaky_server}/echo-auth", auth=("user", "pass"))
+    assert _auth_from_resp(resp) == "Basic dXNlcjpwYXNz"
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -191,7 +186,7 @@ async def test_async_stream_sends_bearer(flaky_server):
 @pytest.mark.asyncio
 async def test_async_auth_and_auth_bearer_together_raises(flaky_server):
     async with rqx.AsyncClient() as client:
-        with pytest.raises(rqx.RqxError, match="auth"):
+        with pytest.raises(ValueError, match="basic auth and a bearer token"):
             await client.get(
                 f"{flaky_server}/echo-auth",
                 auth=("user", "pass"),

@@ -6,6 +6,8 @@ use http::header::{CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING};
 use reqwest::{Client, Request, RequestBuilder};
 use url::Url;
 
+use crate::auth::Auth;
+
 use super::error::*;
 use super::headers::Headers;
 use super::query_params::QueryPairs;
@@ -64,8 +66,7 @@ impl RequestSpec {
         params: Option<QueryPairs>,
         body: RequestBody,
         headers: Option<Headers>,
-        auth: Option<(String, String)>,
-        auth_bearer: Option<&str>,
+        auth: &Auth,
         timeout: f64,
     ) -> Result<Self, RqxError> {
         // Uppercased like httpx, so `request("get", ...)` is GET on the wire.
@@ -91,11 +92,15 @@ impl RequestSpec {
         if let Some(headers) = headers {
             builder = builder.headers(headers.inner);
         }
-        if let Some((username, password)) = auth {
-            builder = builder.basic_auth(username, Some(password));
-        }
-        if let Some(token) = auth_bearer {
-            builder = builder.bearer_auth(token);
+
+        match auth {
+            Auth::None => {}
+            Auth::Basic { username, password } => {
+                builder = builder.basic_auth(username, Some(password));
+            }
+            Auth::Bearer(token) => {
+                builder = builder.bearer_auth(token);
+            }
         }
 
         let request = builder

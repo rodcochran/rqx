@@ -3,16 +3,14 @@
 Covers:
 - backoff_jitter — randomizes backoff timing
 - raise_on_status — toggle raise vs return on retry exhaustion
-- raise_on_redirect — toggle raise vs return on redirect-loop exhaustion
 """
 
 import time
 
 import pytest
-
 import rqx
-from tests.fixtures.server import FlakyServerHandler, _free_port
 
+from tests.fixtures.server import FlakyServerHandler, _free_port
 
 # ----- backoff_jitter -----
 
@@ -93,27 +91,6 @@ def test_raise_on_status_false_returns_response(flaky_server):
     assert resp.status_code == 503
 
 
-# ----- raise_on_redirect -----
-
-
-def test_raise_on_redirect_true_raises_on_loop(flaky_server):
-    """Default: raise_on_redirect=True → TooManyRedirects on loop."""
-    retries = rqx.Retry(raise_on_redirect=True)
-    transport = rqx.HTTPTransport(retries=retries)
-    client = rqx.Client(transport=transport, follow_redirects=True, max_redirects=2)
-    with pytest.raises(rqx.TooManyRedirects):
-        client.get(f"{flaky_server}/redirect-loop")
-
-
-def test_raise_on_redirect_false_returns_3xx(flaky_server):
-    """raise_on_redirect=False → return the last 3xx response."""
-    retries = rqx.Retry(raise_on_redirect=False)
-    transport = rqx.HTTPTransport(retries=retries)
-    client = rqx.Client(transport=transport, follow_redirects=True, max_redirects=2)
-    resp = client.get(f"{flaky_server}/redirect-loop")
-    assert 300 <= resp.status_code < 400
-
-
 # ----- async variants -----
 
 
@@ -129,17 +106,6 @@ async def test_raise_on_status_false_returns_response_async(flaky_server):
     client = rqx.AsyncClient(transport=transport)
     resp = await client.get(f"{flaky_server}/?request_id=async_raise_on_status_false")
     assert resp.status_code == 503
-
-
-@pytest.mark.asyncio
-async def test_raise_on_redirect_false_returns_3xx_async(flaky_server):
-    retries = rqx.Retry(raise_on_redirect=False)
-    transport = rqx.AsyncHTTPTransport(retries=retries)
-    client = rqx.AsyncClient(
-        transport=transport, follow_redirects=True, max_redirects=2
-    )
-    resp = await client.get(f"{flaky_server}/redirect-loop")
-    assert 300 <= resp.status_code < 400
 
 
 # ----- retries under follow_redirects -----

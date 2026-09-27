@@ -5,20 +5,45 @@ use std::time::Instant;
 use tokio::sync::Mutex as TokioMutex;
 use url::Url;
 
+use crate::auth::Auth;
 use crate::error::*;
 use crate::headers::Headers;
 use crate::query_params::QueryPairs;
+use crate::redirect::RedirectPolicy;
 use crate::request::{RequestBody, RequestSpec};
 use crate::response::{BufferedResponse, PendingResponse};
-use crate::retry::DEFAULT_RAISE_ON_REDIRECT;
+
+use crate::timeout::Timeout;
 use crate::transport::Transport;
 use crate::url::client_url::RqxClientUrl;
 use crate::url::reference::UrlReference;
 use crate::url::request_url::BaseUrl;
 
 const DEFAULT_TIMEOUT: f64 = 15.0;
-const DEFAULT_FOLLOW_REDIRECTS: bool = false;
-const DEFAULT_MAX_REDIRECTS: u32 = 20;
+
+#[derive(Clone, Default)]
+pub struct ClientConfig {
+    timeout: Timeout,
+    redirects: RedirectPolicy,
+    base_url: Option<BaseUrl>,
+    auth: Auth,
+}
+
+impl ClientConfig {
+    pub fn new(
+        timeout: Timeout,
+        redirects: RedirectPolicy,
+        base_url: Option<BaseUrl>,
+        auth: Auth,
+    ) -> Self {
+        Self {
+            timeout,
+            redirects,
+            base_url,
+            auth,
+        }
+    }
+}
 
 // ────────────────────────────────────────────────────────────────────────
 // Client — shared pure-Rust core for PyClient and PyAsyncClient.
@@ -35,42 +60,28 @@ const DEFAULT_MAX_REDIRECTS: u32 = 20;
 #[derive(Clone)]
 pub struct Client {
     transport: Transport,
-    timeout_secs: f64,
-    follow_redirects: bool,
-    max_redirects: u32,
-    base_url: Option<BaseUrl>,
+    config: ClientConfig,
     cookies: Arc<TokioMutex<HashMap<String, String>>>,
-    /// Client-level default bearer token. Per-request `auth_bearer=`
-    /// overrides this when provided.
-    auth_bearer: Option<String>,
 }
 
 impl Client {
-    pub fn new(
-        transport: Transport,
-        timeout_secs: f64,
-        follow_redirects: bool,
-        max_redirects: u32,
-        base_url: Option<BaseUrl>,
-        auth_bearer: Option<String>,
-    ) -> Self {
+    pub fn new(transport: Transport, config: ClientConfig) -> Self {
         Self {
             transport,
-            timeout_secs,
-            follow_redirects,
-            max_redirects,
-            base_url,
+            config,
             cookies: Arc::new(TokioMutex::new(HashMap::new())),
-            auth_bearer,
         }
     }
 
     pub fn base_url(&self) -> Option<&BaseUrl> {
-        self.base_url.as_ref()
+        self.config.base_url.as_ref()
     }
 
     pub fn timeout_secs(&self) -> f64 {
-        self.timeout_secs
+        self.config
+            .timeout
+            .per_request_total()
+            .unwrap_or(DEFAULT_TIMEOUT)
     }
 
     /// Sync snapshot of the cookie jar — safe to call from any context.
@@ -78,6 +89,10 @@ impl Client {
     /// Python attribute access, never from inside an async future.
     pub fn cookies_snapshot(&self) -> HashMap<String, String> {
         self.cookies.blocking_lock().clone()
+    }
+
+    pub fn redirects(&self) -> RedirectPolicy {
+        self.config.redirects
     }
 
     /// Build and send a request, then buffer the body.
@@ -90,22 +105,12 @@ impl Client {
         json: Option<serde_json::Value>,
         params: Option<QueryPairs>,
         headers: Option<Headers>,
-        auth: Option<(String, String)>,
-        auth_bearer: Option<String>,
+        auth: Option<Auth>,
         follow_redirects: Option<bool>,
         timeout: f64,
     ) -> Result<BufferedResponse, RqxError> {
         let request = self.build(
-            method,
-            url,
-            content,
-            data,
-            json,
-            params,
-            headers,
-            auth,
-            auth_bearer,
-            timeout,
+            method, url, content, data, json, params, headers, auth, timeout,
         )?;
         // `stream` stamps `elapsed` when the headers arrive; reading the body doesn't move it.
         self.stream(request, follow_redirects).await?.read().await
@@ -133,22 +138,9 @@ impl Client {
         json: Option<serde_json::Value>,
         params: Option<QueryPairs>,
         headers: Option<Headers>,
-        auth: Option<(String, String)>,
-        auth_bearer: Option<String>,
+        auth: Option<Auth>,
         timeout: f64,
     ) -> Result<RequestSpec, RqxError> {
-        // Resolve bearer: per-request override wins; otherwise fall back to
-        // the client-level default. Then enforce the basic-vs-bearer collision
-        // rule against the effective values that would actually be applied.
-        let bearer = auth_bearer.or_else(|| self.auth_bearer.clone());
-        if auth.is_some() && bearer.is_some() {
-            return Err(RequestError::RequestError(
-                "Cannot specify both auth= (basic) and auth_bearer= on the same request"
-                    .to_string(),
-            )
-            .into());
-        }
-
         RequestSpec::build(
             self.transport.client(),
             method,
@@ -156,8 +148,7 @@ impl Client {
             params,
             RequestBody::new(content, data, json)?,
             headers,
-            auth,
-            bearer.as_deref(),
+            auth.as_ref().unwrap_or(&self.config.auth),
             timeout,
         )
     }
@@ -168,7 +159,7 @@ impl Client {
         {
             return Ok(absolute);
         }
-        match &self.base_url {
+        match &self.config.base_url {
             Some(base) => base.join(url),
             None => Err(TransportError::UnsupportedProtocol(
                 "Request URL is missing an 'http://' or 'https://' protocol.".to_string(),
@@ -184,7 +175,7 @@ impl Client {
         spec: RequestSpec,
         follow_redirects: Option<bool>,
     ) -> Result<PendingResponse, RqxError> {
-        let follow = follow_redirects.unwrap_or(self.follow_redirects);
+        let follow = follow_redirects.unwrap_or(self.config.redirects.follow);
         let pending = if follow {
             self.follow_redirects(spec).await?
         } else {
@@ -192,197 +183,6 @@ impl Client {
         };
         self.accumulate_cookies(&pending.parts.cookies).await;
         Ok(pending)
-    }
-
-    pub async fn get(
-        &self,
-        url: RqxClientUrl,
-        params: Option<QueryPairs>,
-        headers: Option<Headers>,
-        auth: Option<(String, String)>,
-        auth_bearer: Option<String>,
-        follow_redirects: Option<bool>,
-        timeout: f64,
-    ) -> Result<BufferedResponse, RqxError> {
-        self.request(
-            "GET",
-            url,
-            None,
-            None,
-            None,
-            params,
-            headers,
-            auth,
-            auth_bearer,
-            follow_redirects,
-            timeout,
-        )
-        .await
-    }
-
-    pub async fn options(
-        &self,
-        url: RqxClientUrl,
-        params: Option<QueryPairs>,
-        headers: Option<Headers>,
-        auth: Option<(String, String)>,
-        auth_bearer: Option<String>,
-        follow_redirects: Option<bool>,
-        timeout: f64,
-    ) -> Result<BufferedResponse, RqxError> {
-        self.request(
-            "OPTIONS",
-            url,
-            None,
-            None,
-            None,
-            params,
-            headers,
-            auth,
-            auth_bearer,
-            follow_redirects,
-            timeout,
-        )
-        .await
-    }
-
-    pub async fn head(
-        &self,
-        url: RqxClientUrl,
-        params: Option<QueryPairs>,
-        headers: Option<Headers>,
-        auth: Option<(String, String)>,
-        auth_bearer: Option<String>,
-        follow_redirects: Option<bool>,
-        timeout: f64,
-    ) -> Result<BufferedResponse, RqxError> {
-        self.request(
-            "HEAD",
-            url,
-            None,
-            None,
-            None,
-            params,
-            headers,
-            auth,
-            auth_bearer,
-            follow_redirects,
-            timeout,
-        )
-        .await
-    }
-
-    pub async fn delete(
-        &self,
-        url: RqxClientUrl,
-        params: Option<QueryPairs>,
-        headers: Option<Headers>,
-        auth: Option<(String, String)>,
-        auth_bearer: Option<String>,
-        follow_redirects: Option<bool>,
-        timeout: f64,
-    ) -> Result<BufferedResponse, RqxError> {
-        self.request(
-            "DELETE",
-            url,
-            None,
-            None,
-            None,
-            params,
-            headers,
-            auth,
-            auth_bearer,
-            follow_redirects,
-            timeout,
-        )
-        .await
-    }
-
-    pub async fn post(
-        &self,
-        url: RqxClientUrl,
-        content: Option<&[u8]>,
-        data: Option<HashMap<String, String>>,
-        json: Option<serde_json::Value>,
-        params: Option<QueryPairs>,
-        headers: Option<Headers>,
-        auth: Option<(String, String)>,
-        auth_bearer: Option<String>,
-        follow_redirects: Option<bool>,
-        timeout: f64,
-    ) -> Result<BufferedResponse, RqxError> {
-        self.request(
-            "POST",
-            url,
-            content,
-            data,
-            json,
-            params,
-            headers,
-            auth,
-            auth_bearer,
-            follow_redirects,
-            timeout,
-        )
-        .await
-    }
-
-    pub async fn put(
-        &self,
-        url: RqxClientUrl,
-        content: Option<&[u8]>,
-        data: Option<HashMap<String, String>>,
-        json: Option<serde_json::Value>,
-        params: Option<QueryPairs>,
-        headers: Option<Headers>,
-        auth: Option<(String, String)>,
-        auth_bearer: Option<String>,
-        follow_redirects: Option<bool>,
-        timeout: f64,
-    ) -> Result<BufferedResponse, RqxError> {
-        self.request(
-            "PUT",
-            url,
-            content,
-            data,
-            json,
-            params,
-            headers,
-            auth,
-            auth_bearer,
-            follow_redirects,
-            timeout,
-        )
-        .await
-    }
-
-    pub async fn patch(
-        &self,
-        url: RqxClientUrl,
-        content: Option<&[u8]>,
-        data: Option<HashMap<String, String>>,
-        json: Option<serde_json::Value>,
-        params: Option<QueryPairs>,
-        headers: Option<Headers>,
-        auth: Option<(String, String)>,
-        auth_bearer: Option<String>,
-        follow_redirects: Option<bool>,
-        timeout: f64,
-    ) -> Result<BufferedResponse, RqxError> {
-        self.request(
-            "PATCH",
-            url,
-            content,
-            data,
-            json,
-            params,
-            headers,
-            auth,
-            auth_bearer,
-            follow_redirects,
-            timeout,
-        )
-        .await
     }
 
     /// Merge response cookies into the jar. Skips the lock when the response
@@ -407,20 +207,12 @@ impl Client {
     ///
     /// Reads status, Location, and Set-Cookie off `parts`, so no GIL
     /// acquisition per hop (see https://github.com/rodcochran/rqx/issues/93).
-    async fn follow_redirects(&self, spec: RequestSpec) -> Result<PendingResponse, RqxError> {
-        let raise_on_redirect = self
-            .transport
-            .retries
-            .as_ref()
-            .map(|r| r.raise_on_redirect)
-            .unwrap_or(DEFAULT_RAISE_ON_REDIRECT);
-
-        let mut current = spec;
+    async fn follow_redirects(&self, mut spec: RequestSpec) -> Result<PendingResponse, RqxError> {
         let mut redirects_used: u32 = 0;
         let mut num_retries: u32 = 0;
         let mut retry_history: Vec<(String, f64)> = Vec::new();
         loop {
-            let mut hop = self.transport.send(&current).await?;
+            let mut hop = self.transport.send(&spec).await?;
             num_retries += hop.parts.num_retries;
             retry_history.append(&mut hop.parts.retry_history);
             let status = hop.parts.status_code;
@@ -431,11 +223,11 @@ impl Client {
 
             self.accumulate_cookies(&hop.parts.cookies).await;
 
-            if redirects_used + 1 >= self.max_redirects {
-                if raise_on_redirect {
+            if redirects_used + 1 >= self.config.redirects.max_redirects {
+                if self.config.redirects.raise_on_exceeded {
                     return Err(RequestError::TooManyRedirects(format!(
                         "Exceeded max redirects {}",
-                        self.max_redirects
+                        self.config.redirects.max_redirects
                     ))
                     .into());
                 }
@@ -457,8 +249,8 @@ impl Client {
             hop.drain().await;
 
             // Resolve against the hop that sent the Location, not the original URL.
-            let new_url = current.redirect_target(&location)?;
-            current = current.redirected(status, new_url)?;
+            let new_url = spec.redirect_target(&location)?;
+            spec = spec.redirected(status, new_url)?;
 
             redirects_used += 1;
         }
