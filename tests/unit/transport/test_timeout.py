@@ -15,9 +15,7 @@ Covers:
 import time
 
 import pytest
-
 import rqx
-
 
 # ---------------------------------------------------------------------------
 # Constructor / API surface
@@ -69,9 +67,8 @@ def test_timeout_no_args_all_none():
 def test_timeout_repr():
     t = rqx.Timeout(connect=1.5)
     r = repr(t)
-    assert "Timeout(" in r
-    assert "connect=Some(1.5)" in r
-    assert "read=None" in r
+
+    assert r == "Timeout(connect=1.5, read=None, write=None, pool=None)"
 
 
 # ---------------------------------------------------------------------------

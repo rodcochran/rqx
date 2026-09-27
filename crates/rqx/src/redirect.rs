@@ -3,6 +3,7 @@ use pyo3::prelude::{pyclass, pymethods};
 use rqx_core::redirect::RedirectPolicy;
 
 use crate::exceptions::{PyRqxError, RqxError};
+use crate::py_utils::repr::PyRepr;
 
 #[pyclass(name = "RedirectPolicy", from_py_object, module = "rqx", frozen)]
 #[derive(Clone)]
@@ -69,8 +70,10 @@ impl PyRedirectPolicy {
 
     fn __repr__(&self) -> String {
         format!(
-            "RedirectPolicy(follow={:?}, read={:?}, write={:?})",
-            self.inner.follow, self.inner.max_redirects, self.inner.raise_on_exceeded,
+            "RedirectPolicy(follow={}, max_redirects={}, raise_on_exceeded={})",
+            self.inner.follow.py_repr(),
+            self.inner.max_redirects.py_repr(),
+            self.inner.raise_on_exceeded.py_repr(),
         )
     }
 

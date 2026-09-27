@@ -243,9 +243,9 @@ class Timeout:
 # ---------------------------------------------------------------------------
 
 class RedirectPolicy:
-    follow: bool | None
-    max_redirects: int | None
-    raise_on_exceeded: bool | None
+    follow: bool
+    max_redirects: int
+    raise_on_exceeded: bool
 
     def __init__(
         self,

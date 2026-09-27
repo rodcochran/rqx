@@ -3,6 +3,8 @@ use pyo3::prelude::*;
 
 use rqx_core::timeout::Timeout;
 
+use crate::py_utils::repr::PyRepr;
+
 #[pyclass(name = "Timeout", skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyTimeout {
@@ -27,8 +29,11 @@ impl PyTimeout {
 
     fn __repr__(&self) -> String {
         format!(
-            "Timeout(connect={:?}, read={:?}, write={:?}, pool={:?})",
-            self.inner.connect, self.inner.read, self.inner.write, self.inner.pool
+            "Timeout(connect={}, read={}, write={}, pool={})",
+            self.inner.connect.py_repr(),
+            self.inner.read.py_repr(),
+            self.inner.write.py_repr(),
+            self.inner.pool.py_repr(),
         )
     }
 
