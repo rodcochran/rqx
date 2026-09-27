@@ -32,14 +32,26 @@ class Build:
         """The branch whose tip is exactly this SHA, if this checkout knows one."""
         try:
             names = subprocess.run(
-                ["git", "for-each-ref", "--points-at", sha, "--format=%(refname:short)", "refs/heads", "refs/remotes/origin"],
+                [
+                    "git",
+                    "for-each-ref",
+                    "--points-at",
+                    sha,
+                    "--format=%(refname:short)",
+                    "refs/heads",
+                    "refs/remotes/origin",
+                ],
                 capture_output=True,
                 text=True,
                 check=True,
             ).stdout.split()
         except (OSError, subprocess.CalledProcessError):
             return None
-        local = (n.removeprefix("origin/") for n in names if n not in ("origin", "origin/HEAD"))
+        local = (
+            n.removeprefix("origin/")
+            for n in names
+            if n not in ("origin", "origin/HEAD")
+        )
         return ", ".join(dict.fromkeys(local)) or None
 
 
@@ -58,12 +70,20 @@ class RunBuilds:
         for line in metadata.read_text().splitlines():
             key, _, sha = line.partition("=")
             if key.startswith("sha_") and sha:
-                builds.append(Build(letter=key.removeprefix("sha_"), sha=sha, branch=Build.branch_at(sha)))
+                builds.append(
+                    Build(
+                        letter=key.removeprefix("sha_"),
+                        sha=sha,
+                        branch=Build.branch_at(sha),
+                    )
+                )
         return cls(builds=builds)
 
     def get(self, letter: str) -> Build:
         """A build the metadata doesn't name (the 09-22 follow-up arms) is just its letter."""
-        return next((b for b in self.builds if b.letter == letter), Build(letter=letter))
+        return next(
+            (b for b in self.builds if b.letter == letter), Build(letter=letter)
+        )
 
 
 @dataclass
@@ -150,22 +170,35 @@ def pairs_at(samples: list[Sample], concurrency: int, comparison: str) -> list[P
     ]
 
 
-def report_pairs(pairs: list[Pair], concurrency: int, comparison: str, builds: RunBuilds) -> None:
+def report_pairs(
+    pairs: list[Pair], concurrency: int, comparison: str, builds: RunBuilds
+) -> None:
     candidate, baseline = comparison[0], comparison[1]
     deltas = [p.delta_pct for p in pairs]
     wins = sum(d > 0 for d in deltas)
     print(f"\n== c={concurrency}, {candidate} vs {baseline}: {len(pairs)} pairs")
-    sides = ((builds.get(baseline), [p.baseline for p in pairs]), (builds.get(candidate), [p.candidate for p in pairs]))
+    sides = (
+        (builds.get(baseline), [p.baseline for p in pairs]),
+        (builds.get(candidate), [p.candidate for p in pairs]),
+    )
     width = max(len(build.label) for build, _ in sides)
     for build, side in sides:
-        print(f"  {build.label:{width}s}  median {median(s.rps for s in side):9.0f} rps   rss {median(s.peak_rss_mb for s in side):6.1f} MB")
-    print(f"  {candidate} vs {baseline}: median {median(deltas):+6.2f}%   {candidate} faster in {wins}/{len(pairs)} pairs   range {min(deltas):+.1f}% .. {max(deltas):+.1f}%")
+        print(
+            f"  {build.label:{width}s}  median {median(s.rps for s in side):9.0f} rps   rss {median(s.peak_rss_mb for s in side):6.1f} MB"
+        )
+    print(
+        f"  {candidate} vs {baseline}: median {median(deltas):+6.2f}%   {candidate} faster in {wins}/{len(pairs)} pairs   range {min(deltas):+.1f}% .. {max(deltas):+.1f}%"
+    )
     print("  per pair (first build listed first):")
     for p in pairs:
         if p.candidate_first:
-            order = f"{candidate} {p.candidate.rps:8.0f}  {baseline} {p.baseline.rps:8.0f}"
+            order = (
+                f"{candidate} {p.candidate.rps:8.0f}  {baseline} {p.baseline.rps:8.0f}"
+            )
         else:
-            order = f"{baseline} {p.baseline.rps:8.0f}  {candidate} {p.candidate.rps:8.0f}"
+            order = (
+                f"{baseline} {p.baseline.rps:8.0f}  {candidate} {p.candidate.rps:8.0f}"
+            )
         print(f"    {p.number:2d}  {order}   {p.delta_pct:+6.2f}%")
 
 
@@ -174,7 +207,9 @@ def report(samples: list[Sample], controls: list[Control], builds: RunBuilds) ->
         for comparison in ("ba", "ac", "bc", "da"):
             pairs = pairs_at(samples=samples, concurrency=c, comparison=comparison)
             if pairs:
-                report_pairs(pairs=pairs, concurrency=c, comparison=comparison, builds=builds)
+                report_pairs(
+                    pairs=pairs, concurrency=c, comparison=comparison, builds=builds
+                )
         ctl = [x for x in controls if x.concurrency == c]
         if ctl:
             print(f"  controls at c={c}:")
@@ -189,4 +224,6 @@ if __name__ == "__main__":
     if not samples:
         print("no samples yet")
     else:
-        report(samples=samples, controls=controls, builds=RunBuilds.from_log(sys.argv[1]))
+        report(
+            samples=samples, controls=controls, builds=RunBuilds.from_log(sys.argv[1])
+        )
