@@ -91,6 +91,10 @@ impl Client {
         self.cookies.blocking_lock().clone()
     }
 
+    pub fn redirects(&self) -> RedirectPolicy {
+        self.config.redirects
+    }
+
     /// Build and send a request, then buffer the body.
     pub async fn request(
         &self,

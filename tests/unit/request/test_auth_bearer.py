@@ -129,7 +129,7 @@ def test_auth_and_auth_bearer_together_raises(flaky_server):
         )
 
 
-def test_client_default_bearer_is_overidden_by_per_request_basic_auth(flaky_server):
+def test_client_default_bearer_is_overridden_by_per_request_basic_auth(flaky_server):
     """Client-level bearer default + per-request basic auth = override."""
 
     client = rqx.Client(auth_bearer=TOKEN)

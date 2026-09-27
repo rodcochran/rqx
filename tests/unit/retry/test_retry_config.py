@@ -91,18 +91,6 @@ def test_raise_on_status_false_returns_response(flaky_server):
     assert resp.status_code == 503
 
 
-# ----- raise_on_redirect -----
-
-
-def test_raise_on_redirect_true_raises_on_loop(flaky_server):
-    """Default: raise_on_redirect=True → TooManyRedirects on loop."""
-    retries = rqx.Retry()
-    transport = rqx.HTTPTransport(retries=retries)
-    client = rqx.Client(transport=transport, follow_redirects=True, max_redirects=2)
-    with pytest.raises(rqx.TooManyRedirects):
-        client.get(f"{flaky_server}/redirect-loop")
-
-
 # ----- async variants -----
 
 

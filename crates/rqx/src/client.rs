@@ -5,7 +5,6 @@ use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python, pyclass, pymethods};
 
 use rqx_core::auth::Auth;
 use rqx_core::client::{Client, ClientConfig};
-use rqx_core::redirect::RedirectPolicy;
 use rqx_core::timeout::Timeout;
 use rqx_core::url::request_url::BaseUrl;
 
@@ -34,7 +33,7 @@ pub struct PyClient {
 #[pymethods]
 impl PyClient {
     #[new]
-    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, base_url=None, auth_bearer=None, transport=None, redirects=None,))]
+    #[pyo3(signature = (verify=None, cert=None, timeout=None, follow_redirects=None, max_redirects=None, base_url=None, auth_bearer=None, transport=None, redirects=None))]
     fn __new__(
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
@@ -48,10 +47,11 @@ impl PyClient {
     ) -> Result<Self, PyRqxError> {
         let parsed_base_url = base_url.map(|url| BaseUrl::new(&url.inner)).transpose()?;
 
-        let redirect_policy = match redirects {
-            Some(r) => r.inner,
-            None => RedirectPolicy::with_defaults(follow_redirects, max_redirects, None),
-        };
+        let redirect_policy = PyRedirectPolicy::valid_policy_from_options(
+            follow_redirects,
+            max_redirects,
+            redirects,
+        )?;
 
         let timeout_config = match timeout {
             Some(t) => PyTimeout::extract_any(t)?.inner,
@@ -90,6 +90,13 @@ impl PyClient {
     #[getter]
     fn cookies(&self) -> HashMap<String, String> {
         self.inner.cookies_snapshot()
+    }
+
+    #[getter]
+    fn redirects(&self) -> PyRedirectPolicy {
+        PyRedirectPolicy {
+            inner: self.inner.redirects(),
+        }
     }
 
     #[pyo3(signature = (method, url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -416,10 +423,11 @@ impl PyAsyncClient {
         redirects: Option<PyRedirectPolicy>,
     ) -> Result<Self, PyRqxError> {
         let parsed_base_url = base_url.map(|url| BaseUrl::new(&url.inner)).transpose()?;
-        let redirect_policy = match redirects {
-            Some(r) => r.inner,
-            None => RedirectPolicy::with_defaults(follow_redirects, max_redirects, None),
-        };
+        let redirect_policy = PyRedirectPolicy::valid_policy_from_options(
+            follow_redirects,
+            max_redirects,
+            redirects,
+        )?;
         let timeout_config = match timeout {
             Some(t) => PyTimeout::extract_any(t)?.inner,
             None => Timeout::default(),
@@ -459,6 +467,13 @@ impl PyAsyncClient {
         self.inner.cookies_snapshot()
     }
 
+    #[getter]
+    fn redirects(&self) -> PyRedirectPolicy {
+        PyRedirectPolicy {
+            inner: self.inner.redirects(),
+        }
+    }
+
     #[pyo3(signature = (method, url, content=None, data=None, json=None, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
     fn request<'a>(
         &self,
@@ -483,7 +498,7 @@ impl PyAsyncClient {
 
         let auth_config = match (&auth, &auth_bearer) {
             (None, None) => None,
-            _ => Some(Auth::new(auth, auth_bearer).map_err(|e| PyRqxError::Core(e))?),
+            _ => Some(Auth::new(auth, auth_bearer).map_err(PyRqxError::Core)?),
         };
         RUNTIME.future_into_py(py, async move {
             inner
@@ -729,7 +744,7 @@ impl PyAsyncClient {
 
         let auth_config = match (&auth, &auth_bearer) {
             (None, None) => None,
-            _ => Some(Auth::new(auth, auth_bearer).map_err(|e| PyRqxError::Core(e))?),
+            _ => Some(Auth::new(auth, auth_bearer).map_err(PyRqxError::Core)?),
         };
 
         let request = self.inner.build(

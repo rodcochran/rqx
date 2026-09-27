@@ -1,6 +1,8 @@
-use pyo3::prelude::{PyResult, pyclass, pymethods};
+use pyo3::prelude::{pyclass, pymethods};
 
 use rqx_core::redirect::RedirectPolicy;
+
+use crate::exceptions::{PyRqxError, RqxError};
 
 #[pyclass(name = "RedirectPolicy", from_py_object, module = "rqx", frozen)]
 #[derive(Clone)]
@@ -11,6 +13,39 @@ pub struct PyRedirectPolicy {
 impl PyRedirectPolicy {
     pub fn new(inner: RedirectPolicy) -> Self {
         Self { inner }
+    }
+
+    pub fn valid_policy_from_options(
+        follow_redirects: Option<bool>,
+        max_redirects: Option<u32>,
+        redirects: Option<PyRedirectPolicy>,
+    ) -> Result<RedirectPolicy, PyRqxError> {
+        match redirects {
+            Some(r) => {
+                if let Some(mr) = max_redirects {
+                    if r.max_redirects() != mr {
+                        return Err(RqxError::new_err(
+                            "Cannot specify conflicting max_redirects and RedirectPolicy.max_redirects",
+                        )
+                        .into());
+                    }
+                }
+                if let Some(fr) = follow_redirects {
+                    if r.follow() != fr {
+                        return Err(RqxError::new_err(
+                            "Cannot specify conflicting follow_redirects and RedirectPolicy.follow",
+                        )
+                        .into());
+                    }
+                }
+                Ok(r.inner)
+            }
+            None => Ok(RedirectPolicy::with_defaults(
+                follow_redirects,
+                max_redirects,
+                None,
+            )),
+        }
     }
 }
 
@@ -26,10 +61,17 @@ impl PyRedirectPolicy {
         follow: Option<bool>,
         max_redirects: Option<u32>,
         raise_on_exceeded: Option<bool>,
-    ) -> PyResult<Self> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             inner: RedirectPolicy::with_defaults(follow, max_redirects, raise_on_exceeded),
-        })
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "RedirectPolicy(follow={:?}, read={:?}, write={:?})",
+            self.inner.follow, self.inner.max_redirects, self.inner.raise_on_exceeded,
+        )
     }
 
     // whether to follow redirects

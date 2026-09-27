@@ -62,7 +62,6 @@ pub struct Retry {
     pub allowed_methods: HashSet<String>,
     pub respect_retry_after_header: bool,
     pub raise_on_status: bool,
-    // pub raise_on_redirect: bool,
     pub total_timeout: Option<f64>,
 }
 
@@ -79,7 +78,6 @@ impl Retry {
         allowed_methods: Option<HashSet<String>>,
         respect_retry_after_header: Option<bool>,
         raise_on_status: Option<bool>,
-        // raise_on_redirect: Option<bool>,
         total_timeout: Option<f64>,
     ) -> Self {
         let default_total = total.unwrap_or(DEFAULT_TOTAL_RETRIES);

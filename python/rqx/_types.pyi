@@ -243,6 +243,10 @@ class Timeout:
 # ---------------------------------------------------------------------------
 
 class RedirectPolicy:
+    follow: bool | None
+    max_redirects: int | None
+    raise_on_exceeded: bool | None
+
     def __init__(
         self,
         follow: bool | None = None,
