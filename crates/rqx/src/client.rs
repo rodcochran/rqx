@@ -6,7 +6,7 @@ use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python, pyclass, pymethods};
 use rqx_core::auth::Auth;
 use rqx_core::client::{Client, ClientConfig};
 use rqx_core::timeout::Timeout;
-use rqx_core::url::request_url::BaseUrl;
+use rqx_core::url::base_url::BaseUrl;
 
 use crate::exceptions::*;
 use crate::py_json::JsonBody;
@@ -45,7 +45,7 @@ impl PyClient {
         transport: Option<PyRef<'_, HTTPTransport>>,
         redirects: Option<PyRedirectPolicy>,
     ) -> Result<Self, PyRqxError> {
-        let parsed_base_url = base_url.map(|url| BaseUrl::new(&url.inner)).transpose()?;
+        let parsed_base_url = base_url.map(|url| BaseUrl::new(url.inner)).transpose()?;
 
         let redirect_policy = PyRedirectPolicy::valid_policy_from_options(
             follow_redirects,
@@ -422,7 +422,7 @@ impl PyAsyncClient {
         transport: Option<PyRef<'_, AsyncHTTPTransport>>,
         redirects: Option<PyRedirectPolicy>,
     ) -> Result<Self, PyRqxError> {
-        let parsed_base_url = base_url.map(|url| BaseUrl::new(&url.inner)).transpose()?;
+        let parsed_base_url = base_url.map(|url| BaseUrl::new(url.inner)).transpose()?;
         let redirect_policy = PyRedirectPolicy::valid_policy_from_options(
             follow_redirects,
             max_redirects,

@@ -15,9 +15,8 @@ use crate::response::{BufferedResponse, PendingResponse};
 
 use crate::timeout::Timeout;
 use crate::transport::Transport;
-use crate::url::client_url::RqxClientUrl;
+use crate::url::base_url::BaseUrl;
 use crate::url::reference::UrlReference;
-use crate::url::request_url::BaseUrl;
 
 const DEFAULT_TIMEOUT: f64 = 15.0;
 
@@ -99,7 +98,7 @@ impl Client {
     pub async fn request(
         &self,
         method: &str,
-        url: RqxClientUrl,
+        url: UrlReference,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
@@ -132,7 +131,7 @@ impl Client {
     pub fn build(
         &self,
         method: &str,
-        url: RqxClientUrl,
+        url: UrlReference,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
@@ -144,7 +143,7 @@ impl Client {
         RequestSpec::build(
             self.transport.client(),
             method,
-            self.merge_url(&url)?,
+            self.merge_url(url)?,
             params,
             RequestBody::new(content, data, json)?,
             headers,
@@ -153,15 +152,11 @@ impl Client {
         )
     }
 
-    fn merge_url(&self, url: &RqxClientUrl) -> Result<Url, RqxError> {
-        if let UrlReference::Absolute(absolute) = url.get_inner()
-            && absolute.has_authority()
-        {
-            return Ok(absolute);
-        }
-        match &self.config.base_url {
-            Some(base) => base.join(url),
-            None => Err(TransportError::UnsupportedProtocol(
+    fn merge_url(&self, url: UrlReference) -> Result<Url, RqxError> {
+        match (url, &self.config.base_url) {
+            (UrlReference::Absolute(absolute), _) if absolute.has_authority() => Ok(absolute),
+            (url, Some(base)) => base.join(&url),
+            (_, None) => Err(TransportError::UnsupportedProtocol(
                 "Request URL is missing an 'http://' or 'https://' protocol.".to_string(),
             )
             .into()),

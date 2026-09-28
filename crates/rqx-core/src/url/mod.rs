@@ -1,4 +1,3 @@
-pub mod client_url;
+pub mod base_url;
 pub mod components;
 pub mod reference;
-pub mod request_url;

@@ -11,7 +11,6 @@ use reqwest::Response;
 use super::error::*;
 use super::headers::Headers;
 
-use crate::url::client_url::RqxClientUrl;
 use crate::url::reference::UrlReference;
 
 /// Headers received, body unread. Everything known before the body — status,
@@ -73,7 +72,7 @@ impl BufferedResponse {
 pub struct ResponseParts {
     pub status_code: u16,
     pub headers: Headers,
-    pub url: RqxClientUrl,
+    pub url: UrlReference,
     pub elapsed: Duration,
     pub num_retries: u32,
     pub retry_history: Vec<(String, f64)>,
@@ -219,7 +218,7 @@ impl From<&Response> for ResponseParts {
         ResponseParts {
             status_code: response.status().as_u16(),
             headers: Headers::from_header_map(response.headers().clone()),
-            url: RqxClientUrl::new(UrlReference::from_url(response.url().clone())),
+            url: UrlReference::from_url(response.url().clone()),
             elapsed: Duration::ZERO,
             num_retries: 0,
             retry_history: Vec::new(),
