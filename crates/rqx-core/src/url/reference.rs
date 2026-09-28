@@ -2,6 +2,7 @@
 //! (https://github.com/rodcochran/rqx/issues/59).
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
@@ -13,8 +14,8 @@ use percent_encoding::percent_decode_str;
 use url::{ParseError, Url};
 
 use crate::error::*;
-use crate::query_params::QueryPairs;
-use crate::url::components::UrlComponents;
+use crate::query_params::{QueryPairs, ScalarValue};
+use crate::url::components::{UrlComponentValue, UrlComponents};
 
 /// `url::Url` gives WHATWG normalization — default ports dropped, hosts
 /// lowercased and punycoded, paths percent-encoded — but can't hold a URL
@@ -244,6 +245,36 @@ impl UrlReference {
                 ..UrlComponents::default()
             },
         )
+    }
+
+    pub fn copy_with(
+        &self,
+        kwargs: HashMap<String, Option<UrlComponentValue>>,
+    ) -> Result<Self, RqxError> {
+        if kwargs.is_empty() {
+            return Ok(self.clone());
+        }
+        let components = UrlComponents::from_hash_map(kwargs)?;
+        Self::compose(Some(self), components)
+    }
+
+    pub fn copy_set_param(&self, key: &str, value: Option<ScalarValue>) -> Result<Self, RqxError> {
+        self.with_params(&self.params().set(key, QueryPairs::scalar(value)))
+    }
+
+    pub fn copy_add_param(&self, key: &str, value: Option<ScalarValue>) -> Result<Self, RqxError> {
+        self.with_params(&self.params().add(key, QueryPairs::scalar(value)))
+    }
+
+    pub fn copy_remove_param(&self, key: &str) -> Result<Self, RqxError> {
+        self.with_params(&self.params().remove(key))
+    }
+
+    pub fn copy_merge_params(&self, params: Option<QueryPairs>) -> Result<Self, RqxError> {
+        match params {
+            Some(params) => self.with_params(&self.params().merge(&params)),
+            None => Ok(self.clone()),
+        }
     }
 
     pub fn masked(&self) -> String {

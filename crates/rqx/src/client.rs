@@ -45,7 +45,7 @@ impl PyClient {
         transport: Option<PyRef<'_, HTTPTransport>>,
         redirects: Option<PyRedirectPolicy>,
     ) -> Result<Self, PyRqxError> {
-        let parsed_base_url = base_url.map(|url| BaseUrl::new(&url.inner)).transpose()?;
+        let parsed_base_url = base_url.map(|url| BaseUrl::new(url.inner)).transpose()?;
 
         let redirect_policy = PyRedirectPolicy::valid_policy_from_options(
             follow_redirects,
@@ -422,7 +422,7 @@ impl PyAsyncClient {
         transport: Option<PyRef<'_, AsyncHTTPTransport>>,
         redirects: Option<PyRedirectPolicy>,
     ) -> Result<Self, PyRqxError> {
-        let parsed_base_url = base_url.map(|url| BaseUrl::new(&url.inner)).transpose()?;
+        let parsed_base_url = base_url.map(|url| BaseUrl::new(url.inner)).transpose()?;
         let redirect_policy = PyRedirectPolicy::valid_policy_from_options(
             follow_redirects,
             max_redirects,
