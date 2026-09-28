@@ -1,6 +1,6 @@
 # rqx 0.4.0 — Performance Report
 
-**rqx has the highest throughput and lowest median latency** of the four clients tested (rqx, httpr, aiohttp, httpx) at every concurrency, and the smallest memory footprint at c=10 and c=50. **aiohttp still wins tail-latency consistency** (p99/p50 of ~1.1× vs rqx's ~1.9–2.1×), and from c=100 up aiohttp, and from c=500 up httpr and httpx, use less memory than rqx.
+**rqx has the highest throughput** of the four clients tested (rqx, httpr, aiohttp, httpx) at every concurrency, **and the lowest median latency from c=10 to c=100** (tied with aiohttp at c=1; latency is not measured above c=100), and the smallest memory footprint at c=10 and c=50. **aiohttp still wins tail-latency consistency** (p99/p50 of ~1.1× vs rqx's ~1.9–2.1×), and from c=100 up aiohttp, and from c=500 up httpr and httpx, use less memory than rqx.
 
 **Throughput is up 7–14% against 0.3.0, 3.5–7 points more than the machines explain.** This instance pair is faster than 0.3.0's (httpr +3–7%, aiohttp +1–7% on identical versions), and rqx rose more than either at every concurrency. The extra is consistent with fat LTO, which this release turns on to recover the cross-crate inlining the crate split removed (see *Same-box A/B*). **The tables below are the release run, which predates PR #210.** That run found peak memory at c=500 and c=1000 up 9–11 MB against 0.3.0. PR #210 traced it to a wrapper added in PR #202 that stored each in-flight request's async state twice, and fixed it; its same-box A/B puts c=500 back at 0.3.0's level and adds 4.5–7.2% throughput on top of the numbers here (see *Memory* and *Same-box A/B*).
 
@@ -37,7 +37,7 @@ Spreads are tighter than 0.3.0's for rqx, and there is no session-long drift lik
 | 500  | 19,021    | 21,137    | +11.1% | +4.6%   | +7.2%     | +8.6%   |
 | 1000 | 18,697    | 20,549    | +9.9%  | +5.7%   | —         | 0.0%    |
 
-The controls ran the same software as 0.3.0 (httpr 0.7.2, aiohttp 3.14.3, httpx 0.28.1, `rustc` 1.98.1, Python 3.12.3) with the same harness, so their movement is the instance pair: 1–7% faster. rqx beats httpr's movement by 3.5–7.3 points at every concurrency and aiohttp's by 3.6–10.0. httpx moves −1.5% to +8.6%, in the same band as the other controls; rqx's lead over it is 36× at c=100 and 52× at c=1000 (46× in 0.3.0, where httpx was the same 395 RPS).
+The controls ran the same software as 0.3.0 (httpr 0.7.2, aiohttp 3.14.3, httpx 0.28.1, `rustc` 1.98.1, Python 3.12.3) with the same harness, so their movement is the instance pair: 1–7% faster. rqx beats httpr's movement by 3.5–7.3 points at every concurrency and aiohttp's by 3.6–10.0. httpx moves −1.5% to +8.6%, in the same band as the other controls; rqx's lead over it is 36× at c=100 and 52× at c=1000 (47× in 0.3.0, where httpx was the same 395 RPS).
 
 ### Same-box A/B
 

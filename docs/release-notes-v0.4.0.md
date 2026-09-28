@@ -28,7 +28,7 @@ URLs, query parameters and client configuration, and a breaking release. `rqx.UR
 
 ## Performance
 
-* **URL and QueryParams (#196):** interleaved A/B against `main` on the AWS pair found no regression in throughput, latency or memory. Two apparent regressions were measurement artifacts: an RSS difference caused by build order, and a −4.7% at c=500 from three runs per side that 20 alternating pairs measured at −0.6%. Measured costs: +80 bytes per live response and +147 KB of module text.
+* **URL and QueryParams (#196):** interleaved A/B against `main` on the AWS pair found no measurable regression in throughput, latency or memory. Two apparent regressions were measurement artifacts: an RSS difference caused by build order, and a −4.7% at c=500 from three runs per side that 20 alternating pairs measured at −0.6%. Separately from the benchmark, the change's measured costs are +80 bytes per live response and +147 KB of module text.
 * **Multi-crate split (#202):** release builds now use fat LTO, which restores the cross-crate inlining the split removed. Measured 2026-09-22: +4% throughput and a 17% smaller wheel against v0.3.0.
 * **Configuration refactor (#204):** same-box A/B against `main` (`15ee73b` vs `8884722`), 20 alternating pairs per concurrency on paired AWS `c7i.large` instances:
 
