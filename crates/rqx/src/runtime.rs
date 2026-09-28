@@ -41,6 +41,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::time::Duration;
 
+use futures::TryFutureExt;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3_async_runtimes::TaskLocals;
@@ -134,11 +135,20 @@ impl Runtime {
         // thread before returning.
         let handle = self.handle()?;
         SPAWN_HANDLE.with(|slot| *slot.borrow_mut() = Some(handle));
-        let result = generic::future_into_py::<Bridge, _, T>(py, async move {
-            fut.await.map_err(|e| PyErr::from(e.into()))
-        });
+        let result = generic::future_into_py::<Bridge, _, T>(py, Self::with_py_errors(fut));
         SPAWN_HANDLE.with(|slot| slot.borrow_mut().take());
         result
+    }
+
+    /// `fut` with its error converted to a `PyErr`. A combinator, not an
+    /// `async move` block: the block would store `fut` twice, once captured
+    /// and once awaited (https://github.com/rodcochran/rqx/issues/209).
+    fn with_py_errors<F, T, E>(fut: F) -> impl Future<Output = PyResult<T>>
+    where
+        F: Future<Output = Result<T, E>>,
+        E: Into<PyRqxError>,
+    {
+        fut.map_err(|e| PyErr::from(e.into()))
     }
 
     /// Shut the runtime down ahead of interpreter finalization. Called from
@@ -358,5 +368,31 @@ impl ContextExt for Bridge {
         TASK_LOCALS
             .try_with(|c| c.get().cloned())
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::mem::size_of_val;
+
+    use super::Runtime;
+
+    /// The task future holds each in-flight request's state, so converting
+    /// its error must not store that state a second time
+    /// (https://github.com/rodcochran/rqx/issues/209).
+    #[test]
+    fn error_conversion_does_not_duplicate_the_future() {
+        let request = async {
+            let state = [0u8; 4096];
+            std::future::ready(()).await;
+            Ok::<_, rqx_core::error::RqxError>(state.len())
+        };
+        let request_size = size_of_val(&request);
+        let task = Runtime::with_py_errors(request);
+        assert!(
+            size_of_val(&task) <= request_size + 64,
+            "task future is {} bytes for a {request_size}-byte request future",
+            size_of_val(&task),
+        );
     }
 }
