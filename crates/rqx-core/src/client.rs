@@ -143,7 +143,7 @@ impl Client {
         RequestSpec::build(
             self.transport.client(),
             method,
-            self.merge_url(&url)?,
+            self.merge_url(url)?,
             params,
             RequestBody::new(content, data, json)?,
             headers,
@@ -152,15 +152,11 @@ impl Client {
         )
     }
 
-    fn merge_url(&self, url: &UrlReference) -> Result<Url, RqxError> {
-        if let UrlReference::Absolute(absolute) = url
-            && absolute.has_authority()
-        {
-            return Ok(absolute.clone());
-        }
-        match &self.config.base_url {
-            Some(base) => base.join(url),
-            None => Err(TransportError::UnsupportedProtocol(
+    fn merge_url(&self, url: UrlReference) -> Result<Url, RqxError> {
+        match (url, &self.config.base_url) {
+            (UrlReference::Absolute(absolute), _) if absolute.has_authority() => Ok(absolute),
+            (url, Some(base)) => base.join(&url),
+            (_, None) => Err(TransportError::UnsupportedProtocol(
                 "Request URL is missing an 'http://' or 'https://' protocol.".to_string(),
             )
             .into()),
