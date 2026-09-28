@@ -6,7 +6,7 @@ use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python, pyclass, pymethods};
 use rqx_core::auth::Auth;
 use rqx_core::client::{Client, ClientConfig};
 use rqx_core::timeout::Timeout;
-use rqx_core::url::request_url::BaseUrl;
+use rqx_core::url::base_url::BaseUrl;
 
 use crate::exceptions::*;
 use crate::py_json::JsonBody;

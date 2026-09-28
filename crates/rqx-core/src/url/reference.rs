@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
 use iri_string::components::AuthorityComponents;
 use iri_string::percent_encode::PercentEncoded;
@@ -381,5 +382,11 @@ impl fmt::Display for UrlReference {
 impl PartialEq for UrlReference {
     fn eq(&self, other: &Self) -> bool {
         self.to_string() == other.to_string()
+    }
+}
+
+impl Hash for UrlReference {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.to_string().hash(state);
     }
 }

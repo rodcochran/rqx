@@ -1,6 +1,5 @@
 use url::Url;
 
-use super::client_url::RqxClientUrl;
 use super::reference::UrlReference;
 use crate::error::RqxError;
 
@@ -13,9 +12,9 @@ use crate::error::RqxError;
 pub struct BaseUrl(Url);
 
 impl BaseUrl {
-    pub fn new(url: &RqxClientUrl) -> Result<Self, RqxError> {
-        match url.get_inner() {
-            UrlReference::Absolute(base) => Ok(Self(base).with_trailing_slash()),
+    pub fn new(url: &UrlReference) -> Result<Self, RqxError> {
+        match url {
+            UrlReference::Absolute(base) => Ok(Self(base.clone()).with_trailing_slash()),
             UrlReference::Relative(_) => Err(RqxError::InvalidURL(format!(
                 "invalid base_url \"{url}\": relative URL without a base"
             ))),
@@ -35,7 +34,7 @@ impl BaseUrl {
 
     // A reference contributes its path and query only. An authority it carries
     // (`//other.example/x`) is not a host rqx will target, as in httpx.
-    pub fn join(&self, url: &RqxClientUrl) -> Result<Url, RqxError> {
+    pub fn join(&self, url: &UrlReference) -> Result<Url, RqxError> {
         match self.0.join(url.raw_path().trim_start_matches('/')) {
             Ok(joined) => Ok(joined),
             Err(e) => Err(RqxError::InvalidURL(format!(

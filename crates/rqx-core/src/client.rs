@@ -15,9 +15,8 @@ use crate::response::{BufferedResponse, PendingResponse};
 
 use crate::timeout::Timeout;
 use crate::transport::Transport;
-use crate::url::client_url::RqxClientUrl;
+use crate::url::base_url::BaseUrl;
 use crate::url::reference::UrlReference;
-use crate::url::request_url::BaseUrl;
 
 const DEFAULT_TIMEOUT: f64 = 15.0;
 
@@ -99,7 +98,7 @@ impl Client {
     pub async fn request(
         &self,
         method: &str,
-        url: RqxClientUrl,
+        url: UrlReference,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
@@ -132,7 +131,7 @@ impl Client {
     pub fn build(
         &self,
         method: &str,
-        url: RqxClientUrl,
+        url: UrlReference,
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
@@ -153,11 +152,11 @@ impl Client {
         )
     }
 
-    fn merge_url(&self, url: &RqxClientUrl) -> Result<Url, RqxError> {
-        if let UrlReference::Absolute(absolute) = url.get_inner()
+    fn merge_url(&self, url: &UrlReference) -> Result<Url, RqxError> {
+        if let UrlReference::Absolute(absolute) = url
             && absolute.has_authority()
         {
-            return Ok(absolute);
+            return Ok(absolute.clone());
         }
         match &self.config.base_url {
             Some(base) => base.join(url),

@@ -7,10 +7,8 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyString};
 
-use rqx_core::url::request_url::BaseUrl;
-use rqx_core::url::{
-    client_url::RqxClientUrl, components::UrlComponentValue, reference::UrlReference,
-};
+use rqx_core::url::base_url::BaseUrl;
+use rqx_core::url::{components::UrlComponentValue, reference::UrlReference};
 
 use crate::exceptions::PyRqxError;
 use crate::query_params::{PyQueryParams, PyScalarValue, RequestQueryParams};
@@ -58,18 +56,16 @@ impl UrlKwargs {
 
 #[pyclass(name = "URL", module = "rqx", frozen, skip_from_py_object)]
 pub struct PyURL {
-    pub(crate) inner: RqxClientUrl,
+    pub(crate) inner: UrlReference,
 }
 
 impl PyURL {
-    pub fn new(url: RqxClientUrl) -> Self {
+    pub fn new(url: UrlReference) -> Self {
         Self { inner: url }
     }
 
     pub(crate) fn from_base_url(base_url: &BaseUrl) -> Self {
-        Self::new(RqxClientUrl::new(UrlReference::from_url(
-            base_url.get_inner(),
-        )))
+        Self::new(UrlReference::from_url(base_url.get_inner()))
     }
 }
 
@@ -80,7 +76,7 @@ impl PyURL {
     fn py_new(url: Option<PyURL>, kwargs: Option<&Bound<'_, PyDict>>) -> Result<Self, PyRqxError> {
         let base = match url {
             Some(url) => url,
-            None => Self::new(RqxClientUrl::parse("")?),
+            None => Self::new(UrlReference::parse("")?),
         };
         base.copy_with(kwargs)
     }
@@ -218,7 +214,7 @@ impl<'py> FromPyObject<'_, 'py> for PyURL {
             return Ok(Self::new(url.get().inner.clone()));
         }
         match obj.cast::<PyString>() {
-            Ok(s) => Ok(Self::new(RqxClientUrl::parse(&s.to_cow()?)?)),
+            Ok(s) => Ok(Self::new(UrlReference::parse(&s.to_cow()?)?)),
             Err(_) => Err(PyTypeError::new_err(format!(
                 "Invalid type for url. Expected str or rqx.URL, got {}",
                 obj.get_type().name()?
