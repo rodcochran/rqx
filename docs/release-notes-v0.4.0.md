@@ -4,7 +4,7 @@
 pip install --upgrade rqx
 ```
 
-URLs, query parameters and client configuration, and a breaking release. `rqx.URL` and `rqx.QueryParams` arrive with httpx's semantics, and `response.url` and `client.base_url` now return a `URL` instead of a string. `params=` now follows httpx: `None` sends an empty value, list values repeat the key, and passing `params=` replaces any query already on the URL. Redirect settings move off `Retry` into a new `rqx.RedirectPolicy`. A per-request `auth=` now replaces a client-level `auth_bearer` instead of raising. Every change below that alters existing behavior is listed under Behavior changes. Same-box benchmark A/Bs found no performance regression from the URL work or the configuration refactor.
+URLs, query parameters and client configuration, and a breaking release. `rqx.URL` and `rqx.QueryParams` arrive with httpx's semantics, and `response.url` and `client.base_url` now return a `URL` instead of a string. `params=` now follows httpx: `None` sends an empty value, list values repeat the key, and passing `params=` replaces any query already on the URL. Redirect settings move off `Retry` into a new `rqx.RedirectPolicy`. A per-request `auth=` now replaces a client-level `auth_bearer` instead of raising. Every change below that alters existing behavior is listed under Behavior changes. Throughput is up 7–14% against 0.3.0, mostly from the fat-LTO build that accompanies the crate split; peak memory at c=500 and above is up 9–11 MB, a known regression listed under Performance.
 
 ## Behavior changes
 
@@ -39,7 +39,13 @@ URLs, query parameters and client configuration, and a breaking release. `rqx.UR
   | 500 | 19,769 | 19,741 | −0.05% | 10/20 | 75.3 → 74.6 MB |
 
   All within the noise floor. The httpr and aiohttp controls drifted by 3–4% during the session, which the alternating order cancels.
-* **Release run:** _TODO — full b1/b2/b8 run before tagging; charts and report in `benchmarks/0.4.0/`._
+
+Full run on paired AWS `c7i.large` instances (client + nginx, single-AZ), rqx at `a7c7f33`, 5 runs per bench, against httpr 0.7.2, aiohttp 3.14.3, httpx 0.28.1 — the same comparator versions as 0.3.0. Charts in [`benchmarks/0.4.0/`](https://github.com/rodcochran/rqx/tree/v0.4.0/benchmarks/0.4.0); tables, method, the A/Bs and limitations in [`benchmarks/0.4.0/report.md`](https://github.com/rodcochran/rqx/blob/v0.4.0/benchmarks/0.4.0/report.md).
+
+* **Throughput (b1):** up 7–14% against 0.3.0, 3.5–7 points more than the httpr and aiohttp controls rose on this faster instance pair. That margin is in line with the fat-LTO A/B above. rqx leads every client at every concurrency — +31% over httpr and +67% over aiohttp at c=100, 52× httpx at c=1000.
+* **Latency (b2, c=100):** p50 4.39 ms (−8.2% against 0.3.0, controls −1 to −2%), lowest of the four; p99 10.20 ms, above aiohttp's 7.65 — the #168 tail, unchanged.
+* **Memory — known regression:** peak RSS at c=500 and c=1000 is up 8.9 MB and 10.6 MB (+13–14%) against 0.3.0, with every other client within 0.5 MB. Low concurrency is unchanged or lower (c=10 −1.3 MB). It came in with #196 or #202, not with dependency bumps or #204, and is not yet bisected.
+* **Stability:** zero aborts across 95 b1 cells, 5 b2 runs, 5 b8 runs; zero request failures. Fifth consecutive clean run.
 
 ## Internals
 
