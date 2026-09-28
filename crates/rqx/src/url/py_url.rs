@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -97,7 +98,7 @@ impl PyURL {
     }
 
     #[getter]
-    fn host(&self) -> String {
+    fn host(&self) -> Cow<'_, str> {
         self.inner.host()
     }
 
@@ -107,7 +108,7 @@ impl PyURL {
     }
 
     #[getter]
-    fn path(&self) -> String {
+    fn path(&self) -> Cow<'_, str> {
         self.inner.path()
     }
 
@@ -133,12 +134,12 @@ impl PyURL {
 
     #[getter]
     fn is_absolute_url(&self) -> bool {
-        self.inner.is_absolute_url()
+        self.inner.is_absolute()
     }
 
     #[getter]
     fn is_relative_url(&self) -> bool {
-        self.inner.is_relative_url()
+        !self.inner.is_absolute()
     }
 
     #[pyo3(signature = (**kwargs))]

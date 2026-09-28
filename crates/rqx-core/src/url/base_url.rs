@@ -12,9 +12,9 @@ use crate::error::RqxError;
 pub struct BaseUrl(Url);
 
 impl BaseUrl {
-    pub fn new(url: &UrlReference) -> Result<Self, RqxError> {
+    pub fn new(url: UrlReference) -> Result<Self, RqxError> {
         match url {
-            UrlReference::Absolute(base) => Ok(Self(base.clone()).with_trailing_slash()),
+            UrlReference::Absolute(base) => Ok(Self(base).with_trailing_slash()),
             UrlReference::Relative(_) => Err(RqxError::InvalidURL(format!(
                 "invalid base_url \"{url}\": relative URL without a base"
             ))),

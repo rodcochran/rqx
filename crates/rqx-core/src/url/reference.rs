@@ -379,6 +379,8 @@ impl fmt::Display for UrlReference {
     }
 }
 
+impl Eq for UrlReference {}
+
 impl PartialEq for UrlReference {
     fn eq(&self, other: &Self) -> bool {
         self.to_string() == other.to_string()
