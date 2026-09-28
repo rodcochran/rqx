@@ -72,7 +72,7 @@ just test         # full test suite
 
 Measured on a paired AWS c7i.large client/server (2 vCPU each, non-burstable) in `us-east-1`, hitting nginx over an intra-VPC private IP. Each bar is the median of 5 runs; each (client, concurrency, run) executes in its own Python subprocess to keep clients from contaminating each other's measurements.
 
-Charts below are from the 0.4.0 run (2026-09-27). Full methodology, per-concurrency tables, and limitations: [benchmarks/0.4.0/report.md](benchmarks/0.4.0/report.md). Earlier runs are kept at [benchmarks/0.3.0/report.md](benchmarks/0.3.0/report.md), [benchmarks/0.2.0/report.md](benchmarks/0.2.0/report.md), [benchmarks/0.1.5/report.md](benchmarks/0.1.5/report.md), [benchmarks/0.1.4/report.md](benchmarks/0.1.4/report.md), [benchmarks/0.1.3/report.md](benchmarks/0.1.3/report.md), and [docs/launch_report.md](docs/launch_report.md) for comparison.
+Charts below are from the 0.4.0 release run (2026-09-27), measured just before the last fix of the release ([#210](https://github.com/rodcochran/rqx/pull/210)), which a same-box A/B puts at a further +4.5% throughput and −2.5 MB peak memory at concurrency 100 (+5.7% and −9.3 MB at 500). Full methodology, per-concurrency tables, and limitations: [benchmarks/0.4.0/report.md](benchmarks/0.4.0/report.md). Earlier runs are kept at [benchmarks/0.3.0/report.md](benchmarks/0.3.0/report.md), [benchmarks/0.2.0/report.md](benchmarks/0.2.0/report.md), [benchmarks/0.1.5/report.md](benchmarks/0.1.5/report.md), [benchmarks/0.1.4/report.md](benchmarks/0.1.4/report.md), [benchmarks/0.1.3/report.md](benchmarks/0.1.3/report.md), and [docs/launch_report.md](docs/launch_report.md) for comparison.
 
 ![Throughput at concurrency=100](benchmarks/0.4.0/throughput.png)
 

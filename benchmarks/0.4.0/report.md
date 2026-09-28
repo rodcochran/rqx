@@ -2,11 +2,11 @@
 
 **rqx has the highest throughput and lowest median latency** of the four clients tested (rqx, httpr, aiohttp, httpx) at every concurrency, and the smallest memory footprint at c=10 and c=50. **aiohttp still wins tail-latency consistency** (p99/p50 of ~1.1× vs rqx's ~1.9–2.1×), and from c=100 up aiohttp, and from c=500 up httpr and httpx, use less memory than rqx.
 
-**Throughput is up 7–14% against 0.3.0, 3.5–7 points more than the machines explain.** This instance pair is faster than 0.3.0's (httpr +3–7%, aiohttp +1–7% on identical versions), and rqx rose more than either at every concurrency. The extra is consistent with fat LTO, which this release turns on to recover the cross-crate inlining the crate split removed (see *Same-box A/B*). **Peak memory at c=500 and c=1000 is up 9–11 MB**, with every other client flat; it arrived with PR #196 or PR #202 and is not yet bisected (see *Memory*).
+**Throughput is up 7–14% against 0.3.0, 3.5–7 points more than the machines explain.** This instance pair is faster than 0.3.0's (httpr +3–7%, aiohttp +1–7% on identical versions), and rqx rose more than either at every concurrency. The extra is consistent with fat LTO, which this release turns on to recover the cross-crate inlining the crate split removed (see *Same-box A/B*). **The tables below are the release run, which predates PR #210.** That run found peak memory at c=500 and c=1000 up 9–11 MB against 0.3.0. PR #210 traced it to a wrapper added in PR #202 that stored each in-flight request's async state twice, and fixed it; its same-box A/B puts c=500 back at 0.3.0's level and adds 4.5–7.2% throughput on top of the numbers here (see *Memory* and *Same-box A/B*).
 
 > *These benchmarks are basic and machine-dependent. They are intended as a rough comparison, not a definitive ranking. Results are specific to a 2-vCPU client on AWS c7i.large hitting a same-VPC nginx server over plaintext HTTP/1.1.*
 
-Run: `20260927-231729` · raw logs in [`../results/aws-20260928-v040/`](../results/aws-20260928-v040/) · rqx at `a7c7f33` (`main` with PRs #196, #202 and #204; the binary reports 0.3.0 because the bump lands with the release)
+Run: `20260927-231729` · raw logs in [`../results/aws-20260928-v040/`](../results/aws-20260928-v040/) · rqx at `a7c7f33` (`main` with PRs #196, #202 and #204; the binary reports 0.3.0 because the bump lands with the release). PR #210 landed after this run and is measured by its own A/B below; the tables and charts are the build without it.
 
 ## Throughput
 
@@ -45,8 +45,17 @@ Two same-box A/Bs cover this release's code, each with 20 alternating pairs per 
 
 - **The crate split and fat LTO (PR #202, run `ab-20260922-220938`, c=10).** Splitting rqx into a pure-Rust core and a binding crate cost 4.25% (split slower in 20/20 pairs): calls from the binding into core became calls across a crate boundary, which the compiler cannot inline without LTO. The same split with the old dependency versions was within 0.4% of the new ones, so the dependency bumps are not a factor. With fat LTO the split build was 4.06% faster than v0.3.0 (20/20 pairs) and its wheel 17% smaller.
 - **The configuration refactor (PR #204, run `ab-20260927-171507`, `main` vs the branch).** −0.45% at c=10 (branch faster in 7/20 pairs), +0.31% at c=100 (11/20), −0.05% at c=500 (10/20), peak RSS within 0.7 MB. No detectable effect.
+- **The task-future fix (PR #210, run `ab-20260928-013423`, `main` at `a7c7f33` vs the fix at `79ceb2d`).** Measured after the release run, on a fresh instance pair:
 
-The release run's rqx lead over the controls, 3.5–7 points, is in line with the LTO result. Raw A/B logs are not archived with the release run; the conclusions are recorded here.
+  | c    | `a7c7f33` rps | PR #210 rps | median Δ | PR #210 faster | peak RSS `a7c7f33` → PR #210 |
+  | ---: | ------------: | ----------: | -------: | -------------: | ---------------------------: |
+  | 100  | 19,752        | 20,732      | +4.53%   | 20/20          | 40.7 → 38.2 MB               |
+  | 500  | 18,986        | 19,886      | +5.67%   | 19/20          | 74.9 → 65.6 MB               |
+  | 1000 | 18,175        | 19,482      | +7.22%   | 20/20          | 104.1 → 90.8 MB              |
+
+  httpr and aiohttp controls moved 2% or less within each block. The throughput gain grows with concurrency, which fits the cause: each in-flight request's task is half the size to allocate and copy (see *Memory*).
+
+The release run's rqx lead over the controls, 3.5–7 points, is in line with the LTO result; PR #210's gain is on top of it. Raw A/B logs are not archived with the release run; the conclusions are recorded here.
 
 ## Memory
 
@@ -61,9 +70,11 @@ Peak RSS in MB (median of 5 runs), measured via `resource.getrusage` in each cli
 | httpr   | 35.3     | 40.3     | 43.5     | 52.4     | **58.6** |
 | httpx   | 34.2     | 39.2     | 43.7     | 56.5     | 66.0     |
 
-**rqx's high-concurrency memory is up against 0.3.0: +8.9 MB (+14%) at c=500 and +10.6 MB (+13%) at c=1000.** Low concurrency is unchanged or better (c=10 −1.3 MB, c=50 ±0, c=100 +1.3 MB). Every other client is within 0.5 MB of 0.3.0 at every concurrency, so this is rqx, not the machine.
+**In this run, rqx's high-concurrency memory is up against 0.3.0: +8.9 MB (+14%) at c=500 and +10.6 MB (+13%) at c=1000. PR #210, released in 0.4.0, fixes it.** Low concurrency is unchanged or better (c=10 −1.3 MB, c=50 ±0, c=100 +1.3 MB). Every other client is within 0.5 MB of 0.3.0 at every concurrency, so this is rqx, not the machine.
 
-It is not this release's last change: PR #204's A/B shows 75.3 MB on `main` and 74.6 MB on the branch at c=500. The 22 September A/B already shows it: v0.3.0 at 66.3 MB against the split build at 77.3 MB at c=500, and 77.2 MB for the split with v0.3.0's dependency versions, so it came in with PR #196 (URL and QueryParams) or PR #202 (the crate split), not with dependency bumps. It scales with concurrency, roughly 10–20 KB per concurrent request, which points at something held per connection or per in-flight response rather than code size; PR #196's measured +80 bytes per live response is far too small to account for it. PR #196's own A/B reported no memory regression, but its memory analysis concentrated on low concurrency; if that holds at c=500, the crate split is the likelier source. Bisecting it is the next step: a same-box A/B of v0.3.0 against the PR #196 merge (`63863ed`) at c=500.
+**Cause.** PR #202 changed `Runtime::future_into_py` to convert the caller's error type with an `async move { fut.await.map_err(...) }` wrapper. rustc lays that block out with separate slots for the captured future and the future being awaited, and does not overlap them, so the whole request state was stored twice. Measured with nightly `-Zprint-type-sizes` on release builds, the heap-allocated task per in-flight `AsyncClient` request went from 4,424 bytes in 0.3.0 to 9,400 bytes. PR #210 replaces the wrapper with the `map_err` combinator, which stores the future once: 4,728 bytes (10,840 → 5,448 on the stream-enter path). A unit test pins the wrapper's overhead. Every in-flight request is a tokio task holding that state, so the cost scales with concurrency and was invisible at low c; the dependency bumps and PR #204 were ruled out by earlier A/Bs.
+
+**Effect.** In PR #210's A/B, peak RSS at c=500 went from 74.9 MB, which matches this run's 74.7, to 65.6 MB, level with 0.3.0's 65.8 MB. At c=1000 it dropped 13.3 MB, more than the 10.6 MB regression; the A/B measures for 8 s rather than 15 s, so its c=1000 absolute (104.1 → 90.8 MB) is not directly comparable to this table. The saving is larger than the per-request size difference alone predicts (about 4.7 KB × 500 ≈ 2.3 MB at c=500); the rest is not yet accounted for.
 
 ## Latency
 
@@ -107,8 +118,8 @@ Zero aborts or crashes across 95 b1 cells (aiohttp c=1000 is skipped by design),
 ## Limitations
 
 - **A different instance pair than 0.3.0's,** 1–7% faster by the controls. The *Versus 0.3.0* table reads rqx against those controls, not in absolute terms.
-- **The memory increase is not yet attributed** to PR #196 or PR #202; see *Memory*.
-- **The throughput chart's httpx footnote is out of date.** It says httpx is bound by its default connection pool; the benches set 1,500 connections for every client, and the cause is httpcore re-scanning its pool on every request (see the [0.2.0 report](../0.2.0/report.md#limitations) and https://github.com/rodcochran/rqx/issues/188). The footnote is hardcoded in `plot_bench.py`.
+- **The tables and charts predate PR #210.** The shipped 0.4.0 includes it; its effect is measured by the same-box A/B above rather than by a new release run, so shipped high-concurrency memory is lower, and throughput higher, than the tables show.
+- **httpx's numbers are its connection pool's bookkeeping, not the network.** httpcore re-scans every pooled connection when a request is queued or finishes, so per-request CPU grows with the number of open connections; see the [0.2.0 report](../0.2.0/report.md#limitations) and https://github.com/rodcochran/rqx/issues/188. The throughput chart's footnote now says so; charts before 0.4.0 carry the earlier, incorrect explanation.
 - **aiohttp at c=1000 is skipped** because its connector deadlocks under the harness at that concurrency; that is a harness interaction, not a verdict on aiohttp.
 - **Same-VPC RTT is sub-millisecond,** so every number here is client-CPU-bound. Over a real network the throughput gaps shrink and the latency gaps are dominated by the wire.
 

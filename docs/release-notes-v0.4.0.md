@@ -4,7 +4,7 @@
 pip install --upgrade rqx
 ```
 
-URLs, query parameters and client configuration, and a breaking release. `rqx.URL` and `rqx.QueryParams` arrive with httpx's semantics, and `response.url` and `client.base_url` now return a `URL` instead of a string. `params=` now follows httpx: `None` sends an empty value, list values repeat the key, and passing `params=` replaces any query already on the URL. Redirect settings move off `Retry` into a new `rqx.RedirectPolicy`. A per-request `auth=` now replaces a client-level `auth_bearer` instead of raising. Every change below that alters existing behavior is listed under Behavior changes. Throughput is up 7–14% against 0.3.0, mostly from the fat-LTO build that accompanies the crate split; peak memory at c=500 and above is up 9–11 MB, a known regression listed under Performance.
+URLs, query parameters and client configuration, and a breaking release. `rqx.URL` and `rqx.QueryParams` arrive with httpx's semantics, and `response.url` and `client.base_url` now return a `URL` instead of a string. `params=` now follows httpx: `None` sends an empty value, list values repeat the key, and passing `params=` replaces any query already on the URL. Redirect settings move off `Retry` into a new `rqx.RedirectPolicy`. A per-request `auth=` now replaces a client-level `auth_bearer` instead of raising. Every change below that alters existing behavior is listed under Behavior changes. Throughput is up 7–14% against 0.3.0, mostly from the fat-LTO build that accompanies the crate split, and a further 4.5–7% at c=100–1000 from #210, which also brings peak memory at high concurrency back to 0.3.0's level.
 
 ## Behavior changes
 
@@ -39,12 +39,21 @@ URLs, query parameters and client configuration, and a breaking release. `rqx.UR
   | 500 | 19,769 | 19,741 | −0.05% | 10/20 | 75.3 → 74.6 MB |
 
   All within the noise floor. The httpr and aiohttp controls drifted by 3–4% during the session, which the alternating order cancels.
+* **Async task size (#210, #209):** each in-flight `AsyncClient` request's task stored its whole async state twice, through an error-conversion wrapper added in #202. Replacing it with a combinator halves the task (9,400 → 4,728 bytes). Same-box A/B against `main` (`a7c7f33` vs `79ceb2d`), 20 alternating pairs per concurrency:
 
-Full run on paired AWS `c7i.large` instances (client + nginx, single-AZ), rqx at `a7c7f33`, 5 runs per bench, against httpr 0.7.2, aiohttp 3.14.3, httpx 0.28.1 — the same comparator versions as 0.3.0. Charts in [`benchmarks/0.4.0/`](https://github.com/rodcochran/rqx/tree/v0.4.0/benchmarks/0.4.0); tables, method, the A/Bs and limitations in [`benchmarks/0.4.0/report.md`](https://github.com/rodcochran/rqx/blob/v0.4.0/benchmarks/0.4.0/report.md).
+  | c | main rps | #210 rps | median Δ | #210 faster | RSS main → #210 |
+  |---|---|---|---|---|---|
+  | 100 | 19,752 | 20,732 | +4.53% | 20/20 | 40.7 → 38.2 MB |
+  | 500 | 18,986 | 19,886 | +5.67% | 19/20 | 74.9 → 65.6 MB |
+  | 1000 | 18,175 | 19,482 | +7.22% | 20/20 | 104.1 → 90.8 MB |
+
+  At c=500 peak memory is back to 0.3.0's level (65.8 MB).
+
+Full run on paired AWS `c7i.large` instances (client + nginx, single-AZ), rqx at `a7c7f33` (before #210, which is measured by its A/B above), 5 runs per bench, against httpr 0.7.2, aiohttp 3.14.3, httpx 0.28.1 — the same comparator versions as 0.3.0. Charts in [`benchmarks/0.4.0/`](https://github.com/rodcochran/rqx/tree/v0.4.0/benchmarks/0.4.0); tables, method, the A/Bs and limitations in [`benchmarks/0.4.0/report.md`](https://github.com/rodcochran/rqx/blob/v0.4.0/benchmarks/0.4.0/report.md).
 
 * **Throughput (b1):** up 7–14% against 0.3.0, 3.5–7 points more than the httpr and aiohttp controls rose on this faster instance pair. That margin is in line with the fat-LTO A/B above. rqx leads every client at every concurrency — +31% over httpr and +67% over aiohttp at c=100, 52× httpx at c=1000.
 * **Latency (b2, c=100):** p50 4.39 ms (−8.2% against 0.3.0, controls −1 to −2%), lowest of the four; p99 10.20 ms, above aiohttp's 7.65 — the #168 tail, unchanged.
-* **Memory — known regression:** peak RSS at c=500 and c=1000 is up 8.9 MB and 10.6 MB (+13–14%) against 0.3.0, with every other client within 0.5 MB. Low concurrency is unchanged or lower (c=10 −1.3 MB). It came in with #196 or #202, not with dependency bumps or #204, and is not yet bisected.
+* **Memory:** this run, without #210, had peak RSS at c=500 and c=1000 up 8.9 MB and 10.6 MB (+13–14%) against 0.3.0, with every other client within 0.5 MB. #210 fixes it (see above). Low concurrency is unchanged or lower (c=10 −1.3 MB).
 * **Stability:** zero aborts across 95 b1 cells, 5 b2 runs, 5 b8 runs; zero request failures. Fifth consecutive clean run.
 
 ## Internals
@@ -54,6 +63,7 @@ Full run on paired AWS `c7i.large` instances (client + nginx, single-AZ), rqx at
 * `Auth::{None, Basic, Bearer}` replaces the separate basic and bearer arguments. The basic-vs-bearer rule is checked when an `Auth` is built (#204).
 * `RedirectPolicy` holds `follow`, `max_redirects` and `raise_on_exceeded`, which removes the redirect loop's read of `raise_on_redirect` from the transport's retry config (#204).
 * The seven per-verb methods on the core `Client` are removed. The binding's verbs call `request` (#204).
+* `Runtime::with_py_errors` converts a request's error type with the `map_err` combinator instead of an `async move` wrapper, which stored the future twice (#210).
 * A `PyRepr` trait spells `bool`, `u32`, `f64` and `Option<T>` the way Python's `repr()` does, without the GIL (#204).
 
 ## Tests
@@ -62,6 +72,7 @@ Full run on paired AWS `c7i.large` instances (client + nginx, single-AZ), rqx at
 * Redirect policy: raising versus returning the last 3xx, conflicting and agreeing client kwargs, getters and `repr`, sync and async (#204).
 * Rust unit tests for `PyRepr`, and a hypothesis property checking `repr(Timeout)` and `repr(RedirectPolicy)` against Python's own `repr` for any value (#204).
 * CI runs `cargo test --workspace` (was `--lib`), matching the new `just test-rust`, which `just check` now includes (#204).
+* A unit test pins the error-conversion wrapper's size overhead, so the task future can't silently double again (#210).
 * The test suite floors httpx at 0.28 (#201).
 
 ## Benchmarks & tooling
