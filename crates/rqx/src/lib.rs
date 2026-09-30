@@ -65,6 +65,7 @@ fn _rqx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // use so that a process which only imports rqx (a prefork server's master)
     // never owns runtime threads to lose across fork() (https://github.com/rodcochran/rqx/issues/159).
     let py = m.py();
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_function(wrap_pyfunction!(_shutdown_runtime, m)?)?;
     py.import("atexit")?
         .call_method1("register", (m.getattr("_shutdown_runtime")?,))?;

@@ -1236,7 +1236,7 @@ dependencies = [
 
 [[package]]
 name = "rqx"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "bytes",
  "futures",
@@ -1250,7 +1250,7 @@ dependencies = [
 
 [[package]]
 name = "rqx-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "bytes",
  "encoding_rs",
