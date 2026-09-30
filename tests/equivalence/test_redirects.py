@@ -1,5 +1,7 @@
 """Redirect semantics on every standard status, method and body included."""
 
+from urllib.parse import quote
+
 import pytest
 
 ISSUE_116 = "https://github.com/rodcochran/rqx/issues/116"
@@ -78,3 +80,38 @@ def test_content_type_survives_a_downgraded_redirect(lib, flaky_server):
         f"{flaky_server}/redirect/301", json=PAYLOAD
     )
     assert resp.json()["content_type"] == "application/json"
+
+
+def test_cross_origin_redirect_drops_authorization(lib, flaky_server):
+    """https://github.com/rodcochran/rqx/issues/205"""
+    target = flaky_server.replace("localhost", "127.0.0.1") + "/echo-auth"
+    resp = lib.client(follow_redirects=True).get(
+        f"{flaky_server}/redirect-to?url={quote(target, safe='')}",
+        headers={"Authorization": "Bearer tok"},
+    )
+    assert str(resp.url) == target
+    assert resp.json()["authorization"] == ""
+
+
+def test_same_origin_redirect_keeps_authorization(lib, flaky_server):
+    target = f"{flaky_server}/echo-auth"
+    resp = lib.client(follow_redirects=True).get(
+        f"{flaky_server}/redirect-to?url={quote(target, safe='')}",
+        headers={"Authorization": "Bearer tok"},
+    )
+    assert resp.json()["authorization"] == "Bearer tok"
+
+
+@pytest.mark.parametrize("origin", ["same", "cross"])
+def test_redirect_drops_hand_set_cookie(lib, flaky_server, origin):
+    """The jar, not the first request's header, decides the next hop's cookies."""
+    base = {
+        "same": flaky_server,
+        "cross": flaky_server.replace("localhost", "127.0.0.1"),
+    }
+    target = f"{base[origin]}/cookies"
+    resp = lib.client(follow_redirects=True).get(
+        f"{flaky_server}/redirect-to?url={quote(target, safe='')}",
+        headers={"Cookie": "session=secret"},
+    )
+    assert resp.json() == {"cookies": {}}
