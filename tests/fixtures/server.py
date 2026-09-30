@@ -285,6 +285,11 @@ class FlakyServerHandler(BaseHTTPRequestHandler):
             self._redirect(int(path.removeprefix("/redirect/")), "/echo-body")
             return
 
+        # /redirect-to?url=<absolute URL> — 302 to anywhere, for cross-origin hops.
+        if path == "/redirect-to":
+            self._redirect(302, params["url"][0])
+            return
+
         # relative Locations on each hop; only correct if resolved against that hop.
         if path == "/nested/hop1":
             self._redirect(302, "hop2")
