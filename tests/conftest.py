@@ -90,6 +90,16 @@ def flaky_server():
 
 
 @pytest.fixture(scope="session")
+def other_port_server():
+    """The same handler on a second port: same host, different origin."""
+    server = QuietThreadingHTTPServer(("localhost", 0), FlakyServerHandler)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://localhost:{port}"
+    server.shutdown()
+
+
+@pytest.fixture(scope="session")
 def http2_server():
     """Local HTTPS server speaking both HTTP/2 and HTTP/1.1 via ALPN.
 

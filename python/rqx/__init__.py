@@ -49,6 +49,7 @@ from ._rqx import (
     UnsupportedProtocol,
     WriteError,
     WriteTimeout,
+    __version__,
 )
 
 # optional: nicer names (drop Py prefix)
@@ -58,6 +59,7 @@ Headers = PyHeaders
 Retry = PyRetry
 
 __all__ = [
+    "__version__",
     "URL",
     "AsyncClient",
     "AsyncHTTPTransport",

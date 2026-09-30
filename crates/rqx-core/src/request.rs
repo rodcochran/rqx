@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use http::Method;
-use http::header::{CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING};
+use http::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, TRANSFER_ENCODING};
 use reqwest::{Client, Request, RequestBuilder};
 use url::Url;
 
@@ -132,19 +132,37 @@ impl RequestSpec {
     }
 
     /// Next hop. Body kept when the method is kept (307/308), dropped with its
-    /// headers on a downgrade to GET (302/303).
+    /// headers on a downgrade to GET (302/303). `Cookie` is always dropped so
+    /// the jar rebuilds it for the new URL; `Authorization` is dropped when
+    /// the hop leaves the origin.
     pub fn redirected(&self, status: u16, url: Url) -> Result<Self, RqxError> {
         let mut next = self.clone_request()?;
         let method = Self::redirect_method(next.method(), status);
-        if method != *next.method() {
+        if method != next.method() {
             *next.body_mut() = None;
             for name in [CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING] {
                 next.headers_mut().remove(name);
             }
         }
+        next.headers_mut().remove(COOKIE);
+        if !self.keeps_authorization(&url) {
+            next.headers_mut().remove(AUTHORIZATION);
+        }
         *next.method_mut() = method;
         *next.url_mut() = url;
         Ok(Self { prototype: next })
+    }
+
+    /// Same origin, or httpx's one exception: http → https on the same host
+    /// and default ports.
+    fn keeps_authorization(&self, next: &Url) -> bool {
+        let from = self.url();
+        match (from.port_or_known_default(), next.port_or_known_default()) {
+            (Some(80), Some(443)) if (from.scheme(), next.scheme()) == ("http", "https") => {
+                from.host() == next.host()
+            }
+            _ => from.origin() == next.origin(),
+        }
     }
 
     /// Matches httpx (and browsers): 302 and 303 switch every method except
@@ -155,5 +173,40 @@ impl RequestSpec {
             301 if original == Method::POST => Method::GET,
             _ => original.to_owned(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn keeps_authorization(from: &str, to: &str) -> bool {
+        let request = Request::new(Method::GET, Url::parse(from).unwrap());
+        RequestSpec::from_request(request).keeps_authorization(&Url::parse(to).unwrap())
+    }
+
+    #[test]
+    fn same_origin_keeps_authorization() {
+        assert!(keeps_authorization("http://a/", "http://a:80/x"));
+    }
+
+    #[test]
+    fn https_upgrade_on_default_ports_keeps_authorization() {
+        assert!(keeps_authorization("http://a/", "https://a/"));
+    }
+
+    #[test]
+    fn other_host_drops_authorization() {
+        assert!(!keeps_authorization("http://a/", "https://b/"));
+    }
+
+    #[test]
+    fn upgrade_from_non_default_port_drops_authorization() {
+        assert!(!keeps_authorization("http://a:8080/", "https://a/"));
+    }
+
+    #[test]
+    fn https_downgrade_drops_authorization() {
+        assert!(!keeps_authorization("https://a/", "http://a/"));
     }
 }
