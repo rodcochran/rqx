@@ -125,13 +125,13 @@ impl Transport {
 
             let attempt_start = Instant::now();
 
-            let new_reqeust = request.try_clone().ok_or_else(|| {
+            let new_request = request.try_clone().ok_or_else(|| {
                 RequestError::RequestError(
                     "Streaming request bodies cannot be replayed".to_string(),
                 )
             })?;
 
-            let failure = match self.execute(new_reqeust).await {
+            let failure = match self.execute(new_request).await {
                 Ok(resp) => {
                     if !is_retryable_method {
                         return Ok(PendingResponse::new(resp));
