@@ -1,3 +1,4 @@
+use http::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, TRANSFER_ENCODING};
 use http::method::Method;
 use url::Url;
 
@@ -63,6 +64,29 @@ impl Redirect {
         url.join(location).map_err(|e| {
             RequestError::RequestError(format!("Error parsing url from redirect: {e}")).into()
         })
+    }
+
+    pub fn redirected_request(
+        mut request: reqwest::Request,
+        status: u16,
+        url: Url,
+    ) -> reqwest::Request {
+        let method_for_redirect = Self::redirect_method(&request.method(), status);
+        if method_for_redirect != request.method() {
+            *request.body_mut() = None;
+            for name in [CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING] {
+                request.headers_mut().remove(name);
+            }
+        }
+        request.headers_mut().remove(COOKIE);
+
+        if !Self::keeps_authorization(request.url(), &url) {
+            request.headers_mut().remove(AUTHORIZATION);
+        };
+
+        *request.method_mut() = method_for_redirect;
+        *request.url_mut() = url;
+        request
     }
 }
 

@@ -1,16 +1,15 @@
-use http::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, TRANSFER_ENCODING};
 use http::method::Method;
-use url::Url;
 
 use crate::auth::Auth;
+use crate::error::*;
 use crate::headers::Headers;
 use crate::query_params::QueryPairs;
-use crate::redirect::Redirect;
 use crate::request_components::body::RequestBody;
+use crate::url::reference::UrlReference;
 
 pub struct Request {
     pub method: Method,
-    pub url: Url,
+    pub url: UrlReference,
     pub params: Option<QueryPairs>,
     pub headers: Option<Headers>,
     pub body: RequestBody,
@@ -21,16 +20,19 @@ pub struct Request {
 
 impl Request {
     pub fn new(
-        method: Method,
-        url: Url,
+        method: &str,
+        url: UrlReference,
         params: Option<QueryPairs>,
         headers: Option<Headers>,
         body: RequestBody,
         auth: Option<Auth>,
         timeout: Option<f64>,
         follow_redirects: Option<bool>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, RqxError> {
+        let method = Method::from_bytes(method.to_ascii_uppercase().as_bytes())
+            .map_err(|e| RqxError::InvalidArgument(format!("invalid method {method:?}: {e}")))?;
+
+        Ok(Self {
             method,
             url,
             params,
@@ -39,39 +41,6 @@ impl Request {
             auth,
             timeout,
             follow_redirects,
-        }
-    }
-
-    pub fn redirected(mut self, status: u16, url: Url) -> Self {
-        let method_for_redirect = Redirect::redirect_method(&self.method, status);
-
-        if method_for_redirect != self.method {
-            self.body = RequestBody::Empty;
-        }
-
-        let keeps_auth = Redirect::keeps_authorization(&self.url, &url);
-
-        if let Some(headers) = self.headers.as_mut() {
-            if method_for_redirect != self.method {
-                for name in [CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING] {
-                    headers.delete_item_safe(name.as_ref());
-                }
-            }
-
-            headers.delete_item_safe(COOKIE.as_ref());
-
-            if !keeps_auth {
-                headers.delete_item_safe(AUTHORIZATION.as_ref());
-            }
-        }
-
-        if !keeps_auth {
-            self.auth = Some(Auth::None);
-        }
-
-        self.method = method_for_redirect;
-        self.url = url;
-
-        self
+        })
     }
 }

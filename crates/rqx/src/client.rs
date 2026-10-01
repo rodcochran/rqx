@@ -5,6 +5,8 @@ use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python, pyclass, pymethods};
 
 use rqx_core::auth::Auth;
 use rqx_core::client::{Client, ClientConfig};
+use rqx_core::request::Request;
+use rqx_core::request_components::body::RequestBody;
 use rqx_core::timeout::Timeout;
 use rqx_core::url::base_url::BaseUrl;
 
@@ -124,22 +126,20 @@ impl PyClient {
             (None, None) => None,
             _ => Some(Auth::new(auth, auth_bearer)?),
         };
-        block_on_inner(
-            py,
-            self.inner.request(
-                method,
-                url.inner,
-                content,
-                data,
-                json_value,
-                params.map(|p| p.inner),
-                headers.map(|h| h.inner),
-                auth_config,
-                follow_redirects,
-                timeout_f64,
-            ),
-        )
-        .map(PyResponse::from)
+
+        let body = RequestBody::new(content, data, json_value)?;
+
+        let request = Request::new(
+            method,
+            url.inner,
+            params.map(|p| p.inner),
+            headers.map(|h| h.inner),
+            body,
+            auth_config,
+            timeout_f64,
+            follow_redirects,
+        )?;
+        block_on_inner(py, self.inner.request(request)).map(PyResponse::from)
     }
 
     #[pyo3(signature = (url, params=None, headers=None, auth=None, auth_bearer=None, follow_redirects=None, timeout=None))]
@@ -371,23 +371,19 @@ impl PyClient {
             (None, None) => None,
             _ => Some(Auth::new(auth, auth_bearer)?),
         };
-        let request = self.inner.build(
+        let body = RequestBody::new(content, data, json_value)?;
+
+        let request = Request::new(
             method,
             url.inner,
-            content,
-            data,
-            json_value,
             params.map(|p| p.inner),
             headers.map(|h| h.inner),
+            body,
             auth_config,
-            follow_redirects,
             t,
-        )?;
-        Ok(PyStreamContext::new(
-            self.inner.clone(),
-            request,
             follow_redirects,
-        ))
+        )?;
+        Ok(PyStreamContext::new(self.inner.stream(request)?))
     }
 
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
@@ -502,30 +498,29 @@ impl PyAsyncClient {
             timeout,
             self.inner.timeout_secs(),
         )?);
-        let method = method.to_string();
-        let content = content.map(<[u8]>::to_vec);
+
         let inner = self.inner.clone();
 
         let auth_config = match (&auth, &auth_bearer) {
             (None, None) => None,
             _ => Some(Auth::new(auth, auth_bearer).map_err(PyRqxError::Core)?),
         };
+
+        let body = RequestBody::new(content, data, json_value).map_err(PyRqxError::Core)?;
+
+        let request = Request::new(
+            method,
+            url.inner,
+            params.map(|p| p.inner),
+            headers.map(|h| h.inner),
+            body,
+            auth_config,
+            t,
+            follow_redirects,
+        )
+        .map_err(PyRqxError::Core)?;
         RUNTIME.future_into_py(py, async move {
-            inner
-                .request(
-                    &method,
-                    url.inner,
-                    content.as_deref(),
-                    data,
-                    json_value,
-                    params.map(|p| p.inner),
-                    headers.map(|h| h.inner),
-                    auth_config,
-                    follow_redirects,
-                    t,
-                )
-                .await
-                .map(PyResponse::from)
+            inner.request(request).await.map(PyResponse::from)
         })
     }
 
@@ -760,23 +755,20 @@ impl PyAsyncClient {
             _ => Some(Auth::new(auth, auth_bearer).map_err(PyRqxError::Core)?),
         };
 
-        let request = self.inner.build(
+        let body = RequestBody::new(content, data, json_value)?;
+
+        let request = Request::new(
             method,
             url.inner,
-            content,
-            data,
-            json_value,
             params.map(|p| p.inner),
             headers.map(|h| h.inner),
+            body,
             auth_config,
-            follow_redirects,
             t,
-        )?;
-        Ok(PyAsyncStreamContext::new(
-            self.inner.clone(),
-            request,
             follow_redirects,
-        ))
+        )?;
+
+        Ok(PyAsyncStreamContext::new(self.inner.stream(request)?))
     }
 
     fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {

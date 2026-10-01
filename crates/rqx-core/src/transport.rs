@@ -5,18 +5,15 @@ use reqwest::tls::Identity;
 use reqwest::{Client, ClientBuilder, Response};
 use tokio::sync::Semaphore;
 
-use crate::auth::Auth;
 use crate::error::*;
 use crate::http::protocol::HttpVersionConfig;
 use crate::http::tls::VerifyConfig;
-use crate::request::Request;
-use crate::request_components::body::RequestBody;
 use crate::response::PendingResponse;
 use crate::retry::{FailureKind, Retry, RetryCounts};
 
 #[derive(Clone)]
 pub struct Transport {
-    client: Client,
+    pub client: Client,
     semaphore: Option<Arc<Semaphore>>,
     pub retries: Option<Retry>,
 }
@@ -30,77 +27,11 @@ impl Transport {
         }
     }
 
-    pub async fn send(
-        &self,
-        request: &mut Request,
-        default_auth: &Auth,
-    ) -> Result<PendingResponse, RqxError> {
-        if !matches!(request.url.scheme(), "http" | "https") {
-            return Err(TransportError::UnsupportedProtocol(format!(
-                "Request URL has an unsupported protocol '{}://'.",
-                request.url.scheme()
-            ))
-            .into());
-        }
-
-        // Set query params if they exist and are populated.
-        if let Some(params) = &request.params {
-            let query = params.to_string();
-            match query.is_empty() {
-                true => request.url.set_query(None),
-                false => request.url.set_query(Some(&query)),
-            }
-        };
-
-        // Initialize reqwest's RequestBuilder
-        let mut builder = self
-            .client
-            .request(request.method.clone(), request.url.clone());
-
-        // Apply headers if they exist
-        if let Some(headers) = &request.headers {
-            builder = builder.headers(headers.inner.clone());
-        };
-
-        // Use current requests auth override, or client default.
-        // Non-None override -> use Request's Auth.
-        // If Requests, auth is explicitly Auth::None, this request uses no Auth.
-        // Empty override -> client default.
-        match request.auth.as_ref().unwrap_or(default_auth) {
-            Auth::None => {}
-            Auth::Basic { username, password } => {
-                builder = builder.basic_auth(username, Some(password));
-            }
-            Auth::Bearer(token) => {
-                builder = builder.bearer_auth(token);
-            }
-        };
-
-        match &request.body {
-            RequestBody::Content(c) => {
-                builder = builder.body(c.clone());
-            }
-            RequestBody::Form(f) => {
-                builder = builder.form(f);
-            }
-            RequestBody::Json(j) => {
-                builder = builder.json(j);
-            }
-            RequestBody::Empty => {}
-        };
-
-        if let Some(timeout) = request.timeout {
-            builder = builder.timeout(Duration::from_secs_f64(timeout))
-        }
-
-        let executable_request = builder.build().map_err(RqxError::from)?;
-
+    pub async fn send(&self, request: reqwest::Request) -> Result<PendingResponse, RqxError> {
         if self.retries.is_some() {
-            self.send_with_retries(executable_request).await
+            self.send_with_retries(request).await
         } else {
-            Ok(PendingResponse::new(
-                self.send_raw(executable_request).await?,
-            ))
+            Ok(PendingResponse::new(self.send_raw(request).await?))
         }
     }
 

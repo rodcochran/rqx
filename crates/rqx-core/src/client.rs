@@ -1,19 +1,18 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 
-use http::Method;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex as TokioMutex;
 use url::Url;
 
 use crate::auth::Auth;
 use crate::error::*;
-use crate::headers::Headers;
-use crate::query_params::QueryPairs;
+
 use crate::redirect::{Redirect, RedirectPolicy};
 use crate::request::Request;
 use crate::request_components::body::RequestBody;
 use crate::response::{BufferedResponse, PendingResponse};
+use crate::streaming::context::Unsent;
 use crate::timeout::Timeout;
 use crate::transport::Transport;
 use crate::url::base_url::BaseUrl;
@@ -96,78 +95,92 @@ impl Client {
     }
 
     /// Build and send a request, then buffer the body.
-    pub async fn request(
-        &self,
-        method: &str,
-        url: UrlReference,
-        content: Option<&[u8]>,
-        data: Option<HashMap<String, String>>,
-        json: Option<serde_json::Value>,
-        params: Option<QueryPairs>,
-        headers: Option<Headers>,
-        auth: Option<Auth>,
-        follow_redirects: Option<bool>,
-        timeout: Option<f64>,
-    ) -> Result<BufferedResponse, RqxError> {
-        let request = self.build(
-            method,
-            url,
-            content,
-            data,
-            json,
-            params,
-            headers,
-            auth,
-            follow_redirects,
-            timeout,
-        )?;
-        // `stream` stamps `elapsed` when the headers arrive; reading the body doesn't move it.
-        self.stream(request, follow_redirects).await?.read().await
+    pub async fn request(&self, request: Request) -> Result<BufferedResponse, RqxError> {
+        let follow_redirects = request
+            .follow_redirects
+            .unwrap_or(self.config.redirects.follow);
+        let executable_request = self.build(request)?;
+        self.send(executable_request, follow_redirects)
+            .await?
+            .read()
+            .await
     }
 
     /// Send a built request, leaving the body unread for the stream response
     /// to consume. `elapsed` is the time to headers.
-    pub async fn stream(
-        &self,
-        request: Request,
-        follow_redirects: Option<bool>,
-    ) -> Result<PendingResponse, RqxError> {
-        let start_time = Instant::now();
-        let mut pending = self.send(request, follow_redirects).await?;
-        pending.parts.elapsed = start_time.elapsed();
-        Ok(pending)
-    }
-
-    pub fn build(
-        &self,
-        method: &str,
-        url: UrlReference,
-        content: Option<&[u8]>,
-        data: Option<HashMap<String, String>>,
-        json: Option<serde_json::Value>,
-        params: Option<QueryPairs>,
-        headers: Option<Headers>,
-        auth: Option<Auth>,
-        follow_redirects: Option<bool>,
-        timeout: Option<f64>,
-    ) -> Result<Request, RqxError> {
-        let method = Method::from_bytes(method.to_ascii_uppercase().as_bytes())
-            .map_err(|e| RqxError::InvalidArgument(format!("invalid method {method:?}: {e}")))?;
-
-        let body = RequestBody::new(content, data, json)?;
-
-        let merged_url = self.merge_url(url)?;
-
-        Ok(Request::new(
-            method,
-            merged_url,
-            params,
-            headers,
-            body,
-            auth,
-            timeout,
+    pub fn stream(&self, request: Request) -> Result<Unsent, RqxError> {
+        let follow_redirects = request
+            .follow_redirects
+            .unwrap_or(self.config.redirects.follow);
+        let executable_request = self.build(request)?;
+        Ok(Unsent::new(
+            self.clone(),
+            executable_request,
             follow_redirects,
         ))
+    }
+
+    pub fn build(&self, request: Request) -> Result<reqwest::Request, RqxError> {
+        let mut url = self.merge_url(request.url)?;
+
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(TransportError::UnsupportedProtocol(format!(
+                "Request URL has an unsupported protocol '{}://'.",
+                url.scheme()
+            ))
+            .into());
+        }
+
+        // Set query params if they exist and are populated.
+        if let Some(params) = &request.params {
+            let query = params.to_string();
+            match query.is_empty() {
+                true => url.set_query(None),
+                false => url.set_query(Some(&query)),
+            }
+        };
+
+        // Initialize reqwest's RequestBuilder
+        let mut builder = self.transport.client.request(request.method.clone(), url);
+
+        // Apply headers if they exist
+        if let Some(headers) = &request.headers {
+            builder = builder.headers(headers.inner.clone());
+        };
+
+        // Use current requests auth override, or client default.
+        // Non-None override -> use Request's Auth.
+        // If Requests, auth is explicitly Auth::None, this request uses no Auth.
+        // Empty override -> client default.
+        match request.auth.as_ref().unwrap_or(&self.config.auth) {
+            Auth::None => {}
+            Auth::Basic { username, password } => {
+                builder = builder.basic_auth(username, Some(password));
+            }
+            Auth::Bearer(token) => {
+                builder = builder.bearer_auth(token);
+            }
+        };
+
+        match &request.body {
+            RequestBody::Content(c) => {
+                builder = builder.body(c.clone());
+            }
+            RequestBody::Form(f) => {
+                builder = builder.form(f);
+            }
+            RequestBody::Json(j) => {
+                builder = builder.json(j);
+            }
+            RequestBody::Empty => {}
+        };
+
+        if let Some(timeout) = request.timeout {
+            builder = builder.timeout(Duration::from_secs_f64(timeout))
+        }
+
+        let executable_request = builder.build().map_err(RqxError::from)?;
+        Ok(executable_request)
     }
 
     fn merge_url(&self, url: UrlReference) -> Result<Url, RqxError> {
@@ -183,18 +196,19 @@ impl Client {
 
     /// Send a built request — following redirects when asked — and accumulate
     /// the final response's cookies. Shared by `request` and `stream`.
-    async fn send(
+    pub(crate) async fn send(
         &self,
-        mut request: Request,
-        follow_redirects: Option<bool>,
+        request: reqwest::Request,
+        follow_redirects: bool,
     ) -> Result<PendingResponse, RqxError> {
-        let follow = follow_redirects.unwrap_or(self.config.redirects.follow);
-        let pending = if follow {
+        let start_time = Instant::now();
+        let mut pending = if follow_redirects {
             self.follow_redirects(request).await?
         } else {
-            self.transport.send(&mut request, &self.config.auth).await?
+            self.transport.send(request).await?
         };
         self.accumulate_cookies(&pending.parts.cookies).await;
+        pending.parts.elapsed = start_time.elapsed();
         Ok(pending)
     }
 
@@ -220,12 +234,18 @@ impl Client {
     ///
     /// Reads status, Location, and Set-Cookie off `parts`, so no GIL
     /// acquisition per hop (see https://github.com/rodcochran/rqx/issues/93).
-    async fn follow_redirects(&self, mut request: Request) -> Result<PendingResponse, RqxError> {
+    async fn follow_redirects(
+        &self,
+        mut request: reqwest::Request,
+    ) -> Result<PendingResponse, RqxError> {
         let mut redirects_used: u32 = 0;
         let mut num_retries: u32 = 0;
         let mut retry_history: Vec<(String, f64)> = Vec::new();
         loop {
-            let mut hop = self.transport.send(&mut request, &self.config.auth).await?;
+            let outgoing_request = request.try_clone().ok_or_else(|| {
+                RequestError::RequestError("Request body cannot be replayed".to_string())
+            })?;
+            let mut hop = self.transport.send(outgoing_request).await?;
             num_retries += hop.parts.num_retries;
             retry_history.append(&mut hop.parts.retry_history);
             let status = hop.parts.status_code;
@@ -262,8 +282,8 @@ impl Client {
             hop.drain().await;
 
             // Resolve against the hop that sent the Location, not the original URL.
-            let new_url = Redirect::redirect_target(&request.url, &location)?;
-            request = request.redirected(status, new_url);
+            let new_url = Redirect::redirect_target(&request.url(), &location)?;
+            request = Redirect::redirected_request(request, status, new_url);
             redirects_used += 1;
         }
     }
