@@ -2,13 +2,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use reqwest::tls::Identity;
-use reqwest::{Client, ClientBuilder, Request, Response};
+use reqwest::{Client, ClientBuilder, Response};
 use tokio::sync::Semaphore;
 
+use crate::auth::Auth;
 use crate::error::*;
 use crate::http::protocol::HttpVersionConfig;
 use crate::http::tls::VerifyConfig;
-use crate::request::RequestSpec;
+use crate::request::Request;
 use crate::response::PendingResponse;
 use crate::retry::{FailureKind, Retry, RetryCounts};
 
@@ -28,25 +29,60 @@ impl Transport {
         }
     }
 
-    /// Send with retries, body unread. Every path — buffered, redirect hops,
-    /// streaming — goes through here so retries can't be skipped (https://github.com/rodcochran/rqx/issues/148).
-    pub async fn send(&self, spec: &RequestSpec) -> Result<PendingResponse, RqxError> {
+    pub async fn send(&self, request: &mut Request) -> Result<PendingResponse, RqxError> {
+        // Set query params if they exist and are populated.
+        if let Some(params) = &request.params {
+            let query = params.to_string();
+            match query.is_empty() {
+                true => request.url.set_query(None),
+                false => request.url.set_query(Some(&query)),
+            }
+        };
+
+        // Initialize reqwest's RequestBuilder
+        let mut builder = self
+            .client
+            .request(request.method.clone(), request.url.clone());
+
+        // Apply headers if they exist
+        if let Some(headers) = &request.headers {
+            builder = builder.headers(headers.inner.clone());
+        };
+
+        if let Some(auth) = &request.auth {
+            match auth {
+                Auth::None => {}
+                Auth::Basic { username, password } => {
+                    builder = builder.basic_auth(username, Some(password));
+                }
+                Auth::Bearer(token) => {
+                    builder = builder.bearer_auth(token);
+                }
+            }
+        };
+
+        if let Some(timeout) = request.timeout {
+            builder = builder.timeout(Duration::from_secs_f64(timeout))
+        }
+
+        let executable_request = builder.build().map_err(RqxError::from)?;
+
         if self.retries.is_some() {
-            self.send_with_retries(spec).await
+            self.send_with_retries(executable_request).await
         } else {
             Ok(PendingResponse::new(
-                self.send_raw(spec.clone_request()?).await?,
+                self.send_raw(executable_request).await?,
             ))
         }
     }
 
     /// Single attempt, no retries.
-    async fn send_raw(&self, request: Request) -> Result<Response, RqxError> {
+    async fn send_raw(&self, request: reqwest::Request) -> Result<Response, RqxError> {
         self.execute(request).await.map_err(RqxError::from)
     }
 
     /// Error left unmapped so the retry loop can classify it.
-    async fn execute(&self, request: Request) -> Result<Response, reqwest::Error> {
+    async fn execute(&self, request: reqwest::Request) -> Result<Response, reqwest::Error> {
         let _permit = match self.semaphore.as_ref() {
             // acquire only fails on a closed semaphore; ours is never closed.
             Some(sem) => Some(
@@ -60,12 +96,15 @@ impl Transport {
     }
 
     /// The retry state machine.
-    async fn send_with_retries(&self, spec: &RequestSpec) -> Result<PendingResponse, RqxError> {
+    async fn send_with_retries(
+        &self,
+        request: reqwest::Request,
+    ) -> Result<PendingResponse, RqxError> {
         // Operates on raw reqwest::Response throughout — reading status and
         // retry-after directly from response headers without acquiring the GIL.
         // The body stays unread for the caller. Mirrors the redirect-loop fix from https://github.com/rodcochran/rqx/issues/93.
         let r = self.retries.as_ref().unwrap();
-        let is_retryable_method = r.allowed_methods.contains(spec.method().as_str());
+        let is_retryable_method = r.allowed_methods.contains(request.method().as_str());
         let backoff_max: f32 = r.backoff_max;
         let respect_retry = r.respect_retry_after_header;
         let total_timeout: f64 = r.total_timeout.unwrap_or(f64::INFINITY);
@@ -126,7 +165,19 @@ impl Transport {
             }
 
             let attempt_start = Instant::now();
-            let failure = match self.execute(spec.clone_request()?).await {
+            // TODO: assess what to do about spec.clone_request()...
+            let potential_new_request = request.try_clone().ok_or_else(|| {
+                RequestError::RequestError(
+                    "Streaming request bodies cannot be replayed".to_string(),
+                )
+            });
+
+            let new_reqeust = match potential_new_request {
+                Ok(r) => r,
+                Err(_e) => break,
+            };
+
+            let failure = match self.execute(new_reqeust).await {
                 Ok(resp) => {
                     if !is_retryable_method {
                         return Ok(PendingResponse::new(resp));

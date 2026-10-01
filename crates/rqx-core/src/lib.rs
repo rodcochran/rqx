@@ -8,6 +8,8 @@ pub mod http;
 pub mod query_params;
 pub mod redirect;
 pub mod request;
+pub mod request_components;
+pub mod request_spec;
 pub mod response;
 pub mod retry;
 pub mod streaming;

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use http::Method;
 use tokio::sync::Mutex as TokioMutex;
 use url::Url;
 
@@ -10,9 +11,9 @@ use crate::error::*;
 use crate::headers::Headers;
 use crate::query_params::QueryPairs;
 use crate::redirect::RedirectPolicy;
-use crate::request::{RequestBody, RequestSpec};
+use crate::request::Request;
+use crate::request_components::body::RequestBody;
 use crate::response::{BufferedResponse, PendingResponse};
-
 use crate::timeout::Timeout;
 use crate::transport::Transport;
 use crate::url::base_url::BaseUrl;
@@ -106,10 +107,19 @@ impl Client {
         headers: Option<Headers>,
         auth: Option<Auth>,
         follow_redirects: Option<bool>,
-        timeout: f64,
+        timeout: Option<f64>,
     ) -> Result<BufferedResponse, RqxError> {
         let request = self.build(
-            method, url, content, data, json, params, headers, auth, timeout,
+            method,
+            url,
+            content,
+            data,
+            json,
+            params,
+            headers,
+            auth,
+            follow_redirects,
+            timeout,
         )?;
         // `stream` stamps `elapsed` when the headers arrive; reading the body doesn't move it.
         self.stream(request, follow_redirects).await?.read().await
@@ -119,7 +129,7 @@ impl Client {
     /// to consume. `elapsed` is the time to headers.
     pub async fn stream(
         &self,
-        request: RequestSpec,
+        request: Request,
         follow_redirects: Option<bool>,
     ) -> Result<PendingResponse, RqxError> {
         let start_time = Instant::now();
@@ -138,18 +148,29 @@ impl Client {
         params: Option<QueryPairs>,
         headers: Option<Headers>,
         auth: Option<Auth>,
-        timeout: f64,
-    ) -> Result<RequestSpec, RqxError> {
-        RequestSpec::build(
-            self.transport.client(),
+        follow_redirects: Option<bool>,
+        timeout: Option<f64>,
+    ) -> Result<Request, RqxError> {
+        let method = Method::from_bytes(method.to_ascii_uppercase().as_bytes())
+            .map_err(|e| RqxError::InvalidArgument(format!("invalid method {method:?}: {e}")))?;
+
+        let body = match RequestBody::new(content, data, json)? {
+            RequestBody::Empty => None,
+            r => Some(r),
+        };
+
+        let merged_url = self.merge_url(url)?;
+
+        Ok(Request::new(
             method,
-            self.merge_url(url)?,
+            merged_url,
             params,
-            RequestBody::new(content, data, json)?,
             headers,
-            auth.as_ref().unwrap_or(&self.config.auth),
+            body,
+            auth,
             timeout,
-        )
+            follow_redirects,
+        ))
     }
 
     fn merge_url(&self, url: UrlReference) -> Result<Url, RqxError> {
@@ -167,14 +188,14 @@ impl Client {
     /// the final response's cookies. Shared by `request` and `stream`.
     async fn send(
         &self,
-        spec: RequestSpec,
+        mut request: Request,
         follow_redirects: Option<bool>,
     ) -> Result<PendingResponse, RqxError> {
         let follow = follow_redirects.unwrap_or(self.config.redirects.follow);
         let pending = if follow {
-            self.follow_redirects(spec).await?
+            self.follow_redirects(request).await?
         } else {
-            self.transport.send(&spec).await?
+            self.transport.send(&mut request).await?
         };
         self.accumulate_cookies(&pending.parts.cookies).await;
         Ok(pending)
@@ -202,12 +223,12 @@ impl Client {
     ///
     /// Reads status, Location, and Set-Cookie off `parts`, so no GIL
     /// acquisition per hop (see https://github.com/rodcochran/rqx/issues/93).
-    async fn follow_redirects(&self, mut spec: RequestSpec) -> Result<PendingResponse, RqxError> {
+    async fn follow_redirects(&self, mut request: Request) -> Result<PendingResponse, RqxError> {
         let mut redirects_used: u32 = 0;
         let mut num_retries: u32 = 0;
         let mut retry_history: Vec<(String, f64)> = Vec::new();
         loop {
-            let mut hop = self.transport.send(&spec).await?;
+            let mut hop = self.transport.send(&mut request).await?;
             num_retries += hop.parts.num_retries;
             retry_history.append(&mut hop.parts.retry_history);
             let status = hop.parts.status_code;
@@ -244,8 +265,11 @@ impl Client {
             hop.drain().await;
 
             // Resolve against the hop that sent the Location, not the original URL.
+            // TODO: solve teh mutable state that spec had before.
             let new_url = spec.redirect_target(&location)?;
             spec = spec.redirected(status, new_url)?;
+
+
 
             redirects_used += 1;
         }

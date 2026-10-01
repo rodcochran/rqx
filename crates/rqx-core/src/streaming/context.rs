@@ -1,6 +1,6 @@
 use crate::client::Client;
 use crate::error::*;
-use crate::request::RequestSpec;
+use crate::request_spec::RequestSpec;
 use crate::response::PendingResponse;
 
 /// A request built by `stream()` but not yet sent. Sent once, on enter.

@@ -4,7 +4,7 @@ use pyo3::prelude::{Py, PyAny, PyResult, Python, pyclass, pymethods};
 use pyo3::{Bound, PyRef, PyRefMut};
 
 use rqx_core::client::Client;
-use rqx_core::request::RequestSpec;
+use rqx_core::request_spec::RequestSpec;
 use rqx_core::streaming::context::Unsent;
 
 use super::client::block_on_inner;
