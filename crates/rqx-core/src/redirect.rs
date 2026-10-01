@@ -39,9 +39,6 @@ impl Default for RedirectPolicy {
     }
 }
 
-// TODO: implement Redirect Object
-// ex: Redirect { status, location }
-
 pub struct Redirect {}
 
 impl Redirect {
