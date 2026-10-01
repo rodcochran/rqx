@@ -10,6 +10,7 @@ use crate::error::*;
 use crate::http::protocol::HttpVersionConfig;
 use crate::http::tls::VerifyConfig;
 use crate::request::Request;
+use crate::request_components::body::RequestBody;
 use crate::response::PendingResponse;
 use crate::retry::{FailureKind, Retry, RetryCounts};
 
@@ -73,6 +74,19 @@ impl Transport {
             Auth::Bearer(token) => {
                 builder = builder.bearer_auth(token);
             }
+        };
+
+        match &request.body {
+            RequestBody::Content(c) => {
+                builder = builder.body(c.clone());
+            }
+            RequestBody::Form(f) => {
+                builder = builder.form(f);
+            }
+            RequestBody::Json(j) => {
+                builder = builder.json(j);
+            }
+            RequestBody::Empty => {}
         };
 
         if let Some(timeout) = request.timeout {

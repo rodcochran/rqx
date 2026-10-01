@@ -154,10 +154,7 @@ impl Client {
         let method = Method::from_bytes(method.to_ascii_uppercase().as_bytes())
             .map_err(|e| RqxError::InvalidArgument(format!("invalid method {method:?}: {e}")))?;
 
-        let body = match RequestBody::new(content, data, json)? {
-            RequestBody::Empty => None,
-            r => Some(r),
-        };
+        let body = RequestBody::new(content, data, json)?;
 
         let merged_url = self.merge_url(url)?;
 
