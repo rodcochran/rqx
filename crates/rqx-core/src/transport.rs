@@ -124,17 +124,12 @@ impl Transport {
             }
 
             let attempt_start = Instant::now();
-            // TODO: assess what to do about spec.clone_request()...
-            let potential_new_request = request.try_clone().ok_or_else(|| {
+
+            let new_reqeust = request.try_clone().ok_or_else(|| {
                 RequestError::RequestError(
                     "Streaming request bodies cannot be replayed".to_string(),
                 )
-            });
-
-            let new_reqeust = match potential_new_request {
-                Ok(r) => r,
-                Err(_e) => break,
-            };
+            })?;
 
             let failure = match self.execute(new_reqeust).await {
                 Ok(resp) => {
