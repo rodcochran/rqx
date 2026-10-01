@@ -39,7 +39,12 @@ impl PyRepr for f64 {
                 .split_once('.')
                 .expect("Debug writes a fraction in this range");
             let digits = fraction.len();
-            return format!("{self:.digits$}");
+            let rounded = format!("{self:.digits$}");
+            return if rounded.parse::<f64>() == Ok(*self) {
+                rounded
+            } else {
+                shortest
+            };
         }
 
         let shortest = format!("{self:e}");
@@ -51,7 +56,12 @@ impl PyRepr for f64 {
             .map_or(0, |(_, fraction)| fraction.len());
 
         let rounded = format!("{self:.digits$e}");
-        let (mantissa, exponent) = rounded
+        let chosen = if rounded.parse::<f64>() == Ok(*self) {
+            rounded
+        } else {
+            shortest
+        };
+        let (mantissa, exponent) = chosen
             .split_once('e')
             .expect("LowerExp always writes an exponent");
         let exponent: i32 = exponent.parse().expect("LowerExp exponent is an integer");
@@ -113,6 +123,11 @@ mod tests {
         for (value, expected) in cases {
             assert_eq!(value.py_repr(), *expected, "repr of {value:?}");
         }
+    }
+
+    #[test]
+    fn powers_of_two_keep_the_digits_that_round_trip() {
+        assert_eq!(2.0_f64.powi(-24).py_repr(), "5.960464477539063e-08");
     }
 
     #[test]

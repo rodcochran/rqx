@@ -282,7 +282,7 @@ impl Client {
             hop.drain().await;
 
             // Resolve against the hop that sent the Location, not the original URL.
-            let new_url = Redirect::redirect_target(&request.url(), &location)?;
+            let new_url = Redirect::redirect_target(request.url(), &location)?;
             request = Redirect::redirected_request(request, status, new_url);
             redirects_used += 1;
         }

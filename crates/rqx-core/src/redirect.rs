@@ -71,7 +71,7 @@ impl Redirect {
         status: u16,
         url: Url,
     ) -> reqwest::Request {
-        let method_for_redirect = Self::redirect_method(&request.method(), status);
+        let method_for_redirect = Self::redirect_method(request.method(), status);
         if method_for_redirect != request.method() {
             *request.body_mut() = None;
             for name in [CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING] {
