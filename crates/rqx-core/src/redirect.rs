@@ -68,3 +68,39 @@ impl Redirect {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn keeps_authorization(from: &str, to: &str) -> bool {
+        let from_url = Url::parse(from).unwrap();
+        let to_url = Url::parse(to).unwrap();
+        Redirect::keeps_authorization(&from_url, &to_url)
+    }
+
+    #[test]
+    fn same_origin_keeps_authorization() {
+        assert!(keeps_authorization("http://a/", "http://a:80/x"));
+    }
+
+    #[test]
+    fn https_upgrade_on_default_ports_keeps_authorization() {
+        assert!(keeps_authorization("http://a/", "https://a/"));
+    }
+
+    #[test]
+    fn other_host_drops_authorization() {
+        assert!(!keeps_authorization("http://a/", "https://b/"));
+    }
+
+    #[test]
+    fn upgrade_from_non_default_port_drops_authorization() {
+        assert!(!keeps_authorization("http://a:8080/", "https://a/"));
+    }
+
+    #[test]
+    fn https_downgrade_drops_authorization() {
+        assert!(!keeps_authorization("https://a/", "http://a/"));
+    }
+}
