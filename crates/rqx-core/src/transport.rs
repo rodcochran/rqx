@@ -34,6 +34,14 @@ impl Transport {
         request: &mut Request,
         default_auth: &Auth,
     ) -> Result<PendingResponse, RqxError> {
+        if !matches!(request.url.scheme(), "http" | "https") {
+            return Err(TransportError::UnsupportedProtocol(format!(
+                "Request URL has an unsupported protocol '{}://'.",
+                request.url.scheme()
+            ))
+            .into());
+        }
+
         // Set query params if they exist and are populated.
         if let Some(params) = &request.params {
             let query = params.to_string();
