@@ -29,7 +29,11 @@ impl Transport {
         }
     }
 
-    pub async fn send(&self, request: &mut Request) -> Result<PendingResponse, RqxError> {
+    pub async fn send(
+        &self,
+        request: &mut Request,
+        default_auth: &Auth,
+    ) -> Result<PendingResponse, RqxError> {
         // Set query params if they exist and are populated.
         if let Some(params) = &request.params {
             let query = params.to_string();
@@ -49,15 +53,17 @@ impl Transport {
             builder = builder.headers(headers.inner.clone());
         };
 
-        if let Some(auth) = &request.auth {
-            match auth {
-                Auth::None => {}
-                Auth::Basic { username, password } => {
-                    builder = builder.basic_auth(username, Some(password));
-                }
-                Auth::Bearer(token) => {
-                    builder = builder.bearer_auth(token);
-                }
+        // Use current requests auth override, or client default.
+        // Non-None override -> use Request's Auth.
+        // If Requests, auth is explicitly Auth::None, this request uses no Auth.
+        // Empty override -> client default.
+        match request.auth.as_ref().unwrap_or(default_auth) {
+            Auth::None => {}
+            Auth::Basic { username, password } => {
+                builder = builder.basic_auth(username, Some(password));
+            }
+            Auth::Bearer(token) => {
+                builder = builder.bearer_auth(token);
             }
         };
 

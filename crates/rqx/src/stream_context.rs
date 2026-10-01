@@ -4,7 +4,7 @@ use pyo3::prelude::{Py, PyAny, PyResult, Python, pyclass, pymethods};
 use pyo3::{Bound, PyRef, PyRefMut};
 
 use rqx_core::client::Client;
-use rqx_core::request_spec::RequestSpec;
+use rqx_core::request::Request;
 use rqx_core::streaming::context::Unsent;
 
 use super::client::block_on_inner;
@@ -47,7 +47,7 @@ impl PyStreamContext {
 }
 
 impl PyStreamContext {
-    pub fn new(client: Client, request: RequestSpec, follow_redirects: Option<bool>) -> Self {
+    pub fn new(client: Client, request: Request, follow_redirects: Option<bool>) -> Self {
         Self {
             unsent: Some(Unsent::new(client, request, follow_redirects)),
             response: None,
@@ -104,7 +104,7 @@ impl PyAsyncStreamContext {
 }
 
 impl PyAsyncStreamContext {
-    pub fn new(client: Client, request: RequestSpec, follow_redirects: Option<bool>) -> Self {
+    pub fn new(client: Client, request: Request, follow_redirects: Option<bool>) -> Self {
         Self {
             unsent: Some(Unsent::new(client, request, follow_redirects)),
             response: Arc::new(Mutex::new(None)),

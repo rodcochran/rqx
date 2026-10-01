@@ -10,7 +10,7 @@ use crate::auth::Auth;
 use crate::error::*;
 use crate::headers::Headers;
 use crate::query_params::QueryPairs;
-use crate::redirect::RedirectPolicy;
+use crate::redirect::{Redirect, RedirectPolicy};
 use crate::request::Request;
 use crate::request_components::body::RequestBody;
 use crate::response::{BufferedResponse, PendingResponse};
@@ -195,7 +195,7 @@ impl Client {
         let pending = if follow {
             self.follow_redirects(request).await?
         } else {
-            self.transport.send(&mut request).await?
+            self.transport.send(&mut request, &self.config.auth).await?
         };
         self.accumulate_cookies(&pending.parts.cookies).await;
         Ok(pending)
@@ -228,7 +228,7 @@ impl Client {
         let mut num_retries: u32 = 0;
         let mut retry_history: Vec<(String, f64)> = Vec::new();
         loop {
-            let mut hop = self.transport.send(&mut request).await?;
+            let mut hop = self.transport.send(&mut request, &self.config.auth).await?;
             num_retries += hop.parts.num_retries;
             retry_history.append(&mut hop.parts.retry_history);
             let status = hop.parts.status_code;
@@ -265,12 +265,8 @@ impl Client {
             hop.drain().await;
 
             // Resolve against the hop that sent the Location, not the original URL.
-            // TODO: solve teh mutable state that spec had before.
-            let new_url = spec.redirect_target(&location)?;
-            spec = spec.redirected(status, new_url)?;
-
-
-
+            let new_url = Redirect::redirect_target(&request.url, &location)?;
+            request = request.redirected(status, new_url);
             redirects_used += 1;
         }
     }

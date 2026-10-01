@@ -43,62 +43,29 @@ impl Request {
         }
     }
 
-    pub fn redirected(&self, status: u16, url: Url) -> Result<Self, RqxError> {
-        let method = Redirect::redirect_method(&self.method, status);
-        let method_changed = method != self.method;
+    pub fn redirected(mut self, status: u16, url: Url) -> Self {
+        let method_for_redirect = Redirect::redirect_method(&self.method, status);
 
-        let body = if method_changed {
-            None
-        } else {
-            self.body.clone()
-        };
+        if method_for_redirect != self.method {
+            self.body = None;
+        }
 
-        let mut headers = self.headers.clone();
-
-        if let Some(headers) = headers.as_mut() {
-            if method_changed {
+        if let Some(headers) = self.headers.as_mut() {
+            if method_for_redirect != self.method {
                 for name in [CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING] {
-                    headers.delete_item(&name.to_string());
+                    headers.delete_item_safe(name.as_ref());
                 }
             }
 
-            headers.delete_item(&COOKIE.to_string());
+            headers.delete_item_safe(COOKIE.as_ref());
 
             if !Redirect::keeps_authorization(&self.url, &url) {
-                headers.delete_item(&AUTHORIZATION.to_string());
+                headers.delete_item_safe(AUTHORIZATION.as_ref());
             }
         }
 
-        Ok(Self::new(
-            method,
-            url,
-            self.params.clone(),
-            headers,
-            body,
-            self.auth.clone(),
-            self.timeout,
-            self.follow_redirects,
-        ))
+        self.method = method_for_redirect;
+        self.url = url;
+        self
     }
-
-    /*
-    pub fn redirected(&self, status: u16, url: Url) -> Result<Self, RqxError> {
-        let mut next = self.clone_request()?;
-        let method = Self::redirect_method(next.method(), status);
-        if method != next.method() {
-            *next.body_mut() = None;
-            for name in [CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING] {
-                next.headers_mut().remove(name);
-            }
-        }
-        next.headers_mut().remove(COOKIE);
-        if !self.keeps_authorization(&url) {
-            next.headers_mut().remove(AUTHORIZATION);
-        }
-        *next.method_mut() = method;
-        *next.url_mut() = url;
-        Ok(Self { prototype: next })
-    }
-
-     */
 }

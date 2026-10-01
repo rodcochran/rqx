@@ -1,17 +1,18 @@
 use crate::client::Client;
 use crate::error::*;
-use crate::request_spec::RequestSpec;
+// use crate::request_spec::RequestSpec;
+use crate::request::Request;
 use crate::response::PendingResponse;
 
 /// A request built by `stream()` but not yet sent. Sent once, on enter.
 pub struct Unsent {
     client: Client,
-    request: RequestSpec,
+    request: Request,
     follow_redirects: Option<bool>,
 }
 
 impl Unsent {
-    pub fn new(client: Client, request: RequestSpec, follow_redirects: Option<bool>) -> Self {
+    pub fn new(client: Client, request: Request, follow_redirects: Option<bool>) -> Self {
         Self {
             client,
             request,

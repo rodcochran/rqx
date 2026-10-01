@@ -1,6 +1,8 @@
 use http::method::Method;
 use url::Url;
 
+use crate::error::*;
+
 const DEFAULT_MAX_REDIRECTS: u32 = 20;
 const DEFAULT_FOLLOW_REDIRECTS: bool = false;
 const DEFAULT_RAISE_ON_REDIRECT: bool = true;
@@ -58,5 +60,11 @@ impl Redirect {
             }
             _ => from.origin() == next.origin(),
         }
+    }
+
+    pub fn redirect_target(url: &Url, location: &str) -> Result<Url, RqxError> {
+        url.join(location).map_err(|e| {
+            RequestError::RequestError(format!("Error parsing url from redirect: {e}")).into()
+        })
     }
 }
