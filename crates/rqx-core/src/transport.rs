@@ -19,6 +19,22 @@ pub struct ConnectionPoolConfig {
     pool_timeout: Option<f64>,
 }
 
+impl ConnectionPoolConfig {
+    pub fn new(
+        max_connections: Option<u32>,
+        max_keepalive: Option<u32>,
+        keepalive_expiry: Option<f64>,
+        pool_timeout: Option<f64>,
+    ) -> Self {
+        Self {
+            max_connections,
+            max_keepalive,
+            keepalive_expiry,
+            pool_timeout,
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct TransportConfig {
     pool_config: ConnectionPoolConfig,
@@ -30,11 +46,26 @@ pub struct TransportConfig {
     proxies: Vec<reqwest::Proxy>,
 }
 
-#[derive(Clone)]
-pub struct Transport {
-    pub client: reqwest::Client,
-    config: TransportConfig,
-    semaphore: Option<Arc<Semaphore>>,
+impl TransportConfig {
+    pub fn new(
+        pool_config: ConnectionPoolConfig,
+        http_version_config: HttpVersionConfig,
+        verify_config: VerifyConfig,
+        timeout_config: Timeout,
+        retry_config: Option<Retry>,
+        cert: Option<Identity>,
+        proxies: Vec<reqwest::Proxy>,
+    ) -> Self {
+        Self {
+            pool_config,
+            http_version_config,
+            verify_config,
+            timeout_config,
+            retry_config,
+            cert,
+            proxies,
+        }
+    }
 }
 
 impl From<&TransportConfig> for reqwest::ClientBuilder {
@@ -94,8 +125,14 @@ impl From<&TransportConfig> for reqwest::ClientBuilder {
     }
 }
 
+#[derive(Clone)]
+pub struct Transport {
+    pub client: reqwest::Client,
+    config: TransportConfig,
+    semaphore: Option<Arc<Semaphore>>,
+}
+
 impl Transport {
-    // pub fn new(client: Client, semaphore: Option<Arc<Semaphore>>, retries: Option<Retry>) -> Self {
     pub fn new(config: TransportConfig) -> Result<Self, RqxError> {
         let semaphore = config
             .pool_config
