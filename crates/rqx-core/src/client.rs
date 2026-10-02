@@ -181,9 +181,8 @@ impl Client {
             RequestBody::Empty => {}
         };
 
-        if let Some(timeout) = timeout {
-            builder = builder.timeout(Duration::from_secs_f64(timeout))
-        }
+        let timeout = timeout.unwrap_or_else(|| self.timeout_secs());
+        builder = builder.timeout(Duration::from_secs_f64(timeout));
 
         let executable_request = builder.build().map_err(RqxError::from)?;
         Ok(executable_request)
@@ -292,5 +291,36 @@ impl Client {
             request = Redirect::redirected_request(request, status, new_url);
             redirects_used += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_falls_back_to_the_client_timeout() {
+        let client = Client::new(
+            Transport::new(reqwest::Client::new(), None, None),
+            ClientConfig::default(),
+        );
+        let request = Request::new(
+            "GET",
+            UrlReference::parse("http://example.test/").unwrap(),
+            None,
+            None,
+            RequestBody::Empty,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let built = client.build(request).unwrap();
+
+        assert_eq!(
+            built.timeout(),
+            Some(&Duration::from_secs_f64(client.timeout_secs()))
+        );
     }
 }
