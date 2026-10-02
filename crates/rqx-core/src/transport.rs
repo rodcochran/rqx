@@ -2,19 +2,18 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use reqwest::tls::Identity;
-use reqwest::{Client, ClientBuilder, Request, Response};
+use reqwest::{Client, ClientBuilder, Response};
 use tokio::sync::Semaphore;
 
 use crate::error::*;
 use crate::http::protocol::HttpVersionConfig;
 use crate::http::tls::VerifyConfig;
-use crate::request::RequestSpec;
 use crate::response::PendingResponse;
 use crate::retry::{FailureKind, Retry, RetryCounts};
 
 #[derive(Clone)]
 pub struct Transport {
-    client: Client,
+    pub client: Client,
     semaphore: Option<Arc<Semaphore>>,
     pub retries: Option<Retry>,
 }
@@ -28,25 +27,21 @@ impl Transport {
         }
     }
 
-    /// Send with retries, body unread. Every path — buffered, redirect hops,
-    /// streaming — goes through here so retries can't be skipped (https://github.com/rodcochran/rqx/issues/148).
-    pub async fn send(&self, spec: &RequestSpec) -> Result<PendingResponse, RqxError> {
+    pub async fn send(&self, request: reqwest::Request) -> Result<PendingResponse, RqxError> {
         if self.retries.is_some() {
-            self.send_with_retries(spec).await
+            self.send_with_retries(request).await
         } else {
-            Ok(PendingResponse::new(
-                self.send_raw(spec.clone_request()?).await?,
-            ))
+            Ok(PendingResponse::new(self.send_raw(request).await?))
         }
     }
 
     /// Single attempt, no retries.
-    async fn send_raw(&self, request: Request) -> Result<Response, RqxError> {
+    async fn send_raw(&self, request: reqwest::Request) -> Result<Response, RqxError> {
         self.execute(request).await.map_err(RqxError::from)
     }
 
     /// Error left unmapped so the retry loop can classify it.
-    async fn execute(&self, request: Request) -> Result<Response, reqwest::Error> {
+    async fn execute(&self, request: reqwest::Request) -> Result<Response, reqwest::Error> {
         let _permit = match self.semaphore.as_ref() {
             // acquire only fails on a closed semaphore; ours is never closed.
             Some(sem) => Some(
@@ -60,12 +55,15 @@ impl Transport {
     }
 
     /// The retry state machine.
-    async fn send_with_retries(&self, spec: &RequestSpec) -> Result<PendingResponse, RqxError> {
+    async fn send_with_retries(
+        &self,
+        request: reqwest::Request,
+    ) -> Result<PendingResponse, RqxError> {
         // Operates on raw reqwest::Response throughout — reading status and
         // retry-after directly from response headers without acquiring the GIL.
         // The body stays unread for the caller. Mirrors the redirect-loop fix from https://github.com/rodcochran/rqx/issues/93.
         let r = self.retries.as_ref().unwrap();
-        let is_retryable_method = r.allowed_methods.contains(spec.method().as_str());
+        let is_retryable_method = r.allowed_methods.contains(request.method().as_str());
         let backoff_max: f32 = r.backoff_max;
         let respect_retry = r.respect_retry_after_header;
         let total_timeout: f64 = r.total_timeout.unwrap_or(f64::INFINITY);
@@ -126,7 +124,14 @@ impl Transport {
             }
 
             let attempt_start = Instant::now();
-            let failure = match self.execute(spec.clone_request()?).await {
+
+            let new_request = request.try_clone().ok_or_else(|| {
+                RequestError::RequestError(
+                    "Streaming request bodies cannot be replayed".to_string(),
+                )
+            })?;
+
+            let failure = match self.execute(new_request).await {
                 Ok(resp) => {
                     if !is_retryable_method {
                         return Ok(PendingResponse::new(resp));

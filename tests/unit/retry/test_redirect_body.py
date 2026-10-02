@@ -109,3 +109,18 @@ async def test_retried_request_carries_its_body_async(flaky_server):
     )
     assert resp.num_retries == 2
     assert resp.json()["body"] == '{"id":1}'
+
+
+def test_params_are_not_reapplied_after_a_redirect_stream(flaky_server):
+    client = rqx.Client()
+    with client.stream(
+        "GET", f"{flaky_server}/redirect-once", params={"a": "1"}, follow_redirects=True
+    ) as resp:
+        assert str(resp.url) == f"{flaky_server}/streamable"
+
+
+@pytest.mark.asyncio
+async def test_params_are_not_reapplied_after_a_redirect_async(flaky_server):
+    client = rqx.AsyncClient(follow_redirects=True)
+    resp = await client.get(f"{flaky_server}/redirect-once", params={"a": "1"})
+    assert str(resp.url) == f"{flaky_server}/streamable"
