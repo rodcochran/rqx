@@ -73,6 +73,10 @@ impl Headers {
         }
     }
 
+    pub fn delete_item_safe(&mut self, key: &str) {
+        self.inner.remove(key);
+    }
+
     pub fn contains(&self, key: &str) -> bool {
         self.inner.contains_key(key)
     }

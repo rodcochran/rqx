@@ -31,18 +31,41 @@ impl PyRepr for f64 {
         if self.is_infinite() {
             return if *self > 0.0 { "inf" } else { "-inf" }.to_owned();
         }
+
         let magnitude = self.abs();
         if magnitude == 0.0 || (1e-4..1e16).contains(&magnitude) {
-            return format!("{self:?}");
+            let shortest = format!("{self:?}");
+            let (_, fraction) = shortest
+                .split_once('.')
+                .expect("Debug writes a fraction in this range");
+            let digits = fraction.len();
+            let rounded = format!("{self:.digits$}");
+            return if rounded.parse::<f64>() == Ok(*self) {
+                rounded
+            } else {
+                shortest
+            };
         }
-        // Python's scientific form: shortest mantissa, signed exits.
-        let scientific = format!("{self:e}");
-        let (mantissa, exponent) = scientific
+
+        let shortest = format!("{self:e}");
+        let (mantissa, _) = shortest
+            .split_once('e')
+            .expect("LowerExp always writes an exponent");
+        let digits = mantissa
+            .split_once('.')
+            .map_or(0, |(_, fraction)| fraction.len());
+
+        let rounded = format!("{self:.digits$e}");
+        let chosen = if rounded.parse::<f64>() == Ok(*self) {
+            rounded
+        } else {
+            shortest
+        };
+        let (mantissa, exponent) = chosen
             .split_once('e')
             .expect("LowerExp always writes an exponent");
         let exponent: i32 = exponent.parse().expect("LowerExp exponent is an integer");
-        let sign = if exponent < 0 { '-' } else { '+' };
-        format!("{mantissa}e{sign}{:02}", exponent.abs())
+        format!("{mantissa}e{exponent:+03}")
     }
 }
 
@@ -100,6 +123,24 @@ mod tests {
         for (value, expected) in cases {
             assert_eq!(value.py_repr(), *expected, "repr of {value:?}");
         }
+    }
+
+    #[test]
+    fn powers_of_two_keep_the_digits_that_round_trip() {
+        assert_eq!(2.0_f64.powi(-24).py_repr(), "5.960464477539063e-08");
+    }
+
+    #[test]
+    fn ties_round_to_even_like_python() {
+        assert_eq!(
+            (8796093022208.0_f64 + 0.5625).py_repr(),
+            "8796093022208.562"
+        );
+        assert_eq!(
+            (70368744177664.0_f64 + 0.125).py_repr(),
+            "70368744177664.12"
+        );
+        assert_eq!((1e15_f64 + 0.3).py_repr(), "1000000000000000.2");
     }
 
     #[test]
