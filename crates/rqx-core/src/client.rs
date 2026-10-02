@@ -47,10 +47,6 @@ impl ClientConfig {
 // ────────────────────────────────────────────────────────────────────────
 // Client — shared pure-Rust core for PyClient and PyAsyncClient.
 //
-// All methods are async — no pyo3 ceremony in bodies. The pyo3 boundary
-// (Bound<PyAny>, py.detach, future_into_py) lives in the pyclass wrappers
-// below.
-//
 // Cookies use Arc<TokioMutex> so both pyclass wrappers share this type.
 // TokioMutex::blocking_lock() is safe from the sync side, which calls from
 // outside any tokio runtime.
@@ -106,8 +102,7 @@ impl Client {
             .await
     }
 
-    /// Send a built request, leaving the body unread for the stream response
-    /// to consume. `elapsed` is the time to headers.
+    /// Build the request, sending pushed downstream to when Unsent.send() is called.
     pub fn stream(&self, request: Request) -> Result<Unsent, RqxError> {
         let follow_redirects = request
             .follow_redirects
