@@ -61,6 +61,21 @@ def test_relative_location_resolves_against_the_current_hop(lib, flaky_server):
     assert str(resp.url) == f"{flaky_server}/nested/final"
 
 
+def test_params_apply_to_the_first_request_only(lib, flaky_server):
+    resp = lib.client(follow_redirects=True).get(
+        f"{flaky_server}/redirect-once", params={"a": "1"}
+    )
+    assert str(resp.url) == f"{flaky_server}/streamable"
+
+
+def test_location_query_survives_params_on_the_first_request(lib, flaky_server):
+    target = f"{flaky_server}/echo-url/final?keep=1"
+    resp = lib.client(follow_redirects=True).get(
+        f"{flaky_server}/redirect-to", params={"url": target}
+    )
+    assert str(resp.url) == target
+
+
 def test_redirect_loop_raises_too_many_redirects(lib, flaky_server):
     with pytest.raises(lib.module.TooManyRedirects):
         lib.client(follow_redirects=True, max_redirects=3).get(
