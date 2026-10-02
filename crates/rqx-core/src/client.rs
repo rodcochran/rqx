@@ -116,7 +116,18 @@ impl Client {
     }
 
     pub fn build(&self, request: Request) -> Result<reqwest::Request, RqxError> {
-        let mut url = self.merge_url(request.url)?;
+        let Request {
+            method,
+            url,
+            params,
+            headers,
+            body,
+            auth,
+            timeout,
+            ..
+        } = request;
+
+        let mut url = self.merge_url(url)?;
 
         if !matches!(url.scheme(), "http" | "https") {
             return Err(TransportError::UnsupportedProtocol(format!(
@@ -127,7 +138,7 @@ impl Client {
         }
 
         // Set query params if they exist and are populated.
-        if let Some(params) = &request.params {
+        if let Some(params) = &params {
             let query = params.to_string();
             match query.is_empty() {
                 true => url.set_query(None),
@@ -136,18 +147,18 @@ impl Client {
         };
 
         // Initialize reqwest's RequestBuilder
-        let mut builder = self.transport.client.request(request.method.clone(), url);
+        let mut builder = self.transport.client.request(method, url);
 
         // Apply headers if they exist
-        if let Some(headers) = &request.headers {
-            builder = builder.headers(headers.inner.clone());
+        if let Some(headers) = headers {
+            builder = builder.headers(headers.inner);
         };
 
         // Use current requests auth override, or client default.
         // Non-None override -> use Request's Auth.
         // If Requests, auth is explicitly Auth::None, this request uses no Auth.
         // Empty override -> client default.
-        match request.auth.as_ref().unwrap_or(&self.config.auth) {
+        match auth.as_ref().unwrap_or(&self.config.auth) {
             Auth::None => {}
             Auth::Basic { username, password } => {
                 builder = builder.basic_auth(username, Some(password));
@@ -157,20 +168,20 @@ impl Client {
             }
         };
 
-        match &request.body {
+        match body {
             RequestBody::Content(c) => {
-                builder = builder.body(c.clone());
+                builder = builder.body(c);
             }
             RequestBody::Form(f) => {
-                builder = builder.form(f);
+                builder = builder.form(&f);
             }
             RequestBody::Json(j) => {
-                builder = builder.json(j);
+                builder = builder.json(&j);
             }
             RequestBody::Empty => {}
         };
 
-        if let Some(timeout) = request.timeout {
+        if let Some(timeout) = timeout {
             builder = builder.timeout(Duration::from_secs_f64(timeout))
         }
 
