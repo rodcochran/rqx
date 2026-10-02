@@ -7,7 +7,9 @@ use crate::error::*;
 ///   - `verify=True`  → use system root certificates (default TLS behavior).
 ///   - `verify=False` → accept invalid certificates (insecure).
 ///   - `verify="path"` → add a custom CA cert as a trusted root.
+#[derive(Default, Clone)]
 pub enum VerifyConfig {
+    #[default]
     Default,
     DisableVerification,
     CustomCa(Certificate),
