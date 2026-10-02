@@ -10,6 +10,7 @@ use pyo3::prelude::*;
 use pyo3::types::IntoPyDict;
 
 mod client;
+mod config_builders;
 pub mod exceptions;
 mod headers;
 mod http;

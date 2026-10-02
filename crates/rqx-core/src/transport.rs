@@ -41,7 +41,7 @@ pub struct TransportConfig {
     http_version_config: HttpVersionConfig,
     verify_config: VerifyConfig,
     timeout_config: Timeout,
-    retry_config: Option<Retry>,
+    pub retry_config: Option<Retry>,
     cert: Option<Identity>,
     proxies: Vec<reqwest::Proxy>,
 }
@@ -125,10 +125,10 @@ impl From<&TransportConfig> for reqwest::ClientBuilder {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Transport {
     pub client: reqwest::Client,
-    config: TransportConfig,
+    pub config: TransportConfig,
     semaphore: Option<Arc<Semaphore>>,
 }
 
