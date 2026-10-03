@@ -206,3 +206,25 @@ def test_transport_accepts_timeout(flaky_server):
     client = rqx.Client(transport=transport)
     with pytest.raises(rqx.ReadTimeout):
         client.get(f"{flaky_server}/sleep/1")
+
+
+def test_keepalive_expiry_wins_over_timeout_pool(keepalive_server):
+    """keepalive_expiry sets the pool idle timeout even when timeout.pool is
+    shorter, so the connection survives a gap longer than timeout.pool."""
+    transport = rqx.HTTPTransport(keepalive_expiry=30, timeout=rqx.Timeout(pool=0.2))
+    with rqx.Client(transport=transport) as client:
+        client.get(keepalive_server.url)
+        time.sleep(0.6)
+        client.get(keepalive_server.url)
+    assert keepalive_server.connections == 1
+
+
+def test_timeout_pool_sets_idle_timeout_without_keepalive_expiry(keepalive_server):
+    """Without keepalive_expiry, timeout.pool is the idle timeout: the same gap
+    drops the pooled connection and the second request opens a new one."""
+    transport = rqx.HTTPTransport(timeout=rqx.Timeout(pool=0.2))
+    with rqx.Client(transport=transport) as client:
+        client.get(keepalive_server.url)
+        time.sleep(0.6)
+        client.get(keepalive_server.url)
+    assert keepalive_server.connections == 2
