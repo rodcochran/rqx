@@ -296,12 +296,16 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
+    use crate::transport::TransportConfig;
+
     use super::*;
 
     #[test]
     fn build_falls_back_to_the_client_timeout() {
+        let transport_config = TransportConfig::default();
+
         let client = Client::new(
-            Transport::new(reqwest::Client::new(), None, None),
+            Transport::new(transport_config).unwrap(),
             ClientConfig::default(),
         );
         let request = Request::new(

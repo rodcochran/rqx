@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use reqwest::tls::Identity;
-use reqwest::{Client, ClientBuilder, Response};
 use tokio::sync::Semaphore;
 
 use crate::error::*;
@@ -10,25 +9,156 @@ use crate::http::protocol::HttpVersionConfig;
 use crate::http::tls::VerifyConfig;
 use crate::response::PendingResponse;
 use crate::retry::{FailureKind, Retry, RetryCounts};
+use crate::timeout::Timeout;
+
+#[derive(Clone, Default)]
+pub struct ConnectionPoolConfig {
+    max_connections: Option<u32>,
+    max_keepalive: Option<u32>,
+    keepalive_expiry: Option<f64>,
+}
+
+impl ConnectionPoolConfig {
+    pub fn new(
+        max_connections: Option<u32>,
+        max_keepalive: Option<u32>,
+        keepalive_expiry: Option<f64>,
+    ) -> Self {
+        Self {
+            max_connections,
+            max_keepalive,
+            keepalive_expiry,
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct TransportConfig {
+    pool_config: ConnectionPoolConfig,
+    http_version_config: HttpVersionConfig,
+    verify_config: VerifyConfig,
+    timeout_config: Timeout,
+    pub retry_config: Option<Retry>,
+    cert: Option<Identity>,
+    proxies: Vec<reqwest::Proxy>,
+}
+
+impl TransportConfig {
+    pub fn new(
+        pool_config: ConnectionPoolConfig,
+        http_version_config: HttpVersionConfig,
+        verify_config: VerifyConfig,
+        timeout_config: Timeout,
+        retry_config: Option<Retry>,
+        cert: Option<Identity>,
+        proxies: Vec<reqwest::Proxy>,
+    ) -> Self {
+        Self {
+            pool_config,
+            http_version_config,
+            verify_config,
+            timeout_config,
+            retry_config,
+            cert,
+            proxies,
+        }
+    }
+}
+
+impl From<&TransportConfig> for reqwest::ClientBuilder {
+    fn from(value: &TransportConfig) -> Self {
+        let mut client_builder = reqwest::Client::builder();
+
+        if let Some(max_keepalive) = value.pool_config.max_keepalive {
+            client_builder = client_builder.pool_max_idle_per_host(max_keepalive as usize);
+        };
+        if let Some(p) = value
+            .pool_config
+            .keepalive_expiry
+            .or(value.timeout_config.pool)
+        {
+            client_builder = client_builder.pool_idle_timeout(Duration::from_secs_f64(p));
+        };
+
+        if let Some(c) = value.timeout_config.connect {
+            client_builder = client_builder.connect_timeout(Duration::from_secs_f64(c));
+        };
+        if let Some(r) = value.timeout_config.read {
+            client_builder = client_builder.read_timeout(Duration::from_secs_f64(r));
+        };
+
+        match value.http_version_config {
+            HttpVersionConfig::Negotiate => {
+                // No-op — reqwest's default does ALPN negotiation over TLS.
+            }
+            HttpVersionConfig::Http1Only => {
+                client_builder = client_builder.http1_only();
+            }
+            HttpVersionConfig::Http2Only => {
+                client_builder = client_builder.http2_prior_knowledge();
+            }
+        };
+
+        match &value.verify_config {
+            VerifyConfig::Default => {}
+            VerifyConfig::DisableVerification => {
+                client_builder = client_builder.danger_accept_invalid_certs(true);
+            }
+            VerifyConfig::CustomCa(ca) => {
+                // TODO: add_root_certificate() is deprecated...
+                client_builder = client_builder.add_root_certificate(ca.clone());
+            }
+        };
+
+        if let Some(c) = &value.cert {
+            client_builder = client_builder.identity(c.clone());
+        };
+
+        for p in &value.proxies {
+            client_builder = client_builder.proxy(p.clone());
+        }
+
+        // Turn off reqwest's redirect handler since we do it with more granular control
+        // in Client.
+        client_builder = client_builder.redirect(reqwest::redirect::Policy::none());
+        client_builder = client_builder.cookie_store(true);
+        client_builder
+    }
+}
 
 #[derive(Clone)]
 pub struct Transport {
-    pub client: Client,
+    pub client: reqwest::Client,
+    pub config: TransportConfig,
     semaphore: Option<Arc<Semaphore>>,
-    pub retries: Option<Retry>,
+}
+
+impl Default for Transport {
+    fn default() -> Self {
+        let config = TransportConfig::default();
+        Self::new(config).expect("Failed to build HTTP client")
+    }
 }
 
 impl Transport {
-    pub fn new(client: Client, semaphore: Option<Arc<Semaphore>>, retries: Option<Retry>) -> Self {
-        Self {
+    pub fn new(config: TransportConfig) -> Result<Self, RqxError> {
+        let semaphore = config
+            .pool_config
+            .max_connections
+            .map(|mc| Arc::new(Semaphore::new(mc as usize)));
+
+        let client_builder = reqwest::ClientBuilder::from(&config);
+        let client = client_builder.build()?;
+
+        Ok(Self {
             client,
             semaphore,
-            retries,
-        }
+            config,
+        })
     }
 
     pub async fn send(&self, request: reqwest::Request) -> Result<PendingResponse, RqxError> {
-        if self.retries.is_some() {
+        if self.config.retry_config.is_some() {
             self.send_with_retries(request).await
         } else {
             Ok(PendingResponse::new(self.send_raw(request).await?))
@@ -36,12 +166,15 @@ impl Transport {
     }
 
     /// Single attempt, no retries.
-    async fn send_raw(&self, request: reqwest::Request) -> Result<Response, RqxError> {
+    async fn send_raw(&self, request: reqwest::Request) -> Result<reqwest::Response, RqxError> {
         self.execute(request).await.map_err(RqxError::from)
     }
 
     /// Error left unmapped so the retry loop can classify it.
-    async fn execute(&self, request: reqwest::Request) -> Result<Response, reqwest::Error> {
+    async fn execute(
+        &self,
+        request: reqwest::Request,
+    ) -> Result<reqwest::Response, reqwest::Error> {
         let _permit = match self.semaphore.as_ref() {
             // acquire only fails on a closed semaphore; ours is never closed.
             Some(sem) => Some(
@@ -62,7 +195,7 @@ impl Transport {
         // Operates on raw reqwest::Response throughout — reading status and
         // retry-after directly from response headers without acquiring the GIL.
         // The body stays unread for the caller. Mirrors the redirect-loop fix from https://github.com/rodcochran/rqx/issues/93.
-        let r = self.retries.as_ref().unwrap();
+        let r = self.config.retry_config.as_ref().unwrap();
         let is_retryable_method = r.allowed_methods.contains(request.method().as_str());
         let backoff_max: f32 = r.backoff_max;
         let respect_retry = r.respect_retry_after_header;
@@ -70,7 +203,7 @@ impl Transport {
 
         let mut used = RetryCounts::default();
         let mut retry_history: Vec<(String, f64)> = Vec::new();
-        let mut current_response: Option<Response> = None;
+        let mut current_response: Option<reqwest::Response> = None;
 
         let start_time = Instant::now();
 
@@ -189,144 +322,6 @@ impl Transport {
                 Ok(PendingResponse::new(cr).with_retries(used.total as u32, retry_history))
             }
             None => Err(HTTPError::MaxRetriesExceeded(exhausted).into()),
-        }
-    }
-
-    pub fn client(&self) -> &Client {
-        &self.client
-    }
-}
-
-impl Default for Transport {
-    fn default() -> Self {
-        let client = RqxClientBuilder::default()
-            .with_pool(None, None, None)
-            .with_http_version(HttpVersionConfig::default())
-            .with_phase_timeouts(None, None)
-            .with_proxy(Vec::new())
-            .with_tls(None, None)
-            .build();
-
-        Self {
-            client,
-            semaphore: None,
-            retries: None,
-        }
-    }
-}
-
-// ────────────────────────────────────────────────────────────────────────
-// RqxClientBuilder — wraps reqwest's ClientBuilder with rqx's config vocab.
-//
-// Methods are sliced by *what they configure on reqwest*, not by *which
-// Python argument they came from* — each concern owns exactly one set of
-// reqwest setters and there are no inter-method collisions.
-//
-// All `with_*` methods consume and return `Self` to support chaining and
-// are infallible: parsing/validation happens upstream in `build_http_client`.
-// ────────────────────────────────────────────────────────────────────────
-
-pub struct RqxClientBuilder {
-    inner: ClientBuilder,
-}
-
-impl RqxClientBuilder {
-    /// Configures the connection pool. Owns every `pool_*` setter on reqwest.
-    ///
-    /// Resolves the precedence between `keepalive_expiry` and `timeout.pool`
-    /// (caller passes the latter as `pool_timeout` — `keepalive_expiry` wins
-    /// when both are set).
-    pub fn with_pool(
-        mut self,
-        max_keepalive: Option<u32>,
-        keepalive_expiry: Option<f64>,
-        pool_timeout: Option<f64>,
-    ) -> Self {
-        if let Some(max_keepalive) = max_keepalive {
-            self.inner = self.inner.pool_max_idle_per_host(max_keepalive as usize);
-        }
-        if let Some(p) = keepalive_expiry.or(pool_timeout) {
-            self.inner = self.inner.pool_idle_timeout(Duration::from_secs_f64(p));
-        }
-        self
-    }
-
-    pub fn with_phase_timeouts(mut self, connect: Option<f64>, read: Option<f64>) -> Self {
-        if let Some(c) = connect {
-            self.inner = self.inner.connect_timeout(Duration::from_secs_f64(c));
-        }
-        if let Some(r) = read {
-            self.inner = self.inner.read_timeout(Duration::from_secs_f64(r));
-        }
-        self
-    }
-
-    /// HTTP version selection. Takes a pre-validated [`HttpVersionConfig`];
-    /// the `(false, false)` error case is caught upstream in `from_args`.
-    pub fn with_http_version(mut self, cfg: HttpVersionConfig) -> Self {
-        match cfg {
-            HttpVersionConfig::Negotiate => {
-                // No-op — reqwest's default does ALPN negotiation over TLS.
-            }
-            HttpVersionConfig::Http1Only => {
-                self.inner = self.inner.http1_only();
-            }
-            HttpVersionConfig::Http2Only => {
-                self.inner = self.inner.http2_prior_knowledge();
-            }
-        }
-        self
-    }
-
-    /// TLS: CA verification and client identity.
-    ///
-    /// `verify` is a pre-parsed [`VerifyConfig`] sum type covering the three
-    /// meaningful states of the Python `verify=` arg (default / disable /
-    /// custom CA). `cert` is a pre-parsed reqwest `Identity` for mTLS.
-    pub fn with_tls(mut self, verify: Option<VerifyConfig>, cert: Option<Identity>) -> Self {
-        if let Some(v) = verify {
-            match v {
-                VerifyConfig::Default => {}
-                VerifyConfig::DisableVerification => {
-                    self.inner = self.inner.danger_accept_invalid_certs(true);
-                }
-                VerifyConfig::CustomCa(ca) => {
-                    self.inner = self.inner.add_root_certificate(ca);
-                }
-            }
-        }
-        if let Some(c) = cert {
-            self.inner = self.inner.identity(c);
-        }
-        self
-    }
-
-    /// Proxy configuration. Takes pre-parsed `reqwest::Proxy` values; URL
-    /// parsing and scheme filtering happen upstream in `parse_proxies`.
-    pub fn with_proxy(mut self, proxies: Vec<reqwest::Proxy>) -> Self {
-        for p in proxies {
-            self.inner = self.inner.proxy(p);
-        }
-        self
-    }
-
-    /// Finalize into a reqwest `Client`. Panics if reqwest's build fails —
-    /// failure here indicates a logic error in the builder chain, not user
-    /// input.
-    pub fn build(self) -> Client {
-        self.inner.build().expect("Failed to build HTTP client")
-    }
-}
-
-impl Default for RqxClientBuilder {
-    /// Seeded with rqx's baseline:
-    /// - `redirect::Policy::none()` (Client layer handles redirects)
-    /// - `cookie_store(true)`
-    fn default() -> Self {
-        Self {
-            inner: Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .cookie_store(true),
         }
     }
 }

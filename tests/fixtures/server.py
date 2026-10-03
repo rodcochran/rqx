@@ -741,6 +741,47 @@ class CannedServer:
                     )
 
 
+class KeepAliveServer:
+    """HTTP/1.1 server that keeps each connection open and answers every request
+    on it with `200 ok`. `connections` counts accepted connections, so a test can
+    tell a reused pooled connection from a fresh one."""
+
+    def __init__(self):
+        self.connections = 0
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.url = f"http://127.0.0.1:{self.sock.getsockname()[1]}/"
+
+    def start(self):
+        threading.Thread(target=self._serve, daemon=True).start()
+        return self
+
+    def close(self):
+        self.sock.close()
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            self.connections += 1
+            threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
+
+    def _handle(self, conn):
+        with conn:
+            buffer = b""
+            while True:
+                while b"\r\n\r\n" not in buffer:
+                    chunk = conn.recv(65536)
+                    if not chunk:
+                        return
+                    buffer += chunk
+                _, buffer = buffer.split(b"\r\n\r\n", 1)
+                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+
+
 def _free_port():
     """Pick an unused localhost port. Closes the probe socket before returning,
     so there's a brief race window before hypercorn re-binds — acceptable for

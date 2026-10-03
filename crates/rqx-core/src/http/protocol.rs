@@ -9,7 +9,7 @@ use crate::error::{RequestError, RqxError};
 ///
 /// The `(false, false)` combination is rejected at parse time so the builder
 /// method itself is infallible.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub enum HttpVersionConfig {
     #[default]
     Negotiate,

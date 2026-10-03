@@ -11,6 +11,7 @@ from tests.fixtures.server import (
     CERTS_DIR,
     CannedServer,
     FlakyServerHandler,
+    KeepAliveServer,
     MTLSHandler,
     QuietThreadingHTTPServer,
     _free_port,
@@ -75,6 +76,14 @@ def canned_server():
     yield start
     for server in servers:
         server.close()
+
+
+@pytest.fixture
+def keepalive_server():
+    """A keep-alive HTTP/1.1 server that counts the connections it accepts."""
+    server = KeepAliveServer().start()
+    yield server
+    server.close()
 
 
 @pytest.fixture(scope="session")
