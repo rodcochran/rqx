@@ -11,7 +11,6 @@ use rqx_core::timeout::Timeout;
 use rqx_core::transport::{Transport, TransportConfig};
 use rqx_core::url::base_url::BaseUrl;
 
-use crate::config_builders::transport::TransportArgs;
 use crate::exceptions::*;
 use crate::py_json::JsonBody;
 use crate::query_params::RequestQueryParams;
@@ -21,6 +20,7 @@ use crate::response::PyResponse;
 use crate::runtime::RUNTIME;
 use crate::stream_context::{PyAsyncStreamContext, PyStreamContext};
 use crate::timeout::TimeoutArg;
+use crate::transport::TransportArgs;
 use crate::transport::{AsyncHTTPTransport, HTTPTransport};
 use crate::url::py_url::PyURL;
 

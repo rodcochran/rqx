@@ -73,9 +73,9 @@ impl From<&TransportConfig> for reqwest::ClientBuilder {
             client_builder = client_builder.pool_max_idle_per_host(max_keepalive as usize);
         };
         if let Some(p) = value
-            .timeout_config
-            .pool
-            .or(value.pool_config.keepalive_expiry)
+            .pool_config
+            .keepalive_expiry
+            .or(value.timeout_config.pool)
         {
             client_builder = client_builder.pool_idle_timeout(Duration::from_secs_f64(p));
         };
@@ -131,6 +131,13 @@ pub struct Transport {
     pub client: reqwest::Client,
     pub config: TransportConfig,
     semaphore: Option<Arc<Semaphore>>,
+}
+
+impl Default for Transport {
+    fn default() -> Self {
+        let config = TransportConfig::default();
+        Self::new(config).expect("Failed to build HTTP client")
+    }
 }
 
 impl Transport {
@@ -316,12 +323,5 @@ impl Transport {
             }
             None => Err(HTTPError::MaxRetriesExceeded(exhausted).into()),
         }
-    }
-}
-
-impl Default for Transport {
-    fn default() -> Self {
-        let config = TransportConfig::default();
-        Self::new(config).expect("Failed to build HTTP client")
     }
 }
