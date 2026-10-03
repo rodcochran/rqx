@@ -121,11 +121,15 @@ impl From<&TransportConfig> for reqwest::ClientBuilder {
             client_builder = client_builder.proxy(p.clone());
         }
 
+        // Turn off reqwest's redirect handler since we do it with more granular control
+        // in Client.
+        client_builder = client_builder.redirect(reqwest::redirect::Policy::none());
+        client_builder = client_builder.cookie_store(true);
         client_builder
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Transport {
     pub client: reqwest::Client,
     pub config: TransportConfig,
@@ -319,5 +323,19 @@ impl Transport {
 
     pub fn client(&self) -> &reqwest::Client {
         &self.client
+    }
+}
+
+impl Default for Transport {
+    fn default() -> Self {
+        let config = TransportConfig::default();
+        let client_builder = reqwest::ClientBuilder::from(&config);
+        let client = client_builder.build().expect("Failed to build HTTP client");
+        let semaphore = Option::<Arc<Semaphore>>::default();
+        Self {
+            config,
+            client,
+            semaphore,
+        }
     }
 }
