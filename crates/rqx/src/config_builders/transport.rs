@@ -42,8 +42,11 @@ pub fn build_transport_config(
 
     let timeout = Timeout::new(connect_timeout, read_timeout, write_timeout, pool_timeout);
 
-    let verify_cfg = verify.map(parse_verify_config_from_py).transpose()?;
-    let identity = cert.map(parse_identity).transpose()?;
+    let verify_config = verify
+        .map(parse_verify_config_from_py)
+        .transpose()?
+        .unwrap_or(VerifyConfig::Default);
+    let cert = cert.map(parse_identity).transpose()?;
     let http_version = HttpVersionConfig::from_args(http1, http2)?;
     let proxies = ProxyParser::from_hash_map(proxy)?;
 
@@ -54,15 +57,15 @@ pub fn build_transport_config(
         pool_timeout,
     );
 
-    let retries = retries.map(|r| r.inner.clone());
+    let retry_config = retries.map(|r| r.inner.clone());
 
     Ok(TransportConfig::new(
         pool_config,
         http_version,
-        verify_cfg.unwrap_or(VerifyConfig::Default),
+        verify_config,
         timeout,
-        retries,
-        identity,
+        retry_config,
+        cert,
         proxies,
     ))
 }
