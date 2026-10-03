@@ -18,7 +18,7 @@ use crate::request_headers::RequestHeaders;
 use crate::response::PyResponse;
 use crate::runtime::RUNTIME;
 use crate::stream_context::{PyAsyncStreamContext, PyStreamContext};
-use crate::timeout::PyTimeout;
+use crate::timeout::TimeoutArg;
 use crate::transport::{AsyncHTTPTransport, HTTPTransport};
 use crate::url::py_url::PyURL;
 
@@ -39,7 +39,7 @@ impl PyClient {
     fn __new__(
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
         follow_redirects: Option<bool>,
         max_redirects: Option<u32>,
         base_url: Option<PyURL>,
@@ -55,13 +55,10 @@ impl PyClient {
             redirects,
         )?;
 
-        let timeout_config = match timeout {
-            Some(t) => PyTimeout::extract_any(t)?.inner,
-            None => Timeout::default(),
-        };
+        let timeout = timeout.map(Timeout::from);
         let auth_config = Auth::new(None, auth_bearer)?;
         let config = ClientConfig::new(
-            timeout_config,
+            timeout.clone().unwrap_or_default(),
             redirect_policy,
             parsed_base_url,
             auth_config,
@@ -115,13 +112,12 @@ impl PyClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> Result<PyResponse, PyRqxError> {
         let json_value = json.map(JsonBody::into_value);
-        let timeout_f64 = Some(PyTimeout::resolve_request_timeout(
-            timeout,
-            self.inner.timeout_secs(),
-        )?);
+        let timeout_f64 = timeout
+            .map(Timeout::from)
+            .and_then(|t| t.per_request_total());
         let auth_config = match (&auth, &auth_bearer) {
             (None, None) => None,
             _ => Some(Auth::new(auth, auth_bearer)?),
@@ -152,7 +148,7 @@ impl PyClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> Result<PyResponse, PyRqxError> {
         self.request(
             py,
@@ -180,7 +176,7 @@ impl PyClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> Result<PyResponse, PyRqxError> {
         self.request(
             py,
@@ -208,7 +204,7 @@ impl PyClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> Result<PyResponse, PyRqxError> {
         self.request(
             py,
@@ -236,7 +232,7 @@ impl PyClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> Result<PyResponse, PyRqxError> {
         self.request(
             py,
@@ -267,7 +263,7 @@ impl PyClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> Result<PyResponse, PyRqxError> {
         self.request(
             py,
@@ -298,7 +294,7 @@ impl PyClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> Result<PyResponse, PyRqxError> {
         self.request(
             py,
@@ -329,7 +325,7 @@ impl PyClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> Result<PyResponse, PyRqxError> {
         self.request(
             py,
@@ -360,13 +356,12 @@ impl PyClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> Result<PyStreamContext, PyRqxError> {
         let json_value = json.map(JsonBody::into_value);
-        let t = Some(PyTimeout::resolve_request_timeout(
-            timeout,
-            self.inner.timeout_secs(),
-        )?);
+        let t = timeout
+            .map(Timeout::from)
+            .and_then(|t| t.per_request_total());
         let auth_config = match (&auth, &auth_bearer) {
             (None, None) => None,
             _ => Some(Auth::new(auth, auth_bearer)?),
@@ -417,7 +412,7 @@ impl PyAsyncClient {
     fn __new__(
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
         follow_redirects: Option<bool>,
         max_redirects: Option<u32>,
         base_url: Option<PyURL>,
@@ -431,13 +426,10 @@ impl PyAsyncClient {
             max_redirects,
             redirects,
         )?;
-        let timeout_config = match timeout {
-            Some(t) => PyTimeout::extract_any(t)?.inner,
-            None => Timeout::default(),
-        };
+        let timeout = timeout.map(Timeout::from);
         let auth_config = Auth::new(None, auth_bearer)?;
         let config = ClientConfig::new(
-            timeout_config,
+            timeout.clone().unwrap_or_default(),
             redirect_policy,
             parsed_base_url,
             auth_config,
@@ -491,13 +483,12 @@ impl PyAsyncClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         let json_value = json.map(JsonBody::into_value);
-        let t = Some(PyTimeout::resolve_request_timeout(
-            timeout,
-            self.inner.timeout_secs(),
-        )?);
+        let t = timeout
+            .map(Timeout::from)
+            .and_then(|t| t.per_request_total());
 
         let inner = self.inner.clone();
 
@@ -534,7 +525,7 @@ impl PyAsyncClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
@@ -562,7 +553,7 @@ impl PyAsyncClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
@@ -590,7 +581,7 @@ impl PyAsyncClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
@@ -618,7 +609,7 @@ impl PyAsyncClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
@@ -649,7 +640,7 @@ impl PyAsyncClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
@@ -680,7 +671,7 @@ impl PyAsyncClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
@@ -711,7 +702,7 @@ impl PyAsyncClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> PyResult<Bound<'a, PyAny>> {
         self.request(
             py,
@@ -742,13 +733,12 @@ impl PyAsyncClient {
         auth: Option<(String, String)>,
         auth_bearer: Option<String>,
         follow_redirects: Option<bool>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> Result<PyAsyncStreamContext, PyRqxError> {
         let json_value = json.map(JsonBody::into_value);
-        let t = Some(PyTimeout::resolve_request_timeout(
-            timeout,
-            self.inner.timeout_secs(),
-        )?);
+        let t = timeout
+            .map(Timeout::from)
+            .and_then(|t| t.per_request_total());
 
         let auth_config = match (&auth, &auth_bearer) {
             (None, None) => None,

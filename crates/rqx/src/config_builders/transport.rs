@@ -9,7 +9,6 @@ use rqx_core::timeout::Timeout;
 use crate::exceptions::PyRqxError;
 use crate::http::tls::{parse_identity, parse_verify_config_from_py};
 use crate::retry::PyRetry;
-use crate::timeout::PyTimeout;
 
 use rqx_core::http::protocol::HttpVersionConfig;
 use rqx_core::http::proxy::ProxyParser;
@@ -24,23 +23,10 @@ pub fn build_transport_config(
     verify: Option<&Bound<'_, PyAny>>,
     cert: Option<&Bound<'_, PyAny>>,
     proxy: Option<HashMap<String, String>>,
-    timeout: Option<&Bound<'_, PyAny>>,
+    timeout: Option<Timeout>,
     retries: Option<PyRef<'_, PyRetry>>,
 ) -> Result<TransportConfig, PyRqxError> {
-    let (connect_timeout, read_timeout, write_timeout, pool_timeout) = match timeout {
-        Some(t) => {
-            let parsed = PyTimeout::extract_any(t)?;
-            (
-                parsed.inner.connect,
-                parsed.inner.read,
-                parsed.inner.write,
-                parsed.inner.pool,
-            )
-        }
-        None => (None, None, None, None),
-    };
-
-    let timeout = Timeout::new(connect_timeout, read_timeout, write_timeout, pool_timeout);
+    let timeout = timeout.unwrap_or_default();
 
     let verify_config = verify
         .map(parse_verify_config_from_py)
@@ -54,7 +40,7 @@ pub fn build_transport_config(
         max_connections,
         max_keepalive_connections,
         keepalive_expiry,
-        pool_timeout,
+        timeout.pool,
     );
 
     let retry_config = retries.map(|r| r.inner.clone());

@@ -7,7 +7,9 @@ use std::collections::HashMap;
 use crate::config_builders::transport::build_transport_config;
 use crate::exceptions::PyRqxError;
 use crate::retry::PyRetry;
+use crate::timeout::TimeoutArg;
 
+use rqx_core::timeout::Timeout;
 use rqx_core::transport::Transport;
 
 // ────────────────────────────────────────────────────────────────────────
@@ -45,7 +47,7 @@ impl HTTPTransport {
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
         proxy: Option<HashMap<String, String>>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> Result<Self, PyRqxError> {
         let transport_config = build_transport_config(
             max_connections,
@@ -56,7 +58,7 @@ impl HTTPTransport {
             verify,
             cert,
             proxy,
-            timeout,
+            timeout.map(Timeout::from),
             retries,
         )?;
         Ok(Self {
@@ -74,7 +76,7 @@ impl HTTPTransport {
     pub fn new(
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<Timeout>,
     ) -> Result<Self, PyRqxError> {
         if verify.is_none() && cert.is_none() && timeout.is_none() {
             return Ok(HTTPTransport::default());
@@ -124,7 +126,7 @@ impl AsyncHTTPTransport {
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
         proxy: Option<HashMap<String, String>>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<TimeoutArg<'_>>,
     ) -> Result<Self, PyRqxError> {
         let transport_config = build_transport_config(
             max_connections,
@@ -135,7 +137,7 @@ impl AsyncHTTPTransport {
             verify,
             cert,
             proxy,
-            timeout,
+            timeout.map(Timeout::from),
             retries,
         )?;
         Ok(Self {
@@ -153,7 +155,7 @@ impl AsyncHTTPTransport {
     pub fn new(
         verify: Option<&Bound<'_, PyAny>>,
         cert: Option<&Bound<'_, PyAny>>,
-        timeout: Option<&Bound<'_, PyAny>>,
+        timeout: Option<Timeout>,
     ) -> Result<Self, PyRqxError> {
         if verify.is_none() && cert.is_none() && timeout.is_none() {
             return Ok(AsyncHTTPTransport::default());

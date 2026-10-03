@@ -1,4 +1,3 @@
-use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
 use rqx_core::timeout::Timeout;
@@ -58,51 +57,20 @@ impl PyTimeout {
     }
 }
 
-impl PyTimeout {
-    /// Per-request total timeout (reqwest's `.timeout()` takes one Duration).
-    ///
-    /// Prefer `read` since it's the most common "this individual request is
-    /// taking too long" phase. Fall back to the max of any other set fields.
-    /// Returns None when all phases are None.
-    pub fn per_request_total(&self) -> Option<f64> {
-        self.inner.per_request_total()
-    }
+/// The `timeout=` argument: a bare number (every phase) or an `rqx.Timeout`.
+#[derive(FromPyObject)]
+pub enum TimeoutArg<'py> {
+    #[pyo3(annotation = "Timeout")]
+    Timeout(PyRef<'py, PyTimeout>),
+    #[pyo3(annotation = "float")]
+    Seconds(f64),
+}
 
-    /// Extract a PyTimeout from a Python value: int, float, or PyTimeout.
-    /// Plain numbers fill all four phases (matches httpx's `Timeout(n)` shortcut).
-    pub fn extract_any(value: &Bound<'_, PyAny>) -> PyResult<Self> {
-        if let Ok(t) = value.cast::<PyTimeout>() {
-            return Ok(t.borrow().clone());
-        }
-        if let Ok(n) = value.extract::<f64>() {
-            return Ok(Self {
-                inner: Timeout {
-                    connect: Some(n),
-                    read: Some(n),
-                    write: Some(n),
-                    pool: Some(n),
-                },
-            });
-        }
-        Err(PyTypeError::new_err(
-            "timeout must be a number or rqx.Timeout instance",
-        ))
-    }
-
-    /// Resolve a per-request `timeout=` kwarg to a seconds value for
-    /// `reqwest::RequestBuilder::timeout`. Accepts int, float, or rqx.Timeout
-    /// (uses `read` field or max non-None as the per-request total). Falls
-    /// back to `default` when nothing is passed.
-    pub fn resolve_request_timeout(
-        value: Option<&Bound<'_, PyAny>>,
-        default: f64,
-    ) -> PyResult<f64> {
-        match value {
-            None => Ok(default),
-            Some(t) => {
-                let parsed = Self::extract_any(t)?;
-                Ok(parsed.per_request_total().unwrap_or(default))
-            }
+impl From<TimeoutArg<'_>> for Timeout {
+    fn from(arg: TimeoutArg<'_>) -> Self {
+        match arg {
+            TimeoutArg::Timeout(t) => t.inner.clone(),
+            TimeoutArg::Seconds(n) => Timeout::new(Some(n), Some(n), Some(n), Some(n)),
         }
     }
 }
