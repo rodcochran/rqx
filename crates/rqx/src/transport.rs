@@ -1,16 +1,16 @@
+use std::collections::HashMap;
+
 use pyo3::Bound;
 use pyo3::prelude::{PyRef, pyclass, pymethods};
 use pyo3::types::PyAny;
 
-use std::collections::HashMap;
+use rqx_core::timeout::Timeout;
+use rqx_core::transport::{Transport, TransportConfig};
 
-use crate::config_builders::transport::build_transport_config;
+use crate::config_builders::transport::TransportArgs;
 use crate::exceptions::PyRqxError;
 use crate::retry::PyRetry;
 use crate::timeout::TimeoutArg;
-
-use rqx_core::timeout::Timeout;
-use rqx_core::transport::Transport;
 
 // ────────────────────────────────────────────────────────────────────────
 // HTTPTransport — synchronous Python-facing transport
@@ -49,18 +49,18 @@ impl HTTPTransport {
         proxy: Option<HashMap<String, String>>,
         timeout: Option<TimeoutArg<'_>>,
     ) -> Result<Self, PyRqxError> {
-        let transport_config = build_transport_config(
-            max_connections,
-            max_keepalive_connections,
-            keepalive_expiry,
-            http1,
-            http2,
+        let transport_config = TransportConfig::try_from(TransportArgs {
+            max_connections: max_connections,
+            max_keepalive_connections: max_keepalive_connections,
+            keepalive_expiry: keepalive_expiry,
+            http1: http1,
+            http2: http2,
             verify,
             cert,
-            proxy,
-            timeout.map(Timeout::from),
-            retries,
-        )?;
+            proxy: proxy,
+            timeout: timeout.map(Timeout::from),
+            retries: retries,
+        })?;
         Ok(Self {
             inner: Transport::new(transport_config)?,
         })
@@ -69,25 +69,6 @@ impl HTTPTransport {
     #[getter]
     fn retries(&self) -> Option<PyRetry> {
         self.inner.config.retry_config.clone().map(PyRetry::new)
-    }
-}
-
-impl HTTPTransport {
-    pub fn new(
-        verify: Option<&Bound<'_, PyAny>>,
-        cert: Option<&Bound<'_, PyAny>>,
-        timeout: Option<Timeout>,
-    ) -> Result<Self, PyRqxError> {
-        if verify.is_none() && cert.is_none() && timeout.is_none() {
-            return Ok(HTTPTransport::default());
-        }
-        let transport_config = build_transport_config(
-            None, None, None, None, None, verify, cert, None, timeout, None,
-        )?;
-
-        Ok(Self {
-            inner: Transport::new(transport_config)?,
-        })
     }
 }
 
@@ -128,18 +109,18 @@ impl AsyncHTTPTransport {
         proxy: Option<HashMap<String, String>>,
         timeout: Option<TimeoutArg<'_>>,
     ) -> Result<Self, PyRqxError> {
-        let transport_config = build_transport_config(
-            max_connections,
-            max_keepalive_connections,
-            keepalive_expiry,
-            http1,
-            http2,
+        let transport_config = TransportConfig::try_from(TransportArgs {
+            max_connections: max_connections,
+            max_keepalive_connections: max_keepalive_connections,
+            keepalive_expiry: keepalive_expiry,
+            http1: http1,
+            http2: http2,
             verify,
             cert,
-            proxy,
-            timeout.map(Timeout::from),
-            retries,
-        )?;
+            proxy: proxy,
+            timeout: timeout.map(Timeout::from),
+            retries: retries,
+        })?;
         Ok(Self {
             inner: Transport::new(transport_config)?,
         })
@@ -148,24 +129,5 @@ impl AsyncHTTPTransport {
     #[getter]
     fn retries(&self) -> Option<PyRetry> {
         self.inner.config.retry_config.clone().map(PyRetry::new)
-    }
-}
-
-impl AsyncHTTPTransport {
-    pub fn new(
-        verify: Option<&Bound<'_, PyAny>>,
-        cert: Option<&Bound<'_, PyAny>>,
-        timeout: Option<Timeout>,
-    ) -> Result<Self, PyRqxError> {
-        if verify.is_none() && cert.is_none() && timeout.is_none() {
-            return Ok(AsyncHTTPTransport::default());
-        }
-        let transport_config = build_transport_config(
-            None, None, None, None, None, verify, cert, None, timeout, None,
-        )?;
-
-        Ok(Self {
-            inner: Transport::new(transport_config)?,
-        })
     }
 }

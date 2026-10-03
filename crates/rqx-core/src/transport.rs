@@ -16,7 +16,6 @@ pub struct ConnectionPoolConfig {
     max_connections: Option<u32>,
     max_keepalive: Option<u32>,
     keepalive_expiry: Option<f64>,
-    pool_timeout: Option<f64>,
 }
 
 impl ConnectionPoolConfig {
@@ -24,13 +23,11 @@ impl ConnectionPoolConfig {
         max_connections: Option<u32>,
         max_keepalive: Option<u32>,
         keepalive_expiry: Option<f64>,
-        pool_timeout: Option<f64>,
     ) -> Self {
         Self {
             max_connections,
             max_keepalive,
             keepalive_expiry,
-            pool_timeout,
         }
     }
 }
@@ -76,9 +73,9 @@ impl From<&TransportConfig> for reqwest::ClientBuilder {
             client_builder = client_builder.pool_max_idle_per_host(max_keepalive as usize);
         };
         if let Some(p) = value
-            .pool_config
-            .keepalive_expiry
-            .or(value.pool_config.pool_timeout)
+            .timeout_config
+            .pool
+            .or(value.pool_config.keepalive_expiry)
         {
             client_builder = client_builder.pool_idle_timeout(Duration::from_secs_f64(p));
         };
@@ -320,22 +317,11 @@ impl Transport {
             None => Err(HTTPError::MaxRetriesExceeded(exhausted).into()),
         }
     }
-
-    pub fn client(&self) -> &reqwest::Client {
-        &self.client
-    }
 }
 
 impl Default for Transport {
     fn default() -> Self {
         let config = TransportConfig::default();
-        let client_builder = reqwest::ClientBuilder::from(&config);
-        let client = client_builder.build().expect("Failed to build HTTP client");
-        let semaphore = Option::<Arc<Semaphore>>::default();
-        Self {
-            config,
-            client,
-            semaphore,
-        }
+        Self::new(config).expect("Failed to build HTTP client")
     }
 }

@@ -8,8 +8,10 @@ use rqx_core::client::{Client, ClientConfig};
 use rqx_core::request::Request;
 use rqx_core::request_components::body::RequestBody;
 use rqx_core::timeout::Timeout;
+use rqx_core::transport::{Transport, TransportConfig};
 use rqx_core::url::base_url::BaseUrl;
 
+use crate::config_builders::transport::TransportArgs;
 use crate::exceptions::*;
 use crate::py_json::JsonBody;
 use crate::query_params::RequestQueryParams;
@@ -73,7 +75,12 @@ impl PyClient {
 
         let transport_inner = match transport {
             Some(t) => t.inner.clone(),
-            None => HTTPTransport::new(verify, cert, timeout)?.inner,
+            None => Transport::new(TransportConfig::try_from(TransportArgs {
+                verify,
+                cert,
+                timeout,
+                ..Default::default()
+            })?)?,
         };
 
         Ok(Self {
@@ -444,7 +451,12 @@ impl PyAsyncClient {
 
         let transport_inner = match transport {
             Some(t) => t.inner.clone(),
-            None => AsyncHTTPTransport::new(verify, cert, timeout)?.inner,
+            None => Transport::new(TransportConfig::try_from(TransportArgs {
+                verify,
+                cert,
+                timeout,
+                ..Default::default()
+            })?)?,
         };
 
         Ok(Self {
