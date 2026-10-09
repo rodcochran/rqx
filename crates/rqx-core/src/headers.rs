@@ -23,11 +23,19 @@ impl Headers {
         for (key, value) in pairs {
             let name = match HeaderName::from_str(&key) {
                 Ok(name) => name,
-                Err(e) => return Err(HeaderError::InvalidName(format!("{key:?}: {e}")).into()),
+                Err(e) => {
+                    return Err(RqxError::InvalidArgument(format!(
+                        "invalid header name {key:?}: {e}"
+                    )));
+                }
             };
             let value = match HeaderValue::from_str(&value) {
                 Ok(value) => value,
-                Err(e) => return Err(HeaderError::InvalidValue(format!("{value:?}: {e}")).into()),
+                Err(e) => {
+                    return Err(RqxError::InvalidArgument(format!(
+                        "invalid header value {value:?}: {e}"
+                    )));
+                }
             };
             inner.try_append(name, value)?;
         }
@@ -53,7 +61,7 @@ impl Headers {
             .map(|v| v.to_str().unwrap_or(""))
             .collect();
         match values.is_empty() {
-            true => Err(HeaderError::MissingKey(key.to_string()).into()),
+            true => Err(RqxError::MissingKey(key.to_string())),
             false => Ok(values.join(", ")),
         }
     }
@@ -69,7 +77,7 @@ impl Headers {
     pub fn delete_item(&mut self, key: &str) -> Result<(), RqxError> {
         match self.inner.remove(key) {
             Some(_) => Ok(()),
-            None => Err(HeaderError::MissingKey(key.to_string()).into()),
+            None => Err(RqxError::MissingKey(key.to_string())),
         }
     }
 

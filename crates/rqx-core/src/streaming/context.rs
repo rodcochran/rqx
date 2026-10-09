@@ -20,10 +20,9 @@ impl Unsent {
 
     pub fn take(slot: &mut Option<Unsent>) -> Result<Unsent, RqxError> {
         slot.take().ok_or_else(|| {
-            StreamError::StreamError(
+            RqxError::StreamError(
                 "stream already started; call stream() again for a new request".to_string(),
             )
-            .into()
         })
     }
 

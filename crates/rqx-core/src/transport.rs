@@ -211,11 +211,10 @@ impl Transport {
             let attempt = used.total;
 
             if start_time.elapsed().as_secs_f64() > total_timeout {
-                return Err(HTTPError::MaxRetriesExceeded(format!(
+                return Err(RqxError::MaxRetriesExceeded(format!(
                     "total timeout of {}s exceeded after {} retries",
                     total_timeout, attempt,
-                ))
-                .into());
+                )));
             }
 
             if attempt > 0 {
@@ -259,9 +258,7 @@ impl Transport {
             let attempt_start = Instant::now();
 
             let new_request = request.try_clone().ok_or_else(|| {
-                RequestError::RequestError(
-                    "Streaming request bodies cannot be replayed".to_string(),
-                )
+                RqxError::RequestError("Streaming request bodies cannot be replayed".to_string())
             })?;
 
             let failure = match self.execute(new_request).await {
@@ -317,11 +314,11 @@ impl Transport {
                 //   caller can inspect status_code / headers / body.
                 let status = cr.status().as_u16();
                 if r.status_forcelist.contains(&status) && r.raise_on_status {
-                    return Err(HTTPError::MaxRetriesExceeded(exhausted).into());
+                    return Err(RqxError::MaxRetriesExceeded(exhausted));
                 }
                 Ok(PendingResponse::new(cr).with_retries(used.total as u32, retry_history))
             }
-            None => Err(HTTPError::MaxRetriesExceeded(exhausted).into()),
+            None => Err(RqxError::MaxRetriesExceeded(exhausted)),
         }
     }
 }

@@ -61,9 +61,8 @@ impl Redirect {
     }
 
     pub fn redirect_target(url: &Url, location: &str) -> Result<Url, RqxError> {
-        url.join(location).map_err(|e| {
-            RequestError::RequestError(format!("Error parsing url from redirect: {e}")).into()
-        })
+        url.join(location)
+            .map_err(|e| RqxError::RequestError(format!("Error parsing url from redirect: {e}")))
     }
 
     pub fn redirected_request(

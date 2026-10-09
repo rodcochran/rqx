@@ -181,7 +181,7 @@ impl ResponseParts {
         message.push_str(&format!(
             "For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/{code}"
         ));
-        Some(HTTPError::HTTPStatusError(message).into())
+        Some(RqxError::HTTPStatusError(message))
     }
 
     /// `json()`'s error for a body serde_json rejects, positioned the way the stdlib
@@ -209,7 +209,7 @@ impl ResponseParts {
             "response is not JSON (HTTP {}, content-type: {content_type}): {reason}",
             self.status_code
         );
-        JSONDecodeError { message, doc, pos }.into()
+        RqxError::JSONDecodeError(JSONDecodeError { message, doc, pos })
     }
 }
 

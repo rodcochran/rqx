@@ -130,11 +130,10 @@ impl Client {
         let mut url = self.merge_url(url)?;
 
         if !matches!(url.scheme(), "http" | "https") {
-            return Err(TransportError::UnsupportedProtocol(format!(
+            return Err(RqxError::UnsupportedProtocol(format!(
                 "Request URL has an unsupported protocol '{}://'.",
                 url.scheme()
-            ))
-            .into());
+            )));
         }
 
         // Set query params if they exist and are populated.
@@ -192,10 +191,9 @@ impl Client {
         match (url, &self.config.base_url) {
             (UrlReference::Absolute(absolute), _) if absolute.has_authority() => Ok(absolute),
             (url, Some(base)) => base.join(&url),
-            (_, None) => Err(TransportError::UnsupportedProtocol(
+            (_, None) => Err(RqxError::UnsupportedProtocol(
                 "Request URL is missing an 'http://' or 'https://' protocol.".to_string(),
-            )
-            .into()),
+            )),
         }
     }
 
@@ -248,7 +246,7 @@ impl Client {
         let mut retry_history: Vec<(String, f64)> = Vec::new();
         loop {
             let outgoing_request = request.try_clone().ok_or_else(|| {
-                RequestError::RequestError("Request body cannot be replayed".to_string())
+                RqxError::RequestError("Request body cannot be replayed".to_string())
             })?;
             let mut hop = self.transport.send(outgoing_request).await?;
             num_retries += hop.parts.num_retries;
@@ -263,11 +261,10 @@ impl Client {
 
             if redirects_used + 1 >= self.config.redirects.max_redirects {
                 if self.config.redirects.raise_on_exceeded {
-                    return Err(RequestError::TooManyRedirects(format!(
+                    return Err(RqxError::TooManyRedirects(format!(
                         "Exceeded max redirects {}",
                         self.config.redirects.max_redirects
-                    ))
-                    .into());
+                    )));
                 }
                 return Ok(hop.with_retries(num_retries, retry_history));
             }
@@ -278,7 +275,7 @@ impl Client {
                 .get_first("location")
                 .map(String::from)
                 .ok_or_else(|| {
-                    ProtocolError::RemoteProtocolError(
+                    RqxError::RemoteProtocolError(
                         "3xx response missing Location header".to_string(),
                     )
                 })?;

@@ -1,4 +1,4 @@
-use crate::error::{RequestError, RqxError};
+use crate::error::RqxError;
 
 /// Pre-validated HTTP version selection.
 ///
@@ -25,9 +25,9 @@ impl HttpVersionConfig {
             (true, true) => Ok(Self::Negotiate),
             (true, false) => Ok(Self::Http1Only),
             (false, true) => Ok(Self::Http2Only),
-            (false, false) => Err(RequestError::RequestError(
+            (false, false) => Err(RqxError::RequestError(
                 "at least one of http1, http2 must be true".to_string(),
-            ))?,
+            )),
         }
     }
 }
