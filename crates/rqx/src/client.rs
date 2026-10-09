@@ -5,6 +5,7 @@ use pyo3::prelude::{Py, PyAny, PyRef, PyResult, Python, pyclass, pymethods};
 
 use rqx_core::auth::Auth;
 use rqx_core::client::{Client, ClientConfig};
+use rqx_core::error::RqxCoreError;
 use rqx_core::request::Request;
 use rqx_core::request_components::body::RequestBody;
 use rqx_core::timeout::Timeout;
@@ -794,7 +795,7 @@ impl PyAsyncClient {
 
 pub(crate) fn block_on_inner<F, T>(py: Python<'_>, fut: F) -> Result<T, PyRqxError>
 where
-    F: std::future::Future<Output = Result<T, rqx_core::error::RqxCoreError>> + Send,
+    F: std::future::Future<Output = Result<T, RqxCoreError>> + Send,
     T: Send,
 {
     Ok(py.detach(|| RUNTIME.block_on(fut))??)
