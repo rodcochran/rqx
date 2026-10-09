@@ -16,13 +16,13 @@ impl RequestBody {
         content: Option<&[u8]>,
         data: Option<HashMap<String, String>>,
         json: Option<serde_json::Value>,
-    ) -> Result<Self, RqxError> {
+    ) -> Result<Self, RqxCoreError> {
         match (content, data, json) {
             (None, None, None) => Ok(Self::Empty),
             (Some(content), None, None) => Ok(Self::Content(Bytes::copy_from_slice(content))),
             (None, Some(data), None) => Ok(Self::Form(data)),
             (None, None, Some(json)) => Ok(Self::Json(json)),
-            _ => Err(RqxError::InvalidArgument(
+            _ => Err(RqxCoreError::InvalidArgument(
                 "Only one of content, data, or json may be set".to_string(),
             )),
         }

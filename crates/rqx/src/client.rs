@@ -794,7 +794,7 @@ impl PyAsyncClient {
 
 pub(crate) fn block_on_inner<F, T>(py: Python<'_>, fut: F) -> Result<T, PyRqxError>
 where
-    F: std::future::Future<Output = Result<T, rqx_core::error::RqxError>> + Send,
+    F: std::future::Future<Output = Result<T, rqx_core::error::RqxCoreError>> + Send,
     T: Send,
 {
     Ok(py.detach(|| RUNTIME.block_on(fut))??)

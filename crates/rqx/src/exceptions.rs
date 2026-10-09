@@ -3,6 +3,8 @@ use pyo3::prelude::{Bound, PyAny, PyAnyMethods, PyModule, PyModuleMethods, PyRes
 use pyo3::types::{PyDict, PyType};
 use pyo3::{PyErr, create_exception, import_exception};
 
+use rqx_core::error::RqxCoreError;
+
 /*
 
 Exception hierarchy, same shape as httpx so `except` clauses port unchanged.
@@ -148,12 +150,12 @@ impl StdlibBackedExceptions {
 /// The error a pymethod returns: `?` works on both core results and pyo3
 /// results, and pyo3 converts it to the matching Python exception on the way out.
 pub enum PyRqxError {
-    Core(rqx_core::error::RqxError),
+    Core(RqxCoreError),
     Py(PyErr),
 }
 
-impl From<rqx_core::error::RqxError> for PyRqxError {
-    fn from(value: rqx_core::error::RqxError) -> Self {
+impl From<RqxCoreError> for PyRqxError {
+    fn from(value: RqxCoreError) -> Self {
         PyRqxError::Core(value)
     }
 }
@@ -174,30 +176,28 @@ impl From<PyRqxError> for PyErr {
 }
 
 impl PyRqxError {
-    fn core(e: rqx_core::error::RqxError) -> PyErr {
+    fn core(e: RqxCoreError) -> PyErr {
         match e {
-            rqx_core::error::RqxError::ConnectTimeout(m) => ConnectTimeout::new_err(m),
-            rqx_core::error::RqxError::ReadTimeout(m) => ReadTimeout::new_err(m),
-            rqx_core::error::RqxError::ConnectError(m) => ConnectError::new_err(m),
-            rqx_core::error::RqxError::ReadError(m) => ReadError::new_err(m),
-            rqx_core::error::RqxError::RemoteProtocolError(m) => RemoteProtocolError::new_err(m),
-            rqx_core::error::RqxError::ProxyError(m) => ProxyError::new_err(m),
-            rqx_core::error::RqxError::UnsupportedProtocol(m) => UnsupportedProtocol::new_err(m),
-            rqx_core::error::RqxError::DecodingError(m) => DecodingError::new_err(m),
-            rqx_core::error::RqxError::TooManyRedirects(m) => TooManyRedirects::new_err(m),
-            rqx_core::error::RqxError::RequestError(m) => RequestError::new_err(m),
-            rqx_core::error::RqxError::HTTPStatusError(m) => HTTPStatusError::new_err(m),
-            rqx_core::error::RqxError::MaxRetriesExceeded(m) => MaxRetriesExceeded::new_err(m),
-            rqx_core::error::RqxError::InvalidURL(m) => InvalidURL::new_err(m),
-            rqx_core::error::RqxError::JSONDecodeError(e) => {
-                JSONDecodeError::new_err((e.message, e.doc, e.pos))
-            }
-            rqx_core::error::RqxError::StreamClosed(m) => StreamClosed::new_err(m),
-            rqx_core::error::RqxError::StreamError(m) => StreamError::new_err(m),
-            rqx_core::error::RqxError::TLSConfigError(m) => RqxError::new_err(m),
-            rqx_core::error::RqxError::InvalidArgument(m) => PyValueError::new_err(m),
-            rqx_core::error::RqxError::UnknownKeyword(m) => PyTypeError::new_err(m),
-            rqx_core::error::RqxError::MissingKey(m) => PyKeyError::new_err(m),
+            RqxCoreError::ConnectTimeout(message) => ConnectTimeout::new_err(message),
+            RqxCoreError::ReadTimeout(message) => ReadTimeout::new_err(message),
+            RqxCoreError::ConnectError(message) => ConnectError::new_err(message),
+            RqxCoreError::ReadError(message) => ReadError::new_err(message),
+            RqxCoreError::RemoteProtocolError(message) => RemoteProtocolError::new_err(message),
+            RqxCoreError::ProxyError(message) => ProxyError::new_err(message),
+            RqxCoreError::UnsupportedProtocol(message) => UnsupportedProtocol::new_err(message),
+            RqxCoreError::DecodingError(message) => DecodingError::new_err(message),
+            RqxCoreError::TooManyRedirects(message) => TooManyRedirects::new_err(message),
+            RqxCoreError::RequestError(message) => RequestError::new_err(message),
+            RqxCoreError::HTTPStatusError(message) => HTTPStatusError::new_err(message),
+            RqxCoreError::MaxRetriesExceeded(message) => MaxRetriesExceeded::new_err(message),
+            RqxCoreError::InvalidURL(message) => InvalidURL::new_err(message),
+            RqxCoreError::JSONDecodeError(e) => JSONDecodeError::new_err((e.message, e.doc, e.pos)),
+            RqxCoreError::StreamClosed(message) => StreamClosed::new_err(message),
+            RqxCoreError::StreamError(message) => StreamError::new_err(message),
+            RqxCoreError::TLSConfigError(message) => RqxError::new_err(message),
+            RqxCoreError::InvalidArgument(message) => PyValueError::new_err(message),
+            RqxCoreError::UnknownKeyword(message) => PyTypeError::new_err(message),
+            RqxCoreError::MissingKey(key) => PyKeyError::new_err(key),
         }
     }
 }

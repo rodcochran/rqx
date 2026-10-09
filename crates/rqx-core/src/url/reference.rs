@@ -28,7 +28,7 @@ pub enum UrlReference {
 }
 
 impl UrlReference {
-    pub fn parse(input: &str) -> Result<Self, RqxError> {
+    pub fn parse(input: &str) -> Result<Self, RqxCoreError> {
         match Url::parse(input) {
             Ok(url) => Ok(Self::Absolute(url)),
             Err(ParseError::RelativeUrlWithoutBase) => Self::parse_relative(input),
@@ -40,7 +40,7 @@ impl UrlReference {
         Self::Absolute(url)
     }
 
-    fn parse_relative(input: &str) -> Result<Self, RqxError> {
+    fn parse_relative(input: &str) -> Result<Self, RqxCoreError> {
         if let Ok(reference) = UriRelativeStr::new(input) {
             return Ok(Self::Relative(reference.to_owned()));
         }
@@ -108,8 +108,8 @@ impl UrlReference {
         encoded
     }
 
-    fn invalid(input: &str, error: &dyn fmt::Display) -> RqxError {
-        RqxError::InvalidURL(format!("invalid URL {input:?}: {error}"))
+    fn invalid(input: &str, error: &dyn fmt::Display) -> RqxCoreError {
+        RqxCoreError::InvalidURL(format!("invalid URL {input:?}: {error}"))
     }
 
     /// httpx's rule: a scheme and a host, or it's a reference to somewhere else.
@@ -237,7 +237,7 @@ impl UrlReference {
         }
     }
 
-    pub fn with_params(&self, params: &QueryPairs) -> Result<Self, RqxError> {
+    pub fn with_params(&self, params: &QueryPairs) -> Result<Self, RqxCoreError> {
         Self::compose(
             Some(self),
             UrlComponents {
@@ -250,7 +250,7 @@ impl UrlReference {
     pub fn copy_with(
         &self,
         kwargs: HashMap<String, Option<UrlComponentValue>>,
-    ) -> Result<Self, RqxError> {
+    ) -> Result<Self, RqxCoreError> {
         if kwargs.is_empty() {
             return Ok(self.clone());
         }
@@ -258,19 +258,27 @@ impl UrlReference {
         Self::compose(Some(self), components)
     }
 
-    pub fn copy_set_param(&self, key: &str, value: Option<ScalarValue>) -> Result<Self, RqxError> {
+    pub fn copy_set_param(
+        &self,
+        key: &str,
+        value: Option<ScalarValue>,
+    ) -> Result<Self, RqxCoreError> {
         self.with_params(&self.params().set(key, QueryPairs::scalar(value)))
     }
 
-    pub fn copy_add_param(&self, key: &str, value: Option<ScalarValue>) -> Result<Self, RqxError> {
+    pub fn copy_add_param(
+        &self,
+        key: &str,
+        value: Option<ScalarValue>,
+    ) -> Result<Self, RqxCoreError> {
         self.with_params(&self.params().add(key, QueryPairs::scalar(value)))
     }
 
-    pub fn copy_remove_param(&self, key: &str) -> Result<Self, RqxError> {
+    pub fn copy_remove_param(&self, key: &str) -> Result<Self, RqxCoreError> {
         self.with_params(&self.params().remove(key))
     }
 
-    pub fn copy_merge_params(&self, params: Option<QueryPairs>) -> Result<Self, RqxError> {
+    pub fn copy_merge_params(&self, params: Option<QueryPairs>) -> Result<Self, RqxCoreError> {
         match params {
             Some(params) => self.with_params(&self.params().merge(&params)),
             None => Ok(self.clone()),
@@ -289,7 +297,7 @@ impl UrlReference {
     }
 
     /// Resolve a reference against this URL. An absolute argument wins outright.
-    pub fn join(&self, other: &str) -> Result<Self, RqxError> {
+    pub fn join(&self, other: &str) -> Result<Self, RqxCoreError> {
         // An empty reference resolves to the base as it stands, fragment and
         // all — what httpx and `urllib.parse.urljoin` both do. `Url::join`
         // drops the fragment here.
@@ -308,7 +316,7 @@ impl UrlReference {
     /// replaces this reference outright. Anything else merges against it, on
     /// a borrowed absolute base — resolution needs one — that the result is
     /// then taken back off. `.invalid` is reserved by RFC 2606.
-    fn join_relative(reference: &UriRelativeStr, other: &str) -> Result<Self, RqxError> {
+    fn join_relative(reference: &UriRelativeStr, other: &str) -> Result<Self, RqxCoreError> {
         const ANCHOR: &str = "http://rqx.invalid";
 
         if Url::parse(other).is_ok() || other.starts_with("//") {
@@ -342,7 +350,7 @@ impl UrlReference {
     }
 
     /// Rebuild from components, letting the parser do the encoding.
-    pub fn compose(base: Option<&Self>, components: UrlComponents) -> Result<Self, RqxError> {
+    pub fn compose(base: Option<&Self>, components: UrlComponents) -> Result<Self, RqxCoreError> {
         let current = |read: fn(&Self) -> &str| base.map(read).unwrap_or_default().to_owned();
 
         let scheme = components.scheme.unwrap_or_else(|| current(Self::scheme));

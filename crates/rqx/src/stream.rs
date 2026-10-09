@@ -401,7 +401,7 @@ impl PyStreamResponse {
             Some(Body::Live(response)) => {
                 let bytes = py
                     .detach(|| RUNTIME.block_on(async { response.bytes().await }))?
-                    .map_err(rqx_core::error::RqxError::from)?;
+                    .map_err(rqx_core::error::RqxCoreError::from)?;
                 self.body = Some(Body::Buffered(bytes));
             }
             Some(Body::Streaming(stream)) => {
@@ -698,7 +698,7 @@ impl PyAsyncStreamResponse {
             let bytes = live
                 .bytes()
                 .await
-                .map_err(|e| PyRqxError::from(rqx_core::error::RqxError::from(e)))?;
+                .map_err(|e| PyRqxError::from(rqx_core::error::RqxCoreError::from(e)))?;
             *body.lock().unwrap() = Some(Body::Buffered(bytes.clone()));
             Python::attach(|py| Ok(PyBytes::new(py, &bytes).unbind()))
         })

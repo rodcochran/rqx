@@ -91,7 +91,7 @@ impl Client {
     }
 
     /// Build and send a request, then buffer the body.
-    pub async fn request(&self, request: Request) -> Result<BufferedResponse, RqxError> {
+    pub async fn request(&self, request: Request) -> Result<BufferedResponse, RqxCoreError> {
         let follow_redirects = request
             .follow_redirects
             .unwrap_or(self.config.redirects.follow);
@@ -103,7 +103,7 @@ impl Client {
     }
 
     /// Build the request, sending pushed downstream to when Unsent.send() is called.
-    pub fn stream(&self, request: Request) -> Result<Unsent, RqxError> {
+    pub fn stream(&self, request: Request) -> Result<Unsent, RqxCoreError> {
         let follow_redirects = request
             .follow_redirects
             .unwrap_or(self.config.redirects.follow);
@@ -115,7 +115,7 @@ impl Client {
         ))
     }
 
-    pub fn build(&self, request: Request) -> Result<reqwest::Request, RqxError> {
+    pub fn build(&self, request: Request) -> Result<reqwest::Request, RqxCoreError> {
         let Request {
             method,
             url,
@@ -130,7 +130,7 @@ impl Client {
         let mut url = self.merge_url(url)?;
 
         if !matches!(url.scheme(), "http" | "https") {
-            return Err(RqxError::UnsupportedProtocol(format!(
+            return Err(RqxCoreError::UnsupportedProtocol(format!(
                 "Request URL has an unsupported protocol '{}://'.",
                 url.scheme()
             )));
@@ -183,15 +183,15 @@ impl Client {
         let timeout = timeout.unwrap_or_else(|| self.timeout_secs());
         builder = builder.timeout(Duration::from_secs_f64(timeout));
 
-        let executable_request = builder.build().map_err(RqxError::from)?;
+        let executable_request = builder.build().map_err(RqxCoreError::from)?;
         Ok(executable_request)
     }
 
-    fn merge_url(&self, url: UrlReference) -> Result<Url, RqxError> {
+    fn merge_url(&self, url: UrlReference) -> Result<Url, RqxCoreError> {
         match (url, &self.config.base_url) {
             (UrlReference::Absolute(absolute), _) if absolute.has_authority() => Ok(absolute),
             (url, Some(base)) => base.join(&url),
-            (_, None) => Err(RqxError::UnsupportedProtocol(
+            (_, None) => Err(RqxCoreError::UnsupportedProtocol(
                 "Request URL is missing an 'http://' or 'https://' protocol.".to_string(),
             )),
         }
@@ -203,7 +203,7 @@ impl Client {
         &self,
         request: reqwest::Request,
         follow_redirects: bool,
-    ) -> Result<PendingResponse, RqxError> {
+    ) -> Result<PendingResponse, RqxCoreError> {
         let start_time = Instant::now();
         let mut pending = if follow_redirects {
             self.follow_redirects(request).await?
@@ -240,13 +240,13 @@ impl Client {
     async fn follow_redirects(
         &self,
         mut request: reqwest::Request,
-    ) -> Result<PendingResponse, RqxError> {
+    ) -> Result<PendingResponse, RqxCoreError> {
         let mut redirects_used: u32 = 0;
         let mut num_retries: u32 = 0;
         let mut retry_history: Vec<(String, f64)> = Vec::new();
         loop {
             let outgoing_request = request.try_clone().ok_or_else(|| {
-                RqxError::RequestError("Request body cannot be replayed".to_string())
+                RqxCoreError::RequestError("Request body cannot be replayed".to_string())
             })?;
             let mut hop = self.transport.send(outgoing_request).await?;
             num_retries += hop.parts.num_retries;
@@ -261,7 +261,7 @@ impl Client {
 
             if redirects_used + 1 >= self.config.redirects.max_redirects {
                 if self.config.redirects.raise_on_exceeded {
-                    return Err(RqxError::TooManyRedirects(format!(
+                    return Err(RqxCoreError::TooManyRedirects(format!(
                         "Exceeded max redirects {}",
                         self.config.redirects.max_redirects
                     )));
@@ -275,7 +275,7 @@ impl Client {
                 .get_first("location")
                 .map(String::from)
                 .ok_or_else(|| {
-                    RqxError::RemoteProtocolError(
+                    RqxCoreError::RemoteProtocolError(
                         "3xx response missing Location header".to_string(),
                     )
                 })?;

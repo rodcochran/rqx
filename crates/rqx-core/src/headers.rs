@@ -11,20 +11,20 @@ pub struct Headers {
 }
 
 impl Headers {
-    pub fn new(raw_headers: Option<HashMap<String, String>>) -> Result<Self, RqxError> {
+    pub fn new(raw_headers: Option<HashMap<String, String>>) -> Result<Self, RqxCoreError> {
         match raw_headers {
             Some(map) => Self::try_from_pairs(map.into_iter().collect()),
             None => Ok(Self::from_header_map(HeaderMap::new())),
         }
     }
 
-    pub fn try_from_pairs(pairs: Vec<(String, String)>) -> Result<Self, RqxError> {
+    pub fn try_from_pairs(pairs: Vec<(String, String)>) -> Result<Self, RqxCoreError> {
         let mut inner = HeaderMap::try_with_capacity(pairs.len()).unwrap_or_default();
         for (key, value) in pairs {
             let name = match HeaderName::from_str(&key) {
                 Ok(name) => name,
                 Err(e) => {
-                    return Err(RqxError::InvalidArgument(format!(
+                    return Err(RqxCoreError::InvalidArgument(format!(
                         "invalid header name {key:?}: {e}"
                     )));
                 }
@@ -32,7 +32,7 @@ impl Headers {
             let value = match HeaderValue::from_str(&value) {
                 Ok(value) => value,
                 Err(e) => {
-                    return Err(RqxError::InvalidArgument(format!(
+                    return Err(RqxCoreError::InvalidArgument(format!(
                         "invalid header value {value:?}: {e}"
                     )));
                 }
@@ -53,7 +53,7 @@ impl Headers {
     }
 
     /// Every value for `key`, joined with `, ` the way httpx presents them.
-    pub fn get_joined_values_for_key(&self, key: &str) -> Result<String, RqxError> {
+    pub fn get_joined_values_for_key(&self, key: &str) -> Result<String, RqxCoreError> {
         let values: Vec<&str> = self
             .inner
             .get_all(key)
@@ -61,12 +61,12 @@ impl Headers {
             .map(|v| v.to_str().unwrap_or(""))
             .collect();
         match values.is_empty() {
-            true => Err(RqxError::MissingKey(key.to_string())),
+            true => Err(RqxCoreError::MissingKey(key.to_string())),
             false => Ok(values.join(", ")),
         }
     }
 
-    pub fn set_item(&mut self, key: &str, value: String) -> Result<(), RqxError> {
+    pub fn set_item(&mut self, key: &str, value: String) -> Result<(), RqxCoreError> {
         let name = HeaderName::from_str(key)?;
         let val = HeaderValue::from_str(&value)?;
         // Replaces existing entries with this name.
@@ -74,10 +74,10 @@ impl Headers {
         Ok(())
     }
 
-    pub fn delete_item(&mut self, key: &str) -> Result<(), RqxError> {
+    pub fn delete_item(&mut self, key: &str) -> Result<(), RqxCoreError> {
         match self.inner.remove(key) {
             Some(_) => Ok(()),
-            None => Err(RqxError::MissingKey(key.to_string())),
+            None => Err(RqxCoreError::MissingKey(key.to_string())),
         }
     }
 
