@@ -18,16 +18,15 @@ impl Unsent {
         }
     }
 
-    pub fn take(slot: &mut Option<Unsent>) -> Result<Unsent, RqxError> {
+    pub fn take(slot: &mut Option<Unsent>) -> Result<Unsent, RqxCoreError> {
         slot.take().ok_or_else(|| {
-            StreamError::StreamError(
+            RqxCoreError::StreamError(
                 "stream already started; call stream() again for a new request".to_string(),
             )
-            .into()
         })
     }
 
-    pub async fn send(self) -> Result<PendingResponse, RqxError> {
+    pub async fn send(self) -> Result<PendingResponse, RqxCoreError> {
         self.client.send(self.request, self.follow_redirects).await
     }
 }

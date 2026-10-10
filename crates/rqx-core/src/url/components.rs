@@ -47,7 +47,7 @@ pub struct UrlComponents {
 impl UrlComponents {
     pub fn from_hash_map(
         map: HashMap<String, Option<UrlComponentValue>>,
-    ) -> Result<Self, RqxError> {
+    ) -> Result<Self, RqxCoreError> {
         let mut components = Self::default();
         for (key, value) in &map {
             match key.as_str() {
@@ -61,7 +61,7 @@ impl UrlComponents {
                 "fragment" => components = components.with_fragment(value),
                 "params" => components = components.with_params(value),
                 k => {
-                    return Err(RqxError::UnknownKeyword(format!(
+                    return Err(RqxCoreError::UnknownKeyword(format!(
                         "'{}' is an invalid keyword argument for URL()",
                         k
                     )));
@@ -79,11 +79,11 @@ impl UrlComponents {
         }
     }
 
-    fn component_field_u16(v: &Option<UrlComponentValue>) -> Result<Option<u16>, RqxError> {
+    fn component_field_u16(v: &Option<UrlComponentValue>) -> Result<Option<u16>, RqxCoreError> {
         match v {
             None => Ok(None),
             Some(UrlComponentValue::Int(n)) => Ok(Some(*n)),
-            Some(_v) => Err(RqxError::InvalidURL(format!(
+            Some(_v) => Err(RqxCoreError::InvalidURL(format!(
                 "Component value must be u16 for u16 field, but got {}",
                 _v.type_name()
             ))),
@@ -110,7 +110,7 @@ impl UrlComponents {
         self
     }
 
-    fn with_port(mut self, v: &Option<UrlComponentValue>) -> Result<Self, RqxError> {
+    fn with_port(mut self, v: &Option<UrlComponentValue>) -> Result<Self, RqxCoreError> {
         self.port = Some(Self::component_field_u16(v)?);
         Ok(self)
     }

@@ -28,9 +28,10 @@ impl Request {
         auth: Option<Auth>,
         timeout: Option<f64>,
         follow_redirects: Option<bool>,
-    ) -> Result<Self, RqxError> {
-        let method = Method::from_bytes(method.to_ascii_uppercase().as_bytes())
-            .map_err(|e| RqxError::InvalidArgument(format!("invalid method {method:?}: {e}")))?;
+    ) -> Result<Self, RqxCoreError> {
+        let method = Method::from_bytes(method.to_ascii_uppercase().as_bytes()).map_err(|e| {
+            RqxCoreError::InvalidArgument(format!("invalid method {method:?}: {e}"))
+        })?;
 
         Ok(Self {
             method,

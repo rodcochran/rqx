@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
-use crate::error::{RqxError, TransportError};
+use crate::error::RqxCoreError;
 
 pub struct ProxyParser;
 
 impl ProxyParser {
     pub fn from_hash_map(
         proxy: Option<HashMap<String, String>>,
-    ) -> Result<Vec<reqwest::Proxy>, RqxError> {
+    ) -> Result<Vec<reqwest::Proxy>, RqxCoreError> {
         let Some(map) = proxy else {
             return Ok(Vec::new());
         };
@@ -18,7 +18,7 @@ impl ProxyParser {
                 "https" => reqwest::Proxy::https(&url),
                 _ => continue,
             }
-            .map_err(|e| TransportError::ProxyError(format!("invalid proxy: {e}")))?;
+            .map_err(|e| RqxCoreError::ProxyError(format!("invalid proxy: {e}")))?;
             out.push(p);
         }
         Ok(out)

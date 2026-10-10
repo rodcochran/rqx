@@ -36,7 +36,7 @@ impl PendingResponse {
     }
 
     /// Buffer the body. The one place a `BufferedResponse` is built from the wire.
-    pub async fn read(self) -> Result<BufferedResponse, RqxError> {
+    pub async fn read(self) -> Result<BufferedResponse, RqxCoreError> {
         Ok(BufferedResponse {
             parts: self.parts,
             body: self.response.bytes().await?,
@@ -64,7 +64,7 @@ impl BufferedResponse {
         self.parts.text(&self.body)
     }
 
-    pub fn json(&self) -> Result<serde_json::Value, RqxError> {
+    pub fn json(&self) -> Result<serde_json::Value, RqxCoreError> {
         self.parts.json(&self.body)
     }
 }
@@ -121,7 +121,7 @@ impl ResponseParts {
         decoded.into_owned()
     }
 
-    pub fn json(&self, body: &[u8]) -> Result<serde_json::Value, RqxError> {
+    pub fn json(&self, body: &[u8]) -> Result<serde_json::Value, RqxCoreError> {
         match serde_json::from_slice(body) {
             Ok(value) => Ok(value),
             Err(e) => Err(self.json_decode_error(body, &e)),
@@ -154,7 +154,7 @@ impl ResponseParts {
 
     /// `raise_for_status()`'s error for any status outside 2xx, with httpx's exact
     /// message. The caller attaches the response as `.response`.
-    pub fn status_error(&self) -> Option<RqxError> {
+    pub fn status_error(&self) -> Option<RqxCoreError> {
         if self.is_success() {
             return None;
         }
@@ -181,12 +181,12 @@ impl ResponseParts {
         message.push_str(&format!(
             "For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/{code}"
         ));
-        Some(HTTPError::HTTPStatusError(message).into())
+        Some(RqxCoreError::HTTPStatusError(message))
     }
 
     /// `json()`'s error for a body serde_json rejects, positioned the way the stdlib
     /// parser positions it: `pos` counts characters, not bytes.
-    pub fn json_decode_error(&self, body: &[u8], error: &serde_json::Error) -> RqxError {
+    pub fn json_decode_error(&self, body: &[u8], error: &serde_json::Error) -> RqxCoreError {
         let doc = String::from_utf8_lossy(body).into_owned();
         let byte_offset = if error.line() == 0 {
             0
@@ -209,7 +209,7 @@ impl ResponseParts {
             "response is not JSON (HTTP {}, content-type: {content_type}): {reason}",
             self.status_code
         );
-        JSONDecodeError { message, doc, pos }.into()
+        RqxCoreError::JSONDecodeError(JSONDecodeError { message, doc, pos })
     }
 }
 

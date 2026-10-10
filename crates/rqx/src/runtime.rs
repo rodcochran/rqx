@@ -375,6 +375,8 @@ impl ContextExt for Bridge {
 mod tests {
     use std::mem::size_of_val;
 
+    use rqx_core::error::RqxCoreError;
+
     use super::Runtime;
 
     /// The task future holds each in-flight request's state, so converting
@@ -385,7 +387,7 @@ mod tests {
         let request = async {
             let state = [0u8; 4096];
             std::future::ready(()).await;
-            Ok::<_, rqx_core::error::RqxError>(state.len())
+            Ok::<_, RqxCoreError>(state.len())
         };
         let request_size = size_of_val(&request);
         let task = Runtime::with_py_errors(request);

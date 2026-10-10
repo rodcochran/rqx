@@ -141,7 +141,7 @@ impl Default for Transport {
 }
 
 impl Transport {
-    pub fn new(config: TransportConfig) -> Result<Self, RqxError> {
+    pub fn new(config: TransportConfig) -> Result<Self, RqxCoreError> {
         let semaphore = config
             .pool_config
             .max_connections
@@ -157,7 +157,7 @@ impl Transport {
         })
     }
 
-    pub async fn send(&self, request: reqwest::Request) -> Result<PendingResponse, RqxError> {
+    pub async fn send(&self, request: reqwest::Request) -> Result<PendingResponse, RqxCoreError> {
         if self.config.retry_config.is_some() {
             self.send_with_retries(request).await
         } else {
@@ -166,8 +166,8 @@ impl Transport {
     }
 
     /// Single attempt, no retries.
-    async fn send_raw(&self, request: reqwest::Request) -> Result<reqwest::Response, RqxError> {
-        self.execute(request).await.map_err(RqxError::from)
+    async fn send_raw(&self, request: reqwest::Request) -> Result<reqwest::Response, RqxCoreError> {
+        self.execute(request).await.map_err(RqxCoreError::from)
     }
 
     /// Error left unmapped so the retry loop can classify it.
@@ -191,7 +191,7 @@ impl Transport {
     async fn send_with_retries(
         &self,
         request: reqwest::Request,
-    ) -> Result<PendingResponse, RqxError> {
+    ) -> Result<PendingResponse, RqxCoreError> {
         // Operates on raw reqwest::Response throughout — reading status and
         // retry-after directly from response headers without acquiring the GIL.
         // The body stays unread for the caller. Mirrors the redirect-loop fix from https://github.com/rodcochran/rqx/issues/93.
@@ -211,11 +211,10 @@ impl Transport {
             let attempt = used.total;
 
             if start_time.elapsed().as_secs_f64() > total_timeout {
-                return Err(HTTPError::MaxRetriesExceeded(format!(
+                return Err(RqxCoreError::MaxRetriesExceeded(format!(
                     "total timeout of {}s exceeded after {} retries",
                     total_timeout, attempt,
-                ))
-                .into());
+                )));
             }
 
             if attempt > 0 {
@@ -259,7 +258,7 @@ impl Transport {
             let attempt_start = Instant::now();
 
             let new_request = request.try_clone().ok_or_else(|| {
-                RequestError::RequestError(
+                RqxCoreError::RequestError(
                     "Streaming request bodies cannot be replayed".to_string(),
                 )
             })?;
@@ -286,7 +285,7 @@ impl Transport {
                 }
                 Err(e) => {
                     let kind = FailureKind::from_request_error(&e);
-                    let err = RqxError::from(e);
+                    let err = RqxCoreError::from(e);
                     if !is_retryable_method {
                         return Err(err);
                     }
@@ -317,11 +316,11 @@ impl Transport {
                 //   caller can inspect status_code / headers / body.
                 let status = cr.status().as_u16();
                 if r.status_forcelist.contains(&status) && r.raise_on_status {
-                    return Err(HTTPError::MaxRetriesExceeded(exhausted).into());
+                    return Err(RqxCoreError::MaxRetriesExceeded(exhausted));
                 }
                 Ok(PendingResponse::new(cr).with_retries(used.total as u32, retry_history))
             }
-            None => Err(HTTPError::MaxRetriesExceeded(exhausted).into()),
+            None => Err(RqxCoreError::MaxRetriesExceeded(exhausted)),
         }
     }
 }

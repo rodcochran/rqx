@@ -24,12 +24,13 @@ impl VerifyConfig {
         }
     }
 
-    pub fn from_path_str(path: String) -> Result<VerifyConfig, RqxError> {
+    pub fn from_path_str(path: String) -> Result<VerifyConfig, RqxCoreError> {
         let bytes = std::fs::read(&path)
-            .map_err(|e| RqxError::TLSConfigError(format!("failed to read CA cert: {e}")))?;
+            .map_err(|e| RqxCoreError::TLSConfigError(format!("failed to read CA cert: {e}")))?;
 
-        let cert = Certificate::from_pem(&bytes)
-            .map_err(|e| RqxError::TLSConfigError(format!("failed to construct CA cert: {e}")))?;
+        let cert = Certificate::from_pem(&bytes).map_err(|e| {
+            RqxCoreError::TLSConfigError(format!("failed to construct CA cert: {e}"))
+        })?;
         Ok(Self::CustomCa(cert))
     }
 }
@@ -37,26 +38,29 @@ impl VerifyConfig {
 pub struct IdentityParser {}
 
 impl IdentityParser {
-    pub fn from_path_str(path: String) -> Result<Identity, RqxError> {
-        let pem_bytes = std::fs::read(&path)
-            .map_err(|e| RqxError::TLSConfigError(format!("failed to read client cert: {e}")))?;
+    pub fn from_path_str(path: String) -> Result<Identity, RqxCoreError> {
+        let pem_bytes = std::fs::read(&path).map_err(|e| {
+            RqxCoreError::TLSConfigError(format!("failed to read client cert: {e}"))
+        })?;
 
         Self::from_pem_bytes(&pem_bytes)
     }
 
-    pub fn from_tuple(cert: (String, String)) -> Result<Identity, RqxError> {
+    pub fn from_tuple(cert: (String, String)) -> Result<Identity, RqxCoreError> {
         let (cert_path, key_path) = cert;
-        let mut bytes = std::fs::read(&cert_path)
-            .map_err(|e| RqxError::TLSConfigError(format!("failed to read {cert_path}: {e}")))?;
+        let mut bytes = std::fs::read(&cert_path).map_err(|e| {
+            RqxCoreError::TLSConfigError(format!("failed to read {cert_path}: {e}"))
+        })?;
         let mut key_bytes = std::fs::read(&key_path)
-            .map_err(|e| RqxError::TLSConfigError(format!("failed to read {key_path}: {e}")))?;
+            .map_err(|e| RqxCoreError::TLSConfigError(format!("failed to read {key_path}: {e}")))?;
         bytes.append(&mut key_bytes);
 
         Self::from_pem_bytes(&bytes)
     }
 
-    pub fn from_pem_bytes(pem_bytes: &[u8]) -> Result<Identity, RqxError> {
-        Identity::from_pem(pem_bytes)
-            .map_err(|e| RqxError::TLSConfigError(format!("failed to construct client cert: {e}")))
+    pub fn from_pem_bytes(pem_bytes: &[u8]) -> Result<Identity, RqxCoreError> {
+        Identity::from_pem(pem_bytes).map_err(|e| {
+            RqxCoreError::TLSConfigError(format!("failed to construct client cert: {e}"))
+        })
     }
 }
