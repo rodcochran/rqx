@@ -49,7 +49,7 @@ impl TryFrom<TransportArgs<'_>> for TransportConfig {
             args.keepalive_expiry,
         );
 
-        let retry_config = args.retries.map(|r| r.inner.clone());
+        let retry_config = args.retries.map(|r| r.inner.clone()).unwrap_or_default();
 
         Ok(TransportConfig::new(
             pool_config,
@@ -119,7 +119,7 @@ impl HTTPTransport {
 
     #[getter]
     fn retries(&self) -> Option<PyRetry> {
-        self.inner.config.retry_config.clone().map(PyRetry::new)
+        Some(PyRetry::new(self.inner.config.retry_config.clone()))
     }
 }
 
@@ -179,6 +179,6 @@ impl AsyncHTTPTransport {
 
     #[getter]
     fn retries(&self) -> Option<PyRetry> {
-        self.inner.config.retry_config.clone().map(PyRetry::new)
+        Some(PyRetry::new(self.inner.config.retry_config.clone()))
     }
 }

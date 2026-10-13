@@ -1,8 +1,6 @@
 use http::StatusCode;
-use serde_json::to_string;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::thread::current;
 use std::time::{Duration, Instant};
 
 use reqwest::tls::Identity;
@@ -42,7 +40,7 @@ pub struct TransportConfig {
     http_version_config: HttpVersionConfig,
     verify_config: VerifyConfig,
     timeout_config: Timeout,
-    pub retry_config: Option<Retry>,
+    pub retry_config: Retry,
     cert: Option<Identity>,
     proxies: Vec<reqwest::Proxy>,
 }
@@ -53,7 +51,7 @@ impl TransportConfig {
         http_version_config: HttpVersionConfig,
         verify_config: VerifyConfig,
         timeout_config: Timeout,
-        retry_config: Option<Retry>,
+        retry_config: Retry,
         cert: Option<Identity>,
         proxies: Vec<reqwest::Proxy>,
     ) -> Self {
@@ -162,9 +160,10 @@ impl Transport {
     }
 
     pub async fn send(&self, request: reqwest::Request) -> Result<PendingResponse, RqxCoreError> {
-        if self.config.retry_config.is_some() {
+        if self.config.retry_config.total > 0 {
             self.send_with_retries(request).await
         } else {
+            // fast-path, if total number of allowed retries is 0, then just go here.
             Ok(PendingResponse::new(self.send_raw(request).await?))
         }
     }
@@ -196,18 +195,21 @@ impl Transport {
         &self,
         request: reqwest::Request,
     ) -> Result<PendingResponse, RqxCoreError> {
-        // TODO: going to make the retry....unwrap() impossible.
-        //
         // Operates on raw reqwest::Response throughout — reading status and
         // retry-after directly from response headers without acquiring the GIL.
         // The body stays unread for the caller. Mirrors the redirect-loop fix from https://github.com/rodcochran/rqx/issues/93.
-        let r = self.config.retry_config.as_ref().unwrap();
-        let is_retryable_method = r.allowed_methods.contains(request.method().as_str());
-        let backoff_max: f32 = r.backoff_max;
-        let respect_retry = r.respect_retry_after_header;
-        let total_timeout: f64 = r.total_timeout.unwrap_or(f64::INFINITY);
+        let is_retryable_method = self
+            .config
+            .retry_config
+            .allowed_methods
+            .contains(request.method().as_str());
+        let total_timeout: f64 = self
+            .config
+            .retry_config
+            .total_timeout
+            .unwrap_or(f64::INFINITY);
 
-        let mut used = RetryCounts::default();
+        let mut retry_counts = RetryCounts::default();
         // TODO: is retry_history lost after a single request?
         // CASE: if a single reuqest is executed with retries, then redirectd, then retried again? is that intentional?
         let mut retry_history: Vec<(String, f64)> = Vec::new();
@@ -215,46 +217,14 @@ impl Transport {
 
         let start_time = Instant::now();
 
-        // gut feeling is that we shouldn't have anything after the loop.
-        // The logic for exits should be fully contained in the loop?
-        // loop logic:
-        // for attempt_number in max_attempts:
-        // - send_attempt
-        // - add it to history
-        // - return early for success
-        // - if on last allowed attempt, return what we have or error.
-        // - calculate backoff and continue
-
-        loop {
-            let attempt = used.total;
-
+        for attempt_num in 0..self.config.retry_config.total {
+            // Exit for timeout
             if start_time.elapsed().as_secs_f64() > total_timeout {
                 // TODO: determine if we want to raise MaxRetriesExceeded or a timeout error...
                 return Err(RqxCoreError::MaxRetriesExceeded(format!(
                     "total timeout of {}s exceeded after {} retries",
-                    total_timeout, attempt,
+                    total_timeout, attempt_num,
                 )));
-            }
-
-            if attempt > 0 {
-                let retry_after: f32 = if respect_retry {
-                    self.get_retry_after_from_reqwest_response(current_response.as_ref(), 0.0)
-                } else {
-                    0.0
-                };
-
-                let backoff_value = r.calculate_backoff_for_attempt(attempt);
-                let backoff_time = f32::min(f32::max(backoff_value, retry_after), backoff_max);
-
-                tokio::time::sleep(Duration::from_secs_f32(backoff_time)).await
-            }
-
-            // Drain the previous attempt's body to release the connection back
-            // to the pool before issuing the next request. Required because we
-            // hold raw Response across iterations; PyResponse wrapping would
-            // have drained implicitly via response.bytes().await.
-            if let Some(old) = current_response.take() {
-                let _ = old.bytes().await;
             }
 
             let new_request = request.try_clone().ok_or_else(|| {
@@ -263,36 +233,57 @@ impl Transport {
                 )
             })?;
 
-            let latest_attempt = self.send_attempt(new_request).await;
+            let attempt = self.send_attempt(new_request).await;
 
-            if attempt > 0 {
-                retry_history.push((latest_attempt.message, latest_attempt.elapsed));
-            };
-
-            let failure = match latest_attempt.kind {
+            // Here we have to be at a failure because any non-retryable success will be returned
+            let failure = match attempt.kind {
                 AttemptKind::Success(successful_attempt) => {
-                    if !successful_attempt.status_is_retryable(&r.status_forcelist) {
+                    // Early exit if the method isn't retryable.
+                    if !is_retryable_method {
                         return Ok(PendingResponse::new(successful_attempt.response)
-                            .with_retries(used.total as u32, retry_history));
+                            .with_retries(retry_counts.total as u32, retry_history));
+                    }
+                    // Early exit for success.
+                    // Here, success doesn't mean a 2XX response. It means that the request went through.
+                    if !successful_attempt
+                        .status_is_retryable(&self.config.retry_config.status_forcelist)
+                    {
+                        return Ok(PendingResponse::new(successful_attempt.response)
+                            .with_retries(retry_counts.total as u32, retry_history));
                     }
                     current_response = Some(successful_attempt.response);
                     FailureKind::Status
                 }
                 AttemptKind::Failure(failed_attempt) => {
+                    // Early exit if the method isn't retryable.
+                    if !is_retryable_method {
+                        return Err(failed_attempt.err);
+                    }
                     current_response = None;
                     failed_attempt.kind
                 }
             };
 
-            if !r.allows_another(failure, &used) {
+            // indicates we're in a retry
+            if attempt_num >= 0 {
+                retry_history.push((attempt.message, attempt.elapsed));
+            };
+
+            // Add the failure to the retry counts.
+            retry_counts.record(failure);
+
+            // Out of retries.
+            if !self.config.retry_config.allows_another(&retry_counts) {
                 break;
             }
-            used.record(failure);
+            // Apply backoff
+            self.apply_backoff(current_response.as_ref(), attempt_num)
+                .await;
         }
 
         let exhausted = format!(
             "max retries exceeded after {} retries ({} connect, {} read, {} status)",
-            used.total, used.connect, used.read, used.status
+            retry_counts.total, retry_counts.connect, retry_counts.read, retry_counts.status
         );
         match current_response {
             Some(cr) => {
@@ -301,10 +292,12 @@ impl Transport {
                 // raise_on_status=false → return the failing response so the
                 //   caller can inspect status_code / headers / body.
                 let status = cr.status().as_u16();
-                if r.status_forcelist.contains(&status) && r.raise_on_status {
+                if self.config.retry_config.raise_on_status
+                    && self.config.retry_config.status_forcelist.contains(&status)
+                {
                     return Err(RqxCoreError::MaxRetriesExceeded(exhausted));
                 }
-                Ok(PendingResponse::new(cr).with_retries(used.total as u32, retry_history))
+                Ok(PendingResponse::new(cr).with_retries(retry_counts.total as u32, retry_history))
             }
             None => Err(RqxCoreError::MaxRetriesExceeded(exhausted)),
         }
@@ -326,22 +319,52 @@ impl Transport {
                     message: msg,
                 }
             }
-            Err(e) => Attempt {
-                kind: AttemptKind::Failure(FailedAttempt {
-                    kind: FailureKind::from_request_error(&e),
-                    status: e.status(),
-                }),
-                elapsed: attempt_start.elapsed().as_millis() as f64,
-                message: format!("{}", RqxCoreError::from(e)),
-            },
+            Err(e) => {
+                let failure_kind = FailureKind::from_request_error(&e);
+                let status = e.status();
+                let rqx_error = RqxCoreError::from(e);
+                let message = format!("{}", rqx_error.to_string());
+                Attempt {
+                    kind: AttemptKind::Failure(FailedAttempt {
+                        kind: failure_kind,
+                        status,
+                        err: rqx_error,
+                    }),
+                    elapsed: attempt_start.elapsed().as_millis() as f64,
+                    message,
+                }
+            }
+        }
+    }
+
+    async fn apply_backoff(
+        &self,
+        current_response: Option<&reqwest::Response>,
+        attempt_number: i32,
+    ) {
+        let respect_retry = self.config.retry_config.respect_retry_after_header;
+        let backoff_max: f32 = self.config.retry_config.backoff_max;
+
+        let retry_after: f32 = if respect_retry {
+            self.get_retry_after_from_reqwest_response(current_response)
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        let backoff_value = self
+            .config
+            .retry_config
+            .calculate_backoff_for_attempt(attempt_number);
+        let backoff_time = f32::min(f32::max(backoff_value, retry_after), backoff_max);
+        if backoff_time > 0.0 {
+            tokio::time::sleep(Duration::from_secs_f32(backoff_time)).await
         }
     }
 
     fn get_retry_after_from_reqwest_response(
         &self,
         resp: Option<&reqwest::Response>,
-        fallback_value: f32,
-    ) -> f32 {
+    ) -> Option<f32> {
         resp.and_then(|resp| {
             resp.headers()
                 .get("retry-after")
@@ -349,7 +372,6 @@ impl Transport {
                 .map(String::from)
         })
         .and_then(|v| v.parse::<f32>().ok())
-        .unwrap_or(fallback_value)
     }
 }
 
@@ -368,7 +390,9 @@ struct FailedAttempt {
     kind: FailureKind,
     // Failures can happen on the network or in the reqwest core code.
     // A non-network failure will give us None for status.
+    #[warn(unused)]
     status: Option<StatusCode>,
+    err: RqxCoreError,
 }
 
 enum AttemptKind {

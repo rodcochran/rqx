@@ -37,6 +37,7 @@ pub struct RetryCounts {
     pub connect: i32,
     pub read: i32,
     pub status: i32,
+    pub latest_failure_kind: Option<FailureKind>,
 }
 
 impl RetryCounts {
@@ -47,10 +48,12 @@ impl RetryCounts {
             FailureKind::Read => self.read += 1,
             FailureKind::Status => self.status += 1,
         }
+        self.latest_failure_kind = Some(kind)
     }
 }
 
-#[derive(Clone)]
+// Defaults here essentially allow no Retries
+#[derive(Clone, Default)]
 pub struct Retry {
     pub total: i32,
     pub connect: i32,
@@ -105,14 +108,28 @@ impl Retry {
         }
     }
 
-    pub fn allows_another(&self, kind: FailureKind, used: &RetryCounts) -> bool {
+    // pub fn allows_another(&self, kind: FailureKind, used: &RetryCounts) -> bool {
+    //     if used.total >= self.total {
+    //         return false;
+    //     }
+    //     match kind {
+    //         FailureKind::Connect => used.connect < self.connect,
+    //         FailureKind::Read => used.read < self.read,
+    //         FailureKind::Status => used.status < self.status,
+    //     }
+    // }
+
+    pub fn allows_another(&self, used: &RetryCounts) -> bool {
         if used.total >= self.total {
             return false;
         }
-        match kind {
-            FailureKind::Connect => used.connect < self.connect,
-            FailureKind::Read => used.read < self.read,
-            FailureKind::Status => used.status < self.status,
+        match used.latest_failure_kind {
+            Some(k) => match k {
+                FailureKind::Connect => used.connect < self.connect,
+                FailureKind::Read => used.read < self.read,
+                FailureKind::Status => used.status < self.status,
+            },
+            None => true,
         }
     }
 
