@@ -217,7 +217,7 @@ impl Transport {
 
         let start_time = Instant::now();
 
-        for attempt_num in 0..self.config.retry_config.total {
+        for attempt_num in 0..=self.config.retry_config.total {
             // Exit for timeout
             if start_time.elapsed().as_secs_f64() > total_timeout {
                 // TODO: determine if we want to raise MaxRetriesExceeded or a timeout error...
@@ -265,7 +265,7 @@ impl Transport {
             };
 
             // indicates we're in a retry
-            if attempt_num >= 0 {
+            if attempt_num > 0 {
                 retry_history.push((attempt.message, attempt.elapsed));
             };
 
@@ -277,7 +277,7 @@ impl Transport {
                 break;
             }
             // Apply backoff
-            self.apply_backoff(current_response.as_ref(), attempt_num)
+            self.apply_backoff(current_response.as_ref(), attempt_num + 1)
                 .await;
         }
 

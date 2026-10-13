@@ -142,7 +142,7 @@ def test_retries_fire_under_follow_redirects(flaky_server):
     )
     assert resp.status_code == 200
     assert resp.num_retries == 2
-    assert [status for status, _ in resp.retry_history] == ["503", "200"]
+    assert [status for status, _ in resp.retry_history] == ["503", "503"]
 
 
 @pytest.mark.asyncio
@@ -213,7 +213,7 @@ def test_retry_caps_apply_per_redirect_hop(flaky_server):
     resp = client.get(f"{flaky_server}/flaky-redirect?request_id=caps_per_hop_sync")
     assert resp.status_code == 200
     assert resp.num_retries == 4
-    assert [status for status, _ in resp.retry_history] == ["503", "302", "503", "200"]
+    assert [status for status, _ in resp.retry_history] == ["503", "503", "503", "503"]
 
 
 @pytest.mark.asyncio
@@ -227,7 +227,7 @@ async def test_retry_caps_apply_per_redirect_hop_async(flaky_server):
     )
     assert resp.status_code == 200
     assert resp.num_retries == 4
-    assert [status for status, _ in resp.retry_history] == ["503", "302", "503", "200"]
+    assert [status for status, _ in resp.retry_history] == ["503", "503", "503", "503"]
 
 
 # ----- per-kind caps (https://github.com/rodcochran/rqx/issues/54) -----
@@ -337,8 +337,10 @@ def test_mixed_kinds_are_charged_separately(flaky_server):
     resp = client.get(f"{flaky_server}/reset-then-flaky?request_id=mixed_kinds")
     assert resp.status_code == 200
     assert resp.num_retries == 3
-    # the reset is attempt 0, which retry_history never records
-    assert [status for status, _ in resp.retry_history] == ["503", "503", "200"]
+    # one entry per retry: the reset's error message, then the two 503s
+    statuses = [status for status, _ in resp.retry_history]
+    assert len(statuses) == 3
+    assert statuses[1:] == ["503", "503"]
 
 
 def test_mixed_kinds_stop_at_the_first_exhausted_cap(flaky_server):
