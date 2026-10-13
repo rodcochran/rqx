@@ -1,4 +1,8 @@
+use http::StatusCode;
+use serde_json::to_string;
+use std::collections::HashSet;
 use std::sync::Arc;
+use std::thread::current;
 use std::time::{Duration, Instant};
 
 use reqwest::tls::Identity;
@@ -192,6 +196,8 @@ impl Transport {
         &self,
         request: reqwest::Request,
     ) -> Result<PendingResponse, RqxCoreError> {
+        // TODO: going to make the retry....unwrap() impossible.
+        //
         // Operates on raw reqwest::Response throughout — reading status and
         // retry-after directly from response headers without acquiring the GIL.
         // The body stays unread for the caller. Mirrors the redirect-loop fix from https://github.com/rodcochran/rqx/issues/93.
@@ -202,15 +208,28 @@ impl Transport {
         let total_timeout: f64 = r.total_timeout.unwrap_or(f64::INFINITY);
 
         let mut used = RetryCounts::default();
+        // TODO: is retry_history lost after a single request?
+        // CASE: if a single reuqest is executed with retries, then redirectd, then retried again? is that intentional?
         let mut retry_history: Vec<(String, f64)> = Vec::new();
         let mut current_response: Option<reqwest::Response> = None;
 
         let start_time = Instant::now();
 
+        // gut feeling is that we shouldn't have anything after the loop.
+        // The logic for exits should be fully contained in the loop?
+        // loop logic:
+        // for attempt_number in max_attempts:
+        // - send_attempt
+        // - add it to history
+        // - return early for success
+        // - if on last allowed attempt, return what we have or error.
+        // - calculate backoff and continue
+
         loop {
             let attempt = used.total;
 
             if start_time.elapsed().as_secs_f64() > total_timeout {
+                // TODO: determine if we want to raise MaxRetriesExceeded or a timeout error...
                 return Err(RqxCoreError::MaxRetriesExceeded(format!(
                     "total timeout of {}s exceeded after {} retries",
                     total_timeout, attempt,
@@ -219,30 +238,13 @@ impl Transport {
 
             if attempt > 0 {
                 let retry_after: f32 = if respect_retry {
-                    current_response
-                        .as_ref()
-                        .and_then(|resp| {
-                            resp.headers()
-                                .get("retry-after")
-                                .and_then(|v| v.to_str().ok())
-                                .map(String::from)
-                        })
-                        .and_then(|v| v.parse::<f32>().ok())
-                        .unwrap_or(0.0)
+                    self.get_retry_after_from_reqwest_response(current_response.as_ref(), 0.0)
                 } else {
                     0.0
                 };
 
-                let mut calculated_backoff = r.backoff_factor * 2_f32.powi(attempt - 1);
-                // Apply jitter to spread out retries from many concurrent clients.
-                // Multiplier: (1 + uniform(-jitter, +jitter)) — so jitter=0.5 means
-                // backoff varies ±50% from the deterministic value.
-                if r.backoff_jitter > 0.0 {
-                    let jitter = rand::random::<f32>() * 2.0 - 1.0; // [-1, 1)
-                    calculated_backoff =
-                        (calculated_backoff * (1.0 + jitter * r.backoff_jitter)).max(0.0);
-                }
-                let backoff_time = f32::min(f32::max(calculated_backoff, retry_after), backoff_max);
+                let backoff_value = r.calculate_backoff_for_attempt(attempt);
+                let backoff_time = f32::min(f32::max(backoff_value, retry_after), backoff_max);
 
                 tokio::time::sleep(Duration::from_secs_f32(backoff_time)).await
             }
@@ -255,46 +257,30 @@ impl Transport {
                 let _ = old.bytes().await;
             }
 
-            let attempt_start = Instant::now();
-
             let new_request = request.try_clone().ok_or_else(|| {
                 RqxCoreError::RequestError(
                     "Streaming request bodies cannot be replayed".to_string(),
                 )
             })?;
 
-            let failure = match self.execute(new_request).await {
-                Ok(resp) => {
-                    if !is_retryable_method {
-                        return Ok(PendingResponse::new(resp));
-                    }
+            let latest_attempt = self.send_attempt(new_request).await;
 
-                    let status = resp.status().as_u16();
-                    let attempt_elapsed = attempt_start.elapsed().as_millis() as f64;
-                    if attempt > 0 {
-                        retry_history.push((status.to_string(), attempt_elapsed));
-                    }
+            if attempt > 0 {
+                retry_history.push((latest_attempt.message, latest_attempt.elapsed));
+            };
 
-                    if !r.status_forcelist.contains(&status) {
-                        return Ok(PendingResponse::new(resp)
+            let failure = match latest_attempt.kind {
+                AttemptKind::Success(successful_attempt) => {
+                    if !successful_attempt.status_is_retryable(&r.status_forcelist) {
+                        return Ok(PendingResponse::new(successful_attempt.response)
                             .with_retries(used.total as u32, retry_history));
                     }
-
-                    current_response = Some(resp);
+                    current_response = Some(successful_attempt.response);
                     FailureKind::Status
                 }
-                Err(e) => {
-                    let kind = FailureKind::from_request_error(&e);
-                    let err = RqxCoreError::from(e);
-                    if !is_retryable_method {
-                        return Err(err);
-                    }
-                    let attempt_elapsed = attempt_start.elapsed().as_millis() as f64;
-                    if attempt > 0 {
-                        retry_history.push((format!("{}", err), attempt_elapsed));
-                    }
+                AttemptKind::Failure(failed_attempt) => {
                     current_response = None;
-                    kind
+                    failed_attempt.kind
                 }
             };
 
@@ -323,4 +309,75 @@ impl Transport {
             None => Err(RqxCoreError::MaxRetriesExceeded(exhausted)),
         }
     }
+
+    async fn send_attempt(&self, request: reqwest::Request) -> Attempt {
+        // Goal of this function is to extract metadata, not mutate any of the retry body machine stuff.
+        // leave that up to the send_with_retries to handle.
+        let attempt_start = Instant::now();
+        match self.execute(request).await {
+            Ok(resp) => {
+                let msg = resp.status().to_string();
+                Attempt {
+                    kind: AttemptKind::Success(SuccessfulAttempt {
+                        status: resp.status(),
+                        response: resp,
+                    }),
+                    elapsed: attempt_start.elapsed().as_millis() as f64,
+                    message: msg,
+                }
+            }
+            Err(e) => Attempt {
+                kind: AttemptKind::Failure(FailedAttempt {
+                    kind: FailureKind::from_request_error(&e),
+                    status: e.status(),
+                }),
+                elapsed: attempt_start.elapsed().as_millis() as f64,
+                message: format!("{}", RqxCoreError::from(e)),
+            },
+        }
+    }
+
+    fn get_retry_after_from_reqwest_response(
+        &self,
+        resp: Option<&reqwest::Response>,
+        fallback_value: f32,
+    ) -> f32 {
+        resp.and_then(|resp| {
+            resp.headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .map(String::from)
+        })
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(fallback_value)
+    }
+}
+
+struct SuccessfulAttempt {
+    status: StatusCode,
+    response: reqwest::Response,
+}
+
+impl SuccessfulAttempt {
+    fn status_is_retryable(&self, status_forcelist: &HashSet<u16>) -> bool {
+        status_forcelist.contains(&self.status.as_u16())
+    }
+}
+
+struct FailedAttempt {
+    kind: FailureKind,
+    // Failures can happen on the network or in the reqwest core code.
+    // A non-network failure will give us None for status.
+    status: Option<StatusCode>,
+}
+
+enum AttemptKind {
+    Success(SuccessfulAttempt),
+    Failure(FailedAttempt),
+}
+
+struct Attempt {
+    kind: AttemptKind,
+    elapsed: f64,
+    message: String,
 }

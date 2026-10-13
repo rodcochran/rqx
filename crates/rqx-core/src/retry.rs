@@ -30,6 +30,7 @@ impl FailureKind {
     }
 }
 
+// TODO: can we switch these to u32? dont think they could ever be less than 0...
 #[derive(Default)]
 pub struct RetryCounts {
     pub total: i32,
@@ -113,5 +114,17 @@ impl Retry {
             FailureKind::Read => used.read < self.read,
             FailureKind::Status => used.status < self.status,
         }
+    }
+
+    pub fn calculate_backoff_for_attempt(&self, attempt: i32) -> f32 {
+        let mut backoff = self.backoff_factor * 2_f32.powi(attempt - 1);
+        // Apply jitter to spread out retries from many concurrent clients.
+        if self.backoff_jitter > 0.0 {
+            // Multiplier: (1 + uniform(-jitter, +jitter)) — so jitter=0.5 means
+            // backoff varies ±50% from the deterministic value.
+            let jitter = rand::random::<f32>() * 2.0 - 1.0; // [-1, 1)
+            backoff = (backoff * (1.0 + jitter * self.backoff_jitter)).max(0.0);
+        }
+        return backoff;
     }
 }
